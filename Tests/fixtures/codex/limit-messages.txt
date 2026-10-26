@@ -1,0 +1,10 @@
+# Messaggi di limite di Codex: uno per riga, «testo<TAB>atteso».
+# atteso: HH:MM (oggi o domani), +<minuti> (durata), YYYY-MM-DD HH:MM (data), 30m (illeggibile → 30 minuti).
+# Formati ricavati dalle stringhe del binario codex-cli 0.164 («%-I:%M %p», «%b %-d, %Y %-I:%M %p») e dalle segnalazioni degli utenti.
+You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 5:40 PM.	17:40
+You've hit your usage limit. Try again at 9:05 AM.	09:05
+You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 3rd, 2026 9:15 AM.	2026-11-03 09:15
+You've hit your usage limit. Try again at Nov 3, 2026 12:30 PM.	2026-11-03 12:30
+You've hit your usage limit, try again in 2 hours 10 minutes.	+130
+Rate limit reached. Please try again in 45 minutes.	+45
+You've hit your usage limit. To get more access now, send a request to your admin.	30m

@@ -116,6 +116,32 @@ if let request = argument(after: "--agent-test") {
     dispatchMain()
 }
 
+if arguments.contains("--mcp-serve") {
+    // Debug: only the agent tool server, to try other MCP clients (e.g. `codex exec`) by hand.
+    // Prints the URL and the token, then serves until killed.
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        let tools = AgentTools(executor: Executor())
+        tools.onProgress = { print("  · \($0)") }
+        tools.askUser = { q, _ in print("  ? \(q) → (test: nessuna risposta)"); return nil }
+        let server = MCPServer(tools: AgentTools.definitions) { name, args in
+            await tools.call(name, args)
+        }
+        do {
+            try await server.start()
+            print("URL=\(server.url)")
+            print("TOKEN=\(server.token)")
+            fflush(stdout)
+        } catch {
+            print("Errore: \(error.localizedDescription)")
+            exit(1)
+        }
+        withExtendedLifetime(server) {}
+        while true { try? await Task.sleep(for: .seconds(3600)); _ = server }
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--observe-stats") {
     // Debug: how much of the frontmost window the agent can see (no content printed).
     Task { @MainActor in

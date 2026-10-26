@@ -95,3 +95,43 @@ Il messaggio che oggi riceve Claude contiene un prompt di sistema lungo, la defi
 1. **Epic 4:** introdurre un protocollo comune per i Motori, aggiungere Codex, una catena di riserva Claude ↔ Codex → locale e un Agente locale di base con il modello Apple.
 2. **Epic 5:** prima un banco di prova che misura l'Agente, poi uno spike sui modelli locali su questo Mac, poi il provider compatibile OpenAI, l'ottimizzazione dell'Agente locale e la rimozione delle ultime dipendenze dal cloud (pulizia della dettatura, macro).
 3. **Rinviato:** modello Apple su Private Cloud Compute (entitlement), MLX dentro l'app (dopo lo spike), adapter addestrato per il classificatore.
+
+## 4. Esito dello spike su Codex (Storia 4.1, 27/10)
+
+Prove fatte con `MacTalkAct --mcp-serve` (solo il server degli strumenti, nuovo comando di debug) e `codex exec` 0.164.0-alpha.11.1, login ChatGPT.
+
+### 4.1 Opzioni che servono davvero
+
+| Opzione | Esito |
+| --- | --- |
+| `mcp_servers.mactalk.default_tools_approval_mode="approve"` | **Indispensabile.** Senza, ogni strumento MCP fallisce con «MCP tool call requires approval, but approval policy is never». |
+| `model_instructions_file=<file>` | **Indispensabile.** Sostituisce le istruzioni di base di Codex (pensate per programmare) con il prompt dell'Agente: i token in ingresso scendono da ~47.000 a ~21.000 e spariscono riferimenti a skill personali. |
+| `web_search="disabled"` | Necessaria: senza, il modello ha `web__run`. |
+| `--disable multi_agent` | Toglie gli strumenti per creare sotto-agenti. |
+| `--disable code_mode_host` | **Da non usare.** Tutti i modelli disponibili sono `code_mode_only`: senza host Codex non può chiamare nessuno strumento. |
+| `--disable shell_tool unified_exec computer_use browser_use apps plugins image_generation skill_search tool_suggest view_image sleep_tool goals` | Accettate; tengono fuori shell, computer use e browser. |
+| `--sandbox read-only` | Resta come seconda barriera: `apply_patch` rimane elencato ma non può scrivere (approvazione «never»). |
+| `project_doc_max_bytes=0`, `include_permissions_instructions=false`, `include_apps_instructions=false`, `include_environment_context=false` | Accettate, meno testo inutile. |
+| `--strict-config` | Utile: una chiave sconosciuta fa fallire l'avvio (per esempio `skills.enabled` non esiste). |
+| `~/.codex/AGENTS.md` | Viene letto comunque (33 byte nel Mac di Nico). Non si può escludere senza un `CODEX_HOME` separato, che rischierebbe di invalidare il login dell'utente al rinnovo del token: lo si accetta e il prompt dell'Agente chiede di ignorare istruzioni di stile. |
+
+Strumenti che restano visibili al modello oltre a `mactalk`: `apply_patch` (bloccato dalla sandbox), `clock__curr_time`, risorse MCP, gli strumenti interni del code mode. Nessuno può agire sullo schermo o sui file.
+
+### 4.2 Tempi (5 prove, `gpt-6-luna`, sforzo basso, richiesta «osserva e dimmi l'app»)
+
+| Avvio | Primo strumento | Risposta finale |
+| --- | --- | --- |
+| A freddo | 3,4–4,3 s | 4,3–5,6 s |
+| Processo pronto da 6–8 s | 2,7–3,6 s | 3,6–4,0 s |
+
+Il processo pronto fa risparmiare solo qualche decimo: `codex exec` non avvia la sessione prima di ricevere tutta la richiesta. **Decisione:** un processo per richiesta, senza processo di riserva; `codex app-server` non serve. NFR-9 (primo strumento ≤ 4 s) è rispettato con il modello rapido.
+
+### 4.3 Modelli
+
+Con `--ignore-user-config` il modello predefinito è `gpt-6.1-sol`. Elenco disponibile per l'account: `gpt-6.1-sol` («workhorse»), `gpt-6-astra` (frontiera), `gpt-6.1-terra`, `gpt-6-luna` («veloce ed economico»), modelli 5.6. **Predefiniti scelti:** rapido `gpt-6-luna` con sforzo `low`; profondo `gpt-6.1-sol` con sforzo `medium`. La verifica su 10 compiti tipici è rimandata al Banco di prova (Storia 5.1), che li misura per tutti i Motori nello stesso modo.
+
+### 4.4 Messaggi
+
+- **Login mancante o scaduto:** eventi `error` «Reconnecting… n/5 (unexpected status 401 Unauthorized …)» e poi `turn.failed` con lo stesso testo, dopo circa 20 s di tentativi. Per non aspettare, lo stato «accesso da fare» si ricava da `codex login status` (uscita 1, «Not logged in») al ricontrollo dei Motori.
+- **Limite d'uso:** nel binario compaiono «You've hit your usage limit. … or try again at <ora>» con i formati `%-I:%M %p` e `%b %-d, %Y %-I:%M %p`, e «try again in <durata>». Esempi in `Tests/fixtures/codex/`.
+- **Risposta finale:** l'ultimo `item.completed` di tipo `agent_message` prima di `turn.completed`.
