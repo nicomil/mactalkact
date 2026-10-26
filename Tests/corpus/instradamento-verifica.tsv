@@ -1,0 +1,43 @@
+# Set di verifica: frasi nuove, scritte DOPO la taratura del Router, per controllare che non sia adattato al solo Corpus.
+# Stesso formato di instradamento.tsv.
+Computer, scrivi una mail a Sara per dirle che il pacco è arrivato	no	nessuno	agente
+Computer, ok, ci sentiamo dopo pranzo	si	nessuno	scrivi|chiedi
+Computer, la consegna è prevista per venerdì	si	nessuno	scrivi|chiedi
+Computer, ti confermo che domani ci sono	si	nessuno	scrivi|chiedi
+Computer, sposta questa frase in fondo	si	nessuno	agente
+Computer, unisci i due paragrafi	si	nessuno	agente
+Computer, elimina la riga vuota	si	nessuno	agente
+Computer, rifai il titolo in maiuscolo	si	nessuno	agente
+Computer, fammi vedere la cronologia	no	nessuno	agente|locale
+Computer, apri le note	no	nessuno	rapido|locale
+Computer, apri wikipedia	no	nessuno	rapido|locale
+Computer, apri la calcolatrice	no	nessuno	rapido|locale
+Computer, chiudi la finestra	no	nessuno	rapido
+Computer, vai avanti	no	nessuno	rapido
+Computer, apri l'ultima foto	no	nessuno	agente
+Computer, cerca ristoranti vicino a me	no	nessuno	agente
+Computer, metti la pagina più grande	no	nessuno	locale|agente
+Computer, rimetti la dimensione normale	no	nessuno	locale|agente
+Adesso cambia il colore	si	finestra	agente
+E poi salvalo	si	finestra	agente|rapido
+Uguale anche per la terza riga	si	finestra	agente
+No, non quella	si	finestra	agente|ignora
+Vieni qui piccolino	si	finestra	ignora
+Hai fame?	si	finestra	ignora
+Shh, dorme	no	finestra	ignora
+Ma guarda che faccia	si	finestra	ignora
+Ti voglio bene	si	finestra	ignora
+Che ore sono amore?	no	finestra	ignora
+Perfetto grazie	no	finestra	chiudi-conversazione
+Gnam gnam	si	finestra	ignora
+Mamma mia che sonno	si	sessione	ignora|chiedi
+Buongiorno Paolo, ti allego il preventivo richiesto	si	sessione	scrivi|chiedi
+Cancella la parola sbagliata	si	sessione	agente
+Torna su	no	sessione	rapido
+Fai una pausa	no	sessione	agente|ignora|chiedi
+Ricordami alle cinque di chiamare il pediatra	no	ptt	agente
+Sono le tre e mezza	si	ptt	scrivi|chiedi
+Bravo	si	ptt	chiedi|ignora
+Togli il grassetto	si	ptt	agente
+Computer, aspetta	si	nessuno	chiedi|ignora|agente
+Computer, niente, lascia stare	si	nessuno	chiedi|ignora|agente

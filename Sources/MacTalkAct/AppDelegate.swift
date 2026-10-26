@@ -106,6 +106,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .wakeWord: symbol = "ear"
         case .session: symbol = "waveform"
         }
+        if case .paused = coordinator?.agent.availability {
+            statusItem.button?.image = NSImage(systemSymbolName: symbol == "hand.raised" ? "hand.raised.slash" : "\(symbol).badge.exclamationmark",
+                                               accessibilityDescription: "MacTalkAct (agente in pausa)")
+                ?? NSImage(systemSymbolName: symbol, accessibilityDescription: "MacTalkAct")
+            return
+        }
         statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "MacTalkAct")
     }
 
@@ -116,6 +122,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let header = NSMenuItem(title: "Tieni premuto \(settings.pttKey.short) e parla", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        if case .paused(let until) = coordinator.agent.availability {
+            let f = DateFormatter()
+            f.dateFormat = "HH:mm"
+            let paused = NSMenuItem(title: "Agente in pausa fino alle \(f.string(from: until)) (limite subscription)", action: nil, keyEquivalent: "")
+            paused.isEnabled = false
+            menu.addItem(paused)
+        } else if coordinator.agent.availability == .missing {
+            let missing = NSMenuItem(title: "Agente non disponibile: comando «claude» non trovato", action: nil, keyEquivalent: "")
+            missing.isEnabled = false
+            menu.addItem(missing)
+        }
         menu.addItem(.separator())
 
         let wake = NSMenuItem(title: "Ascolto continuo («\(settings.firstWakePhrase)»)", action: #selector(toggleWake), keyEquivalent: "")
@@ -218,9 +235,18 @@ struct HelpView: View {
             "Ascolto continuo dal menu: di' «Computer» seguito dal comando (es. «Computer, apri Mail»)",
         ]),
         ("Scrivere", [
-            "Con il cursore in un campo di testo, parla e basta: viene scritto",
+            "Con il cursore in un campo di testo, detta: il modello Apple sul Mac capisce se è testo da scrivere, un comando o chiacchiera",
+            "Nel dubbio non scrive: ti mostra la frase e aspetta «scrivilo»",
             "«scrivi …» per forzare la dettatura",
+            "«cancella quello che hai scritto»: toglie l'ultima cosa scritta dall'app",
             "«a capo», «invio», «cancella», «cancella parola», «seleziona tutto»",
+        ]),
+        ("Conversazione", [
+            "Dopo ogni risposta hai 20 secondi per continuare senza dire «computer» («💬 Ti ascolto ancora»)",
+            "In quei secondi la chiacchiera con chi è nella stanza viene ignorata",
+            "«basta così» o «grazie» chiudono subito la conversazione",
+            "L'agente ricorda le ultime 5 cose fatte (10 minuti): «rimetti com'era prima», «fai lo stesso con l'altra»",
+            "«dimentica la conversazione» cancella questa memoria (non viene mai salvata su disco)",
         ]),
         ("Muoversi", [
             "«giù», «su», «scorri molto giù», «pagina giù», «vai in cima», «vai in fondo»",
@@ -245,6 +271,9 @@ struct HelpView: View {
             "Può farti una domanda: rispondi a voce",
             "«cancella l'ultima frase», «sostituisci martedì con giovedì», «traducilo in inglese»",
             "«stop» lo ferma in qualsiasi momento",
+            "Le richieste semplici usano un modello più rapido; «pensaci bene» usa quello più capace",
+            "I comandi di un solo passo (nuova scheda, schermo intero, apri un'app o un sito) partono subito, senza Claude ⚡️",
+            "Se finisce la subscription l'agente va in pausa fino all'ora di ripresa: dettatura, comandi e numeri funzionano",
         ]),
         ("Numeri", [
             "«mostra numeri»: un numero su ogni elemento cliccabile della finestra",

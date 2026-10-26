@@ -54,6 +54,15 @@ final class AppSettings: ObservableObject {
     @Published var backend: AIBackend { didSet { defaults.set(backend.rawValue, forKey: "backend") } }
     @Published var claudePath: String { didSet { defaults.set(claudePath, forKey: "claudePath") } }
     @Published var speakReplies: Bool { didSet { defaults.set(speakReplies, forKey: "speakReplies") } }
+    /// Model for simple agent requests (FR-13); `model` is the deep one.
+    @Published var fastModel: String { didSet { defaults.set(fastModel, forKey: "fastModel") } }
+    @Published var useFastModel: Bool { didSet { defaults.set(useFastModel, forKey: "useFastModel") } }
+    /// Apple's on-device model decides between command, dictation and chatter (FR-3).
+    @Published var useOnDeviceRouter: Bool { didSet { defaults.set(useOnDeviceRouter, forKey: "useOnDeviceRouter") } }
+    /// One-step commands run locally without the agent (FR-11).
+    @Published var useLocalLane: Bool { didSet { defaults.set(useLocalLane, forKey: "useLocalLane") } }
+    /// Seconds the conversation stays open after a response (FR-7).
+    @Published var conversationSeconds: Double { didSet { defaults.set(conversationSeconds, forKey: "conversationSeconds") } }
 
     private init() {
         model = defaults.string(forKey: "model") ?? "claude-opus-5-5"
@@ -65,6 +74,11 @@ final class AppSettings: ObservableObject {
         backend = AIBackend(rawValue: defaults.string(forKey: "backend") ?? "") ?? .subscription
         claudePath = defaults.string(forKey: "claudePath") ?? ""
         speakReplies = defaults.bool(forKey: "speakReplies")
+        fastModel = defaults.string(forKey: "fastModel") ?? "claude-sonnet-5-5"
+        useFastModel = defaults.object(forKey: "useFastModel") as? Bool ?? true
+        useOnDeviceRouter = defaults.object(forKey: "useOnDeviceRouter") as? Bool ?? true
+        useLocalLane = defaults.object(forKey: "useLocalLane") as? Bool ?? true
+        conversationSeconds = defaults.object(forKey: "conversationSeconds") as? Double ?? 20
     }
 
     /// Path of the `claude` command, if installed (custom path wins).
@@ -151,12 +165,30 @@ struct SettingsView: View {
                 Text("Doppio tocco sul tasto: sessione a mani libere (niente frase di attivazione, di' «basta» per chiudere).")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Capire le frasi") {
+                Toggle("Usa il modello Apple sul Mac per distinguere comandi, dettatura e chiacchiera", isOn: $settings.useOnDeviceRouter)
+                Toggle("Esegui da solo i comandi semplici (nuova scheda, apri un'app), senza Claude", isOn: $settings.useLocalLane)
+                Stepper("Conversazione aperta dopo ogni risposta: \(Int(settings.conversationSeconds)) s",
+                        value: $settings.conversationSeconds, in: 0...60, step: 5)
+                Text("Senza il modello Apple, nei campi di testo l'app chiede «Di' scrivilo» prima di scrivere una frase ambigua.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Claude (richieste libere)") {
                 Toggle("Usa Claude per ciò che non è un comando rapido", isOn: $settings.useAI)
-                Picker("Modello", selection: $settings.model) {
+                Picker("Modello per i compiti lunghi", selection: $settings.model) {
                     Text("Claude Opus 5.5 (più capace)").tag("claude-opus-5-5")
                     Text("Claude Sonnet 5.5 (equilibrato)").tag("claude-sonnet-5-5")
                     Text("Claude Haiku 5.5 (più veloce ed economico)").tag("claude-haiku-5-5")
+                }
+                Toggle("Usa un modello più rapido per le richieste semplici", isOn: $settings.useFastModel)
+                if settings.useFastModel {
+                    Picker("Modello per le richieste semplici", selection: $settings.fastModel) {
+                        Text("Claude Sonnet 5.5 (equilibrato)").tag("claude-sonnet-5-5")
+                        Text("Claude Haiku 5.5 (più veloce)").tag("claude-haiku-5-5")
+                        Text("Claude Opus 5.5 (più capace)").tag("claude-opus-5-5")
+                    }
+                    Text("Di' «pensaci bene» per usare il modello dei compiti lunghi.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Toggle("Ripulisci anche la dettatura con Claude (più lento)", isOn: $settings.cleanDictation)
                 Picker("Accesso a Claude", selection: $settings.backend) {

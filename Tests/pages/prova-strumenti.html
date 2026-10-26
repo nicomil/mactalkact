@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>MacTalkAct prova strumenti</title>
+<style>body{font:15px -apple-system;margin:24px} td,th{padding:4px 12px} .cell{border:1px solid #ccc;padding:8px;font-family:Menlo;white-space:pre;min-height:60px}</style></head>
+<body>
+<h1>Prova strumenti</h1>
+<table>
+<tr><th>Studente</th><th>18:30</th><th>21:30</th></tr>
+<tr><td>Anna</td><td><input type="checkbox" aria-label="Anna 18:30"></td><td><input type="checkbox" aria-label="Anna 21:30" checked></td></tr>
+<tr><td>Bruno</td><td><input type="checkbox" aria-label="Bruno 18:30"></td><td><input type="checkbox" aria-label="Bruno 21:30"></td></tr>
+<tr><td>Carla</td><td><input type="checkbox" aria-label="Carla 18:30"></td><td><input type="checkbox" aria-label="Carla 21:30" checked></td></tr>
+<tr><td>Dario</td><td><input type="checkbox" aria-label="Dario 18:30"></td><td><input type="checkbox" aria-label="Dario 21:30" checked></td></tr>
+<tr><td>Elena</td><td><input type="checkbox" aria-label="Elena 18:30"></td><td><input type="checkbox" aria-label="Elena 21:30"></td></tr>
+</table>
+<p>Campo nativo:</p>
+<textarea id="nativo" aria-label="Campo nativo" rows="3" cols="60">domanda = "Che cos'è il cloud computing?"
+risposta = ""</textarea>
+<p>Cella stile editor (contenteditable):</p>
+<div id="cella" class="cell" contenteditable="true" aria-label="Cella di codice">titolo = "Quiz"
+domanda = "Che cos'è il cloud computing?"
+punti = 3</div>
+</body></html>

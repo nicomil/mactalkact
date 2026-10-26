@@ -73,6 +73,8 @@ struct KeyCombo {
 /// The "hands": turns decisions into keyboard, mouse and Accessibility actions.
 @MainActor
 final class Executor {
+    /// Every text the app types, for "cancella quello che hai scritto" (AD-5).
+    let journal = InsertionJournal()
 
     // MARK: Keys
 
@@ -127,6 +129,32 @@ final class Executor {
         let t = context.selectedText.isEmpty ? TextDiff.spaced(text, after: context.textBeforeCursor) : text
         guard !t.isEmpty else { return }
         await paste(t)
+        await journal.record(text: t, before: context)
+    }
+
+    /// Types text for the agent or the local lane, and records it.
+    func typeText(_ text: String) async {
+        let before = ScreenContext.capture(includeLabels: false)
+        await paste(text)
+        if before.selectedText.isEmpty { await journal.record(text: text, before: before) } else { journal.clear() }
+    }
+
+    /// Removes the last text the app typed, if the field is still as the app left it (FR-10).
+    /// Returns a short description for the HUD.
+    func undoLastInsertion() async -> String? {
+        let now = ScreenContext.capture(includeLabels: false)
+        switch journal.undoPlan(now: now) {
+        case .nothing:
+            return nil
+        case .deleteCharacters(let n):
+            await deleteBackward(n)
+            journal.clear()
+            return "Tolto quello che avevo scritto"
+        case .commandZ:
+            try? press("cmd+z")
+            journal.clear()
+            return "Ho usato Annulla: controlla il risultato"
+        }
     }
 
     /// Agent version: diffs against the text before the caret as it is right now.
@@ -146,6 +174,111 @@ final class Executor {
         let edit = TextDiff.backspaceEdit(old: original.textBeforeCursor, new: new)
         await deleteBackward(edit.deletes)
         if !edit.insert.isEmpty { await paste(edit.insert) }
+    }
+
+    // MARK: Replace text (also in web editors)
+
+    enum ReplaceResult: Equatable {
+        case done(String)
+        case notFound(String)
+        case unverified(String)
+        case noField
+    }
+
+    /// Copies the current selection without disturbing the user's clipboard.
+    func copySelection() async -> String? {
+        let pb = NSPasteboard.general
+        let saved: [[(NSPasteboard.PasteboardType, Data)]] = (pb.pasteboardItems ?? []).map { item in
+            item.types.compactMap { t in item.data(forType: t).map { (t, $0) } }
+        }
+        let before = pb.changeCount
+        try? press("cmd+c")
+        var copied: String?
+        for _ in 0..<10 {
+            try? await Task.sleep(for: .milliseconds(40))
+            if pb.changeCount != before { copied = pb.string(forType: .string); break }
+        }
+        pb.clearContents()
+        let items = saved.map { pairs -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            for (t, d) in pairs { item.setData(d, forType: t) }
+            return item
+        }
+        if !items.isEmpty { pb.writeObjects(items) }
+        return copied
+    }
+
+    /// Replaces `find` with `new` in the focused field (FR-16). Tries, in order:
+    /// 1. Accessibility (native fields): select the exact range and paste;
+    /// 2. the current line (web code editors, notebook cells): select line, copy, check, paste;
+    /// 3. the whole field (short cells): select all, copy, check, paste.
+    /// Each path verifies the result before reporting success.
+    func replaceText(find: String, with new: String) async -> ReplaceResult {
+        let ctx = ScreenContext.capture(includeLabels: false)
+        guard let front = AX.frontmostApplication() else { return .noField }
+        let app = AX.app(front.processIdentifier)
+        let focused = AX.focusedElement(in: app)
+
+        // 1. Accessibility
+        if let el = focused, AX.isSettable(el, kAXValueAttribute), let value = AX.string(el, kAXValueAttribute),
+           let r = value.range(of: find) {
+            let ns = NSRange(r, in: value)
+            var cf = CFRange(location: ns.location, length: ns.length)
+            if let axRange = AXValueCreate(.cfRange, &cf),
+               AXUIElementSetAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, axRange) == .success {
+                try? await Task.sleep(for: .milliseconds(60))
+                await typeText(new)
+                try? await Task.sleep(for: .milliseconds(150))
+                let after = AX.string(el, kAXValueAttribute) ?? ""
+                return after.contains(new) ? .done("accessibility") : .unverified("accessibility")
+            }
+        }
+        // Outside a text field, cmd+← in a browser means "go back": keyboard paths only inside a field.
+        guard ctx.isEditable else { return .noField }
+
+        // 2. Current line
+        try? press("cmd+left")
+        try? press("cmd+shift+right")
+        try? await Task.sleep(for: .milliseconds(80))
+        if let line = await copySelection()?.trimmingCharacters(in: .newlines), line.contains(find) {
+            let expected = line.replacingOccurrences(of: find, with: new, options: [], range: line.range(of: find))
+            await typeText(expected)
+            try? await Task.sleep(for: .milliseconds(150))
+            try? press("cmd+left")
+            try? press("cmd+shift+right")
+            try? await Task.sleep(for: .milliseconds(80))
+            let check = await copySelection()?.trimmingCharacters(in: .newlines)
+            try? press("right")
+            return check == expected ? .done("riga") : .unverified("riga")
+        }
+        try? press("right")
+
+        // 3. Whole field (notebook cell, short text area)
+        try? press("cmd+a")
+        try? await Task.sleep(for: .milliseconds(80))
+        guard let all = await copySelection(), !all.isEmpty else { try? press("right"); return .notFound("") }
+        guard all.count < 20_000, let r = all.range(of: find) else {
+            try? press("right")
+            return .notFound(String(all.prefix(200)))
+        }
+        let expected = all.replacingCharacters(in: r, with: new)
+        await typeText(expected)
+        try? await Task.sleep(for: .milliseconds(200))
+        try? press("cmd+a")
+        try? await Task.sleep(for: .milliseconds(80))
+        let check = await copySelection()
+        try? press("right")
+        return check?.trimmingCharacters(in: .newlines) == expected.trimmingCharacters(in: .newlines)
+            ? .done("campo intero") : .unverified("campo intero")
+    }
+
+    /// Test helper: the whole content of the focused field (select all + copy, then collapse).
+    func copySelectionOfField() async -> String? {
+        try? press("cmd+a")
+        try? await Task.sleep(for: .milliseconds(80))
+        let t = await copySelection()
+        try? press("right")
+        return t
     }
 
     // MARK: Click

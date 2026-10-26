@@ -6,7 +6,8 @@ import Foundation
 final class AgentRunner {
     let tools: AgentTools
     private var server: MCPServer?
-    private let cli = ClaudeCLI()
+    private let cliDeep = ClaudeCLI()
+    private let cliFast = ClaudeCLI()
     private let settings: AppSettings
     var running = false
 
@@ -40,11 +41,84 @@ final class AgentRunner {
     what they mean. When they say «ricorda che…» save it with remember; «dimentica…» → forget. If you \
     discover something stable they will likely reuse (e.g. which browser profile «aula IB» is), remember it.
     - «crea una macro X: …» → save_macro with short Italian steps (one action each).
+    - The request may include <recent>: the last interactions with this user, most recent last. Use it to \
+    resolve references («di prima», «anche l'altra», «rimetti com'era»): the `changes` there show the text \
+    before and after each edit.
+    - To change text in a field, document or notebook cell use replace_text (it verifies the result); \
+    use type_text only to add new text.
+    - To click many similar items (checkboxes in a table, rows) use click_many with all the ids at once, \
+    then check the returned states.
+    - Ids are never reused: after a new observe or screenshot, older ids are rejected.
     """
 
     init(executor: Executor, settings: AppSettings) {
         self.tools = AgentTools(executor: executor)
         self.settings = settings
+    }
+
+    // MARK: Availability (AD-7)
+
+    /// The only source of truth on whether the agent can be used right now.
+    private(set) var availability: AgentAvailability = .available
+    var onAvailabilityChange: ((AgentAvailability) -> Void)?
+    private var resumeTask: Task<Void, Never>?
+
+    private func setAvailability(_ a: AgentAvailability) {
+        guard a != availability else { return }
+        availability = a
+        Log.info("Agente: \(a)")
+        onAvailabilityChange?(a)
+    }
+
+    /// Re-checks the `claude` command (installed or not) without touching a pause.
+    func refreshAvailability() {
+        if case .paused(let until) = availability, Date() < until { return }
+        setAvailability(settings.claudeExecutable == nil ? .missing : .available)
+    }
+
+    /// "You've hit your session limit · resets 7pm (Europe/Rome)" → pause until then (FR-14).
+    func pauseForLimit(message: String) {
+        let until = Self.resetDate(from: message) ?? Date().addingTimeInterval(30 * 60)
+        setAvailability(.paused(until: until))
+        resumeTask?.cancel()
+        resumeTask = Task { @MainActor [weak self] in
+            let wait = max(5, until.timeIntervalSinceNow + 60)
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled, let self else { return }
+            self.setAvailability(.available)
+            self.prewarm()
+        }
+    }
+
+    /// "You've hit your session limit · resets 7pm", "usage limit reached", "5-hour limit reached".
+    static func isLimitMessage(_ message: String) -> Bool {
+        let m = message.lowercased()
+        return m.contains("limit") && (m.contains("hit") || m.contains("reached") || m.contains("resets") || m.contains("exceeded"))
+    }
+
+    static func resetDate(from message: String, now: Date = Date()) -> Date? {
+        guard let r = message.range(of: "resets ", options: .caseInsensitive) else { return nil }
+        let tail = String(message[r.upperBound...]).lowercased()
+        let pattern = #"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"#
+        guard let re = try? NSRegularExpression(pattern: pattern),
+              let m = re.firstMatch(in: tail, range: NSRange(tail.startIndex..., in: tail)),
+              let hR = Range(m.range(at: 1), in: tail), var hour = Int(tail[hR]) else { return nil }
+        let minute = Range(m.range(at: 2), in: tail).flatMap { Int(tail[$0]) } ?? 0
+        if let apR = Range(m.range(at: 3), in: tail) {
+            let ap = tail[apR]
+            if ap == "pm", hour < 12 { hour += 12 }
+            if ap == "am", hour == 12 { hour = 0 }
+        }
+        guard hour < 24, minute < 60 else { return nil }
+        var cal = Calendar.current
+        if let open = tail.firstIndex(of: "("), let close = tail.firstIndex(of: ")"), open < close,
+           let tz = TimeZone(identifier: String(message[r.upperBound...])
+                .split(separator: "(").last?.split(separator: ")").first.map(String.init) ?? "") {
+            cal.timeZone = tz
+        }
+        guard var date = cal.date(bySettingHour: hour, minute: minute, second: 0, of: now) else { return nil }
+        if date <= now { date = cal.date(byAdding: .day, value: 1, to: date) ?? date }
+        return date
     }
 
     /// Starts the local tool server (once).
@@ -61,15 +135,17 @@ final class AgentRunner {
     /// The spawn may happen on a background queue: capture the path setting now.
     private func refreshExecutable() {
         let custom = settings.claudePath
-        cli.executablePath = { ClaudeCLI.locate(custom: custom) }
+        cliDeep.executablePath = { ClaudeCLI.locate(custom: custom) }
+        cliFast.executablePath = { ClaudeCLI.locate(custom: custom) }
     }
 
-    private var config: ClaudeCLI.Config? {
+    /// Two levels (AD-6): the fast one for 1-3 step requests, the deep one for long tasks.
+    private func config(deep: Bool) -> ClaudeCLI.Config? {
         guard let server else { return nil }
         return ClaudeCLI.Config(
-            model: settings.model,
+            model: deep ? settings.model : settings.fastModel,
             systemPrompt: Self.systemPrompt,
-            effort: "medium",
+            effort: deep ? "medium" : "low",
             extraArgs: [
                 "--mcp-config", server.mcpConfigJSON,
                 "--permission-mode", "dontAsk",
@@ -81,17 +157,26 @@ final class AgentRunner {
         )
     }
 
-    /// Keeps a `claude` process ready, already connected to the tools.
+    private func cli(deep: Bool) -> ClaudeCLI { deep || !settings.useFastModel ? cliDeep : cliFast }
+
+    /// Keeps `claude` processes ready, already connected to the tools.
     func prewarm() {
-        guard let config else { return }
+        guard availability == .available else { return }
         refreshExecutable()
-        let cli = self.cli
-        DispatchQueue.global(qos: .utility).async { cli.prewarm(config) }
+        var pairs: [(ClaudeCLI, ClaudeCLI.Config)] = []
+        if let c = config(deep: true) { pairs.append((cliDeep, c)) }
+        if settings.useFastModel, let c = config(deep: false) { pairs.append((cliFast, c)) }
+        for (cli, c) in pairs {
+            DispatchQueue.global(qos: .utility).async { cli.prewarm(c) }
+        }
     }
 
     /// Runs one request to completion and returns the agent's final sentence.
-    func run(_ request: String, context: ScreenContext) async throws -> String {
-        guard let config else { throw ClaudeCLIError.failed("server strumenti non avviato") }
+    /// Only one request at a time (AD-6).
+    func run(_ request: String, context: ScreenContext, recent: String = "", deep: Bool = true) async throws -> String {
+        let useDeep = deep || !settings.useFastModel
+        guard let config = config(deep: useDeep) else { throw ClaudeCLIError.failed("server strumenti non avviato") }
+        guard !running else { throw ClaudeCLIError.failed("sto già lavorando a un'altra richiesta") }
         refreshExecutable()
         tools.reset()
         running = true
@@ -107,22 +192,36 @@ final class AgentRunner {
         <memory>
         \(Memory.shared.promptText)
         </memory>
+        \(recent)
         REQUEST: \(request)
         """
         let started = Date()
-        let data = try await cli.run(config, message: message, timeout: 240)
-        let answer = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        Log.info(String(format: "Agente: %d passi in %.1fs → %@", tools.callCount, Date().timeIntervalSince(started), answer))
-        return answer
+        do {
+            let data = try await cli(deep: useDeep).run(config, message: message, timeout: 240)
+            let answer = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            Log.info(String(format: "Agente (%@): %d passi in %.1fs → %@", config.model, tools.callCount, Date().timeIntervalSince(started), answer))
+            return answer
+        } catch {
+            let message = error.localizedDescription
+            if Self.isLimitMessage(message) {
+                pauseForLimit(message: message)
+            } else if case ClaudeCLIError.notFound = error {
+                setAvailability(.missing)
+            }
+            Log.info(String(format: "Agente (%@): errore dopo %.1fs", config.model, Date().timeIntervalSince(started)))
+            throw error
+        }
     }
 
     func cancel() {
         tools.cancelled = true
-        cli.cancelCurrent()
+        cliDeep.cancelCurrent()
+        cliFast.cancelCurrent()
     }
 
     func shutdown() {
-        cli.shutdown()
+        cliDeep.shutdown()
+        cliFast.shutdown()
         server?.stop()
     }
 }

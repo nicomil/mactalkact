@@ -12,6 +12,25 @@ if arguments.contains("--selftest") {
     exit(ok ? 0 : 1)
 }
 
+if arguments.contains("--route-test") {
+    let path = argument(after: "--route-test").flatMap { $0.hasPrefix("-") ? nil : $0 } ?? "Tests/corpus/instradamento.tsv"
+    let rules = arguments.contains("--rules")
+    Task { @MainActor in
+        let ok = await DebugCLI.routeTest(path: path, rulesOnly: rules)
+        exit(ok ? 0 : 1)
+    }
+    dispatchMain()
+}
+
+if let page = argument(after: "--tools-test") {
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        await DebugCLI.toolsTest(page: page)
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if let path = argument(after: "--transcribe") {
     Task { @MainActor in
         await DebugCLI.transcribe(path)

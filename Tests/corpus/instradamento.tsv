@@ -1,0 +1,137 @@
+# Corpus del Router di MacTalkAct. Una riga per frase, campi separati da TAB:
+# frase · campo di testo (si/no) · stato · decisione attesa (alternative separate da |) · nota
+# Stati: nessuno (ascolto continuo, niente in corso) · armato (dopo «computer» da solo) · finestra (conversazione aperta)
+#        ptt (push-to-talk) · sessione (mani libere) · proposta (in attesa di «scrivilo») · conferma (piano da confermare) · numeri
+# Le frasi sono scritte a mano o riprese dalla sessione del 26/10 senza dati privati.
+#
+# --- Sessione reale del 26/10 (notebook Jupyter in Edge)
+Computer, selezionale check box accanto a quelle già selezionate	no	nessuno	agente	26/10 20:45
+Computer, modifica la domanda	si	nessuno	agente	26/10 20:48
+Computer	si	armato	arma	26/10 20:49, finiva scritto
+Rimetti la domanda di prima	si	finestra	agente	26/10 20:49, finiva scritto
+Modifica la domanda che cos'è il cloud computing in che cos'è Internet?	si	finestra	agente	26/10 20:50, finiva scritto
+Modifica la domanda	si	finestra	agente	26/10 20:50, finiva scritto
+Ciao	si	finestra	ignora	26/10 20:51, finiva scritto
+Bellissimo, ok, stop	si	finestra	ignora	26/10 20:51, finiva scritto
+Computer, apri nuova TAB	no	nessuno	rapido	26/10 20:52, prima andava all'agente
+Ciao amore, vuoi la pappa?	si	nessuno	ignora	senza parola di attivazione
+Computer, ciao amore vuoi la pappa?	si	nessuno	chiedi|ignora	chiacchiera rivolta all'app: mai scrivere
+#
+# --- Parola di attivazione
+Computer.	si	nessuno	arma
+Computer?	no	nessuno	arma
+Ehi computer	si	nessuno	arma
+Ok computer, ehm	si	nessuno	arma
+Computer	si	finestra	arma
+Allora vediamo, computer apri Safari	no	nessuno	rapido
+Ma che ore sono?	no	nessuno	ignora
+Apri Safari	no	nessuno	ignora	senza parola di attivazione
+#
+# --- Comandi rapidi della grammatica
+Computer, giù	no	nessuno	rapido
+Computer, scorri giù per favore	no	nessuno	rapido
+Computer, annulla	si	nessuno	rapido
+Computer, apri Mail	no	nessuno	rapido
+Computer, nuova scheda	no	nessuno	rapido
+Computer, apri una nuova scheda	no	nessuno	rapido
+Computer, mostra numeri	no	nessuno	rapido
+Computer, scrivi ciao a tutti	si	nessuno	rapido	«scrivi» è dettatura esplicita
+Giù	no	finestra	rapido
+Ancora	no	finestra	rapido
+Stop	no	finestra	chiudi-conversazione
+#
+# --- Dettatura con parola di attivazione, cursore in un campo di testo
+Computer, caro Marco ti scrivo per confermare la riunione di domani	si	nessuno	scrivi
+Computer, la riunione è spostata a giovedì alle dieci	si	nessuno	scrivi|chiedi
+Computer, grazie mille per la disponibilità, a presto	si	nessuno	scrivi|chiedi
+Computer, arrivo tra cinque minuti	si	nessuno	scrivi|chiedi
+Computer, ho comprato il latte e i pannolini	si	nessuno	scrivi|chiedi
+Computer, il documento è pronto per la revisione	si	nessuno	scrivi|chiedi
+Computer, buongiorno a tutti, oggi parliamo di reti	si	nessuno	scrivi|chiedi
+Computer, ricordati di comprare il pane	si	nessuno	agente|scrivi|chiedi	ambigua: promemoria o testo
+#
+# --- Sessione a mani libere: tutto è rivolto all'app
+Caro Luca, ti mando il file entro stasera	si	sessione	scrivi|chiedi
+Bellissimo	si	sessione	ignora
+Che bravo che sei	si	sessione	ignora|chiedi
+Metti in grassetto il titolo	si	sessione	agente|locale
+Apri Spotify	no	sessione	rapido
+#
+# --- Push-to-talk
+Ci vediamo domani alle nove	si	ptt	scrivi|chiedi
+Traduci questo paragrafo in inglese	si	ptt	agente
+Ok	si	ptt	chiedi|ignora
+Correggi l'ultima frase	si	ptt	agente
+#
+# --- Comandi liberi in un campo di testo (non devono mai essere scritti)
+Computer, cambia la seconda domanda	si	nessuno	agente
+Computer, rimetti com'era prima	si	nessuno	agente
+Computer, sostituisci martedì con giovedì	si	nessuno	agente
+Computer, metti in grassetto il titolo	si	nessuno	agente|locale
+Computer, cancella l'ultima frase	si	nessuno	agente
+Computer, rendilo più formale	si	nessuno	agente
+Computer, aggiungi una riga vuota sotto	si	nessuno	agente
+Computer, togli il punto esclamativo	si	nessuno	agente
+Computer, fai la stessa cosa nella cella sotto	si	nessuno	agente
+Computer, spunta tutte le caselle delle 18:30	no	nessuno	agente
+#
+# --- Finestra di conversazione: comandi senza «computer», chiacchiera ignorata
+Cambia anche la seconda	si	finestra	agente
+No aspetta, quella sotto	si	finestra	agente
+Fai lo stesso con l'altra	si	finestra	agente
+Ma dove hai messo le chiavi?	si	finestra	ignora
+Arrivo, arrivo	si	finestra	ignora
+Che bravo il mio piccolo	no	finestra	ignora
+Va bene grazie	no	finestra	chiudi-conversazione
+Basta così	no	finestra	chiudi-conversazione
+Grazie	si	finestra	chiudi-conversazione
+Ok	si	finestra	ignora
+Sì sì, ho capito	no	finestra	ignora
+Scorri giù	no	finestra	rapido
+Apri la mail di Marco	no	finestra	agente
+Ehi, guarda che bello	no	finestra	ignora
+Arrivo tra cinque minuti	si	finestra	ignora	dettatura senza «computer»: non scrivere
+#
+# --- Proposta «scrivilo»
+Scrivilo	si	proposta	scrivilo
+Sì, scrivilo	si	proposta	scrivilo
+No lascia stare	si	proposta	ignora|chiedi|agente
+#
+# --- Annullare quello che l'app ha scritto, memoria della conversazione
+Computer, cancella quello che hai scritto	si	nessuno	annulla-scritto
+Non era da scrivere	si	finestra	annulla-scritto
+Togli quello che hai scritto	si	finestra	annulla-scritto
+Computer, dimentica la conversazione	no	nessuno	dimentica-conversazione
+#
+# --- Corsia locale: un solo passo, cursore fuori da un campo di testo
+Computer, chiudi questa scheda	no	nessuno	locale|rapido
+Computer, riapri la scheda che ho chiuso	no	nessuno	locale
+Computer, metti a schermo intero	no	nessuno	locale|rapido
+Computer, ingrandisci la pagina	no	nessuno	locale
+Computer, rimpicciolisci	no	nessuno	locale
+Computer, apri una finestra privata	no	nessuno	locale
+Computer, vai alla scheda successiva	no	nessuno	locale|rapido
+Computer, apri Spotify	no	nessuno	rapido
+Computer, apri youtube	no	nessuno	locale|rapido|agente
+Computer, vai su youtube	no	nessuno	locale|rapido|agente
+Computer, aprimi il calendario	no	nessuno	locale|rapido
+Computer, torna alla pagina di prima	no	nessuno	locale|rapido
+Computer, ricarica la pagina	no	nessuno	rapido
+Computer, apri la barra degli indirizzi	no	nessuno	locale|rapido
+Computer, cerca nella pagina	no	nessuno	rapido
+#
+# --- Richieste per l'agente (più passi o lettura dello schermo)
+Computer, apri la prima mail	no	nessuno	agente
+Computer, rispondi a Marco che arrivo alle cinque	no	nessuno	agente
+Computer, cerca su YouTube una ninna nanna	no	nessuno	agente
+Computer, scrivi a Giulia che sono in ritardo	no	nessuno	agente
+Computer, aprimi la cartella Python qui nel notebook	no	nessuno	agente
+Computer, leggimi il titolo della pagina	no	nessuno	agente
+Computer, archivia questa mail	no	nessuno	agente
+Computer, scarica il PDF	no	nessuno	agente
+#
+# --- Conferme e numeri
+Sì	no	conferma	conferma
+No	no	conferma	conferma
+Dodici	no	numeri	numero
+Clicca il 7	no	numeri	numero

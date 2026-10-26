@@ -15,9 +15,14 @@ final class AgentTools {
     private let executor: Executor
     private var registry: [Int: (element: AXUIElement, label: String, role: String)] = [:]
     private var nextID = 1
+    /// First id of the current snapshot: smaller ids come from an older observe/screenshot (AD-8).
+    private var generationStart = 1
+    private(set) var generation = 0
     private var lastShot: WindowShot?
     private var confirmedUntil = Date.distantPast
     private(set) var callCount = 0
+    /// Text changes made during the current task, for the conversation memory (FR-8).
+    private(set) var changes: [String] = []
     private let maxCalls = 60
     var cancelled = false
 
@@ -29,9 +34,12 @@ final class AgentTools {
     func reset() {
         registry.removeAll()
         nextID = 1
+        generationStart = 1
+        generation = 0
         lastShot = nil
         confirmedUntil = .distantPast
         callCount = 0
+        changes = []
         cancelled = false
     }
 
@@ -48,6 +56,13 @@ final class AgentTools {
              "Click an element by id (from the latest observe) or at x/y image coordinates (from the latest screenshot). method: 'auto' (accessibility press, then real mouse click), 'mouse' (real mouse click, best for web pages and lists), 'double' (double click), 'right' (right click).",
              ["id": ["type": "integer"], "x": ["type": "number"], "y": ["type": "number"],
               "method": ["type": "string", "enum": ["auto", "mouse", "double", "right"]]]),
+        tool("click_many",
+             "Click several elements in one call (e.g. many checkboxes in a list), in order. Returns, for each id, whether it worked and the element's state afterwards (checked/unchecked when it is a checkbox). Prefer this to many single clicks. Ids must come from the latest observe/screenshot.",
+             ["ids": ["type": "array", "items": ["type": "integer"]],
+              "method": ["type": "string", "enum": ["auto", "mouse"]]], required: ["ids"]),
+        tool("replace_text",
+             "Replace text inside the focused text field, document or code/notebook cell, then verify it. Works also in web editors (Jupyter, Colab, code editors) where get_text sees nothing: click into the field or cell first. `find` must be the exact current text (a word, a line or more).",
+             ["find": ["type": "string"], "replace": ["type": "string"]], required: ["find", "replace"]),
         tool("type_text",
              "Type text at the caret (pasted, any length, any language). If id is given, that field is focused first.",
              ["text": ["type": "string"], "id": ["type": "integer"]], required: ["text"]),
@@ -150,8 +165,7 @@ final class AgentTools {
             var marks: [(Int, CGRect)] = []
             var legend: [String] = []
             if let (app, _) = AX.frontApp(), let window = AX.focusedWindow(in: app), let wf = AX.frame(window) {
-                registry.removeAll()
-                nextID = 1
+                newGeneration()
                 for c in AXTree.clickables(in: window, windowFrame: wf, limit: 150) {
                     let id = nextID
                     nextID += 1
@@ -176,10 +190,47 @@ final class AgentTools {
         case "click":
             return try await click(a)
 
+        case "click_many":
+            let ids = ((a["ids"] as? [Any]) ?? []).compactMap { Self.int($0) }
+            guard !ids.isEmpty else { return .error("Missing ids") }
+            let method = (a["method"] as? String) ?? "auto"
+            onProgress?("Clicco \(ids.count) elementi…")
+            var lines: [String] = []
+            for id in ids {
+                if cancelled { lines.append("[\(id)] not done: cancelled"); break }
+                let r = try await click(["id": id, "method": method], quiet: true)
+                let text = (r.content.first?["text"] as? String) ?? ""
+                var line = r.isError ? "[\(id)] ERROR: \(text)" : "[\(id)] «\(registry[id]?.label ?? "")» ok"
+                if !r.isError, let el = registry[id]?.element {
+                    try? await Task.sleep(for: .milliseconds(120))
+                    if let state = Self.toggleState(el) { line += ", now \(state)" }
+                }
+                lines.append(line)
+            }
+            return .text(lines.joined(separator: "\n") + "\nScreenshot to double-check visually if needed.")
+
+        case "replace_text":
+            guard let find = a["find"] as? String, let replace = a["replace"] as? String, !find.isEmpty else {
+                return .error("Missing find/replace")
+            }
+            onProgress?("Sostituisco il testo…")
+            let r = await executor.replaceText(find: find, with: replace)
+            switch r {
+            case .done(let how):
+                changes.append("«\(Self.short(find))» → «\(Self.short(replace))»")
+                return .text("Replaced and verified (\(how)).")
+            case .notFound(let seen):
+                return .error("«\(Self.short(find, max: 60))» not found in the focused field\(seen.isEmpty ? "" : " (it contains: «\(Self.short(seen, max: 200))»)"). Click into the right field or cell, or check the exact text.")
+            case .unverified(let how):
+                return .error("Typed the replacement (\(how)) but could not verify it: take a screenshot to check.")
+            case .noField:
+                return .error("No text field is focused: click into the field or cell first.")
+            }
+
         case "type_text":
             guard let text = a["text"] as? String else { return .error("Missing text") }
             if let id = Self.int(a["id"]) {
-                guard let item = registry[id] else { return .error("Unknown id \(id): call observe again.") }
+                guard let item = registry[id] else { return .error(staleMessage(id)) }
                 if AXUIElementSetAttributeValue(item.element, kAXFocusedAttribute as CFString, kCFBooleanTrue) != .success,
                    let f = AX.frame(item.element) {
                     await executor.mouseClick(at: CGPoint(x: f.midX, y: f.midY))
@@ -187,7 +238,8 @@ final class AgentTools {
                 try await Task.sleep(for: .milliseconds(150))
             }
             onProgress?("Scrivo…")
-            await executor.paste(text)
+            await executor.typeText(text)
+            changes.append("typed «\(Self.short(text))»")
             return .text("Typed \(text.count) characters.")
 
         case "press_keys":
@@ -209,8 +261,9 @@ final class AgentTools {
             }
             onProgress?(direction == "up" ? "Scorro su" : "Scorro giù")
             await executor.scroll(direction, amount: amount, at: point)
+            lastShot = nil // x/y from the old screenshot no longer match the screen
             try await Task.sleep(for: .milliseconds(250))
-            return .text("Scrolled \(direction) \(amount). IDs may have changed: observe again before clicking.")
+            return .text("Scrolled \(direction) \(amount). Element ids still work; x/y coordinates need a new screenshot.")
 
         case "open_app":
             guard let name = a["name"] as? String else { return .error("Missing name") }
@@ -281,17 +334,25 @@ final class AgentTools {
         case "edit_text":
             guard let text = a["text"] as? String, let mode = a["mode"] as? String else { return .error("Missing mode/text") }
             onProgress?("Modifico il testo…")
+            let before = ScreenContext.capture(includeLabels: false)
             if mode == "replace_selection" {
-                await executor.paste(text)
+                await executor.typeText(text)
+                changes.append("«\(Self.short(before.selectedText))» → «\(Self.short(text))»")
             } else {
                 try await executor.rewriteBeforeCursor(new: text)
+                changes.append("«\(Self.short(String(before.textBeforeCursor.suffix(160))))» → «\(Self.short(String(text.suffix(160))))»")
             }
             return .text("Text edited.")
 
         case "ask_user":
             guard let q = a["question"] as? String else { return .error("Missing question") }
-            guard let answer = await askUser?(q, false), !answer.isEmpty else {
-                return .text("(no answer from the user)")
+            // A bare «sì»/«no» does not answer an open question: ask once more (FR-9).
+            var answer = await askUser?(q, false)
+            if let a = answer, Self.isEmptyAnswer(a) {
+                answer = await askUser?("Mi serve la risposta precisa: \(q)", false)
+            }
+            guard let answer, !answer.isEmpty, !Self.isEmptyAnswer(answer) else {
+                return .text("No usable answer from the user. Do not guess: stop without acting and say you need the missing detail.")
             }
             return .text("User answered: \(answer)")
 
@@ -310,6 +371,32 @@ final class AgentTools {
     }
 
     private var confirmed: Bool { Date() < confirmedUntil }
+
+    /// A new snapshot: old ids stop working, numbering continues (ids are never reused in a task).
+    private func newGeneration() {
+        registry.removeAll()
+        generation += 1
+        generationStart = nextID
+    }
+
+    private func staleMessage(_ id: Int) -> String {
+        id < generationStart && id > 0
+            ? "Id \(id) comes from an older observe/screenshot and may now point elsewhere: observe or screenshot again."
+            : "Unknown id \(id): observe or screenshot first."
+    }
+
+    /// Checked/unchecked state of checkboxes, radios and switches after an action.
+    private static func toggleState(_ element: AXUIElement) -> String? {
+        let role = AX.role(element)
+        guard ["AXCheckBox", "AXRadioButton", "AXSwitch", "AXToggle", "AXCell", "AXRow", "AXMenuItem"].contains(role) else { return nil }
+        if let n = AX.value(element, kAXValueAttribute) as? NSNumber { return n.intValue == 0 ? "unchecked" : "checked" }
+        if let b = AX.value(element, kAXSelectedAttribute) as? Bool { return b ? "selected" : "not selected" }
+        // Web tables: the checkbox is often a child of the clicked cell.
+        for child in AX.children(element) where ["AXCheckBox", "AXRadioButton"].contains(AX.role(child)) {
+            if let n = AX.value(child, kAXValueAttribute) as? NSNumber { return n.intValue == 0 ? "unchecked" : "checked" }
+        }
+        return nil
+    }
 
     private func openProfile(browser: String, profile: String, url: String?) async throws -> Result {
         guard let appURL = executor.findApp(browser) else { return .error("Browser «\(browser)» not found.") }
@@ -347,8 +434,7 @@ final class AgentTools {
     private static let textRoles: Set<String> = ["AXStaticText", "AXHeading", "AXImage"]
 
     private func observe(query: String?) -> String {
-        registry.removeAll()
-        nextID = 1
+        newGeneration()
         guard let (app, running) = AX.frontApp() else { return "No frontmost application." }
         let window = AX.focusedWindow(in: app)
         let ctx = ScreenContext.capture(includeLabels: false)
@@ -442,18 +528,18 @@ final class AgentTools {
 
     // MARK: Click
 
-    private func click(_ a: [String: Any]) async throws -> Result {
+    private func click(_ a: [String: Any], quiet: Bool = false) async throws -> Result {
         let method = (a["method"] as? String) ?? "auto"
         var point: CGPoint?
         var label = ""
 
         if let id = Self.int(a["id"]) {
-            guard let item = registry[id] else { return .error("Unknown id \(id): call observe again.") }
+            guard let item = registry[id] else { return .error(staleMessage(id)) }
             label = item.label
             if Safety.isRiskyLabel(label), !confirmed {
                 return .error("Clicking «\(label)» may send or delete something: call confirm first.")
             }
-            onProgress?("Clicco «\(label)»")
+            if !quiet { onProgress?("Clicco «\(label)»") }
             if method == "auto" {
                 if AX.press(item.element) {
                     try await Task.sleep(for: .milliseconds(350))
@@ -498,6 +584,21 @@ final class AgentTools {
         if let d = v as? Double { return Int(d) }
         if let s = v as? String { return Int(s) }
         return nil
+    }
+
+    static func short(_ s: String, max: Int = 120) -> String {
+        let one = s.replacingOccurrences(of: "\n", with: " ⏎ ")
+        return one.count > max ? String(one.prefix(max)) + "…" : one
+    }
+
+    private static let emptyAnswers: Set<String> = [
+        "si", "no", "ok", "okay", "va bene", "certo", "boh", "non so", "si si", "no no", "esatto", "giusto", "vai",
+    ]
+
+    /// «sì», «ok», «boh»: no information for an open question.
+    static func isEmptyAnswer(_ text: String) -> Bool {
+        let n = Grammar.normalize(text)
+        return n.isEmpty || emptyAnswers.contains(n)
     }
 
     private static func compact(_ args: [String: Any]) -> String {

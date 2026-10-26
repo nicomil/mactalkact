@@ -29,11 +29,11 @@ final class Coordinator {
     var dryRun = false
     var onDryRun: ((String) -> Void)?
     private var sessionIdleTask: Task<Void, Never>?
-    /// After a command: a few seconds in which short fast commands ("giù", "ancora")
-    /// work without the wake phrase. Free speech still needs it.
-    private var followUpUntil = Date.distantPast
-    /// After the wake phrase alone ("Computer…"): the next sentence is for us, whatever it is.
-    private var armedUntil = Date.distantPast
+    /// Armed state, conversation window, recent interactions (AD-4).
+    let conversation = ConversationState()
+    private var conversationHint: Task<Void, Never>?
+    /// Sentences are routed one at a time, in order.
+    private var routeChain: Task<Void, Never>?
     private var pending: PendingPlan?
     /// Long dictation: everything said is typed until "fine" or a long silence.
     private var dictating = false
@@ -58,6 +58,7 @@ final class Coordinator {
         engine.onUtterance = { [weak self] text in self?.handleUtterance(text, addressed: false) }
         engine.onSpeechStart = { [weak self] in self?.dictationIdle?.cancel() }
         setupAgent()
+        agent.onAvailabilityChange = { [weak self] a in self?.availabilityChanged(a) }
         // Don't listen to our own voice.
         speaker.onSpeakingChange = { [weak self] speaking in
             guard let self else { return }
@@ -84,9 +85,72 @@ final class Coordinator {
                 setMode(.wakeWord)
             }
             prewarmAI()
+            prewarmRouter()
         } catch {
             hud.show(.error, "Riconoscimento vocale non disponibile", detail: error.localizedDescription, autoHide: 8)
             Log.error("prepare: \(error)")
+        }
+    }
+
+    // MARK: Router
+
+    private var routerCache: (key: String, router: IntentRouter)?
+
+    /// The router, rebuilt when the relevant settings change.
+    var router: IntentRouter {
+        let onDevice = settings.useOnDeviceRouter && OnDeviceClassifier.isAvailable
+        let key = "\(onDevice)"
+        if let c = routerCache, c.key == key { return c.router }
+        let classifier: IntentClassifier = onDevice ? OnDeviceClassifier() : RuleClassifier()
+        let proposer = LocalActionProposer.isAvailable ? LocalActionProposer() : nil
+        let executor = self.executor
+        let validator = LocalActionValidator { spoken in
+            executor.findApp(spoken).map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
+        }
+        let r = IntentRouter(classifier: classifier, proposer: proposer, validator: validator)
+        routerCache = (key, r)
+        Log.info("Router: classificatore \(classifier.name)\(proposer == nil ? "" : " + corsia locale")")
+        return r
+    }
+
+    private func prewarmRouter() {
+        let r = router
+        r.classifier.prewarm()
+        if settings.useLocalLane { r.proposer?.prewarm() }
+    }
+
+    private func routerState(pushToTalk: Bool) -> RouterState {
+        var s = RouterState()
+        switch mode {
+        case .off: s.listening = .pushToTalk
+        case .wakeWord: s.listening = .wakeWord
+        case .session: s.listening = .session
+        }
+        s.pushToTalk = pushToTalk
+        s.armed = conversation.isArmed
+        s.windowOpen = conversation.isWindowOpen && mode != .off
+        s.numbersVisible = numbers.isVisible
+        s.pendingConfirmation = pending != nil
+        s.proposedText = conversation.pendingProposal
+        s.wakePhrases = settings.wakePhraseList
+        s.aiAvailable = settings.aiAvailable
+        s.agentAvailability = settings.backend == .subscription ? agent.availability : .available
+        s.localLane = settings.useLocalLane
+        return s
+    }
+
+    private func availabilityChanged(_ a: AgentAvailability) {
+        onModeChange?()
+        switch a {
+        case .available:
+            hud.show(.info, "L'agente è tornato disponibile", autoHide: 3)
+            if settings.speakReplies { Task { await speaker.say("L'agente è di nuovo disponibile.") } }
+        case .paused(let until):
+            let f = DateFormatter()
+            f.dateFormat = "HH:mm"
+            Log.info("Modalità ridotta fino alle \(f.string(from: until))")
+        case .missing:
+            break
         }
     }
 
@@ -118,7 +182,7 @@ final class Coordinator {
         let how = mode == .off ? "Tieni premuto \(settings.pttKey.short) e rispondi" : "Rispondi a voce"
         hud.show(.confirm, question, detail: confirmation ? "\(how): «sì» conferma, altro annulla" : how, autoHide: 25)
         if settings.speakReplies { await speaker.say(question) }
-        armedUntil = Date().addingTimeInterval(25)
+        conversation.arm(seconds: 25)
         return await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
             agentQuestion?.resume(returning: nil)
             agentQuestion = c
@@ -251,7 +315,7 @@ final class Coordinator {
         }
         guard mode != .off, !busy, !live.isEmpty else { return }
         let wake = WakeWord.extract(live, phrases: settings.wakePhraseList)
-        let addressed = mode == .session || Date() < armedUntil || pending != nil || wake != nil
+        let addressed = mode == .session || conversation.isArmed || pending != nil || wake != nil
         if addressed {
             hud.show(.listening, wake.map { $0.isEmpty ? "Dimmi pure…" : $0 } ?? live)
         }
@@ -287,99 +351,177 @@ final class Coordinator {
             }
             return
         }
-        Task { await handle(text, addressed: addressed) }
+        let previous = routeChain
+        routeChain = Task { await previous?.value; await self.handle(text, addressed: addressed) }
     }
 
-    // MARK: Router
+    // MARK: Routing
 
+    /// Asks the router for a decision, logs it, and carries it out.
     private func handle(_ raw: String, addressed: Bool) async {
-        var text = raw
-        let armed = Date() < armedUntil
-        let inConversation = addressed || mode == .session || armed || pending != nil
-        armedUntil = .distantPast
-
-        // Numbers on screen: "12" / "clicca 12" picks one, no wake phrase needed.
-        if numbers.isVisible {
-            let spoken = WakeWord.extract(text, phrases: settings.wakePhraseList).flatMap { $0.isEmpty ? nil : $0 } ?? text
-            if let choice = Grammar.numberChoice(spoken) {
-                Log.speech(spoken)
-                await clickNumber(choice.number, method: choice.method)
-                return
-            }
+        guard !busy else { return }
+        let started = Date()
+        var cached: ScreenContext?
+        func screen() -> ScreenContext {
+            if let c = cached { return c }
+            let c = ScreenContext.capture(includeLabels: false)
+            cached = c
+            return c
         }
+        let decision = await router.decide(raw, editable: { screen().isEditable }, state: routerState(pushToTalk: addressed))
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        let what = decision.logsText ? "«\(raw.trimmingCharacters(in: .whitespacesAndNewlines))»" : "\(raw.count) caratteri"
+        Log.info("Instradamento: \(decision.label) · \(decision.reason) · \(ms) ms · \(what)")
+        if case .arm = decision {} else { conversation.disarm() }
 
-        if !inConversation {
-            // Continuous listening: speech containing the wake phrase is for us…
-            if let stripped = WakeWord.extract(text, phrases: settings.wakePhraseList) {
-                text = stripped
-                if text.isEmpty {
-                    armedUntil = Date().addingTimeInterval(8)
-                    Sound.listen()
-                    hud.show(.listening, "Dimmi pure…", autoHide: 8)
-                    return
-                }
-            } else if Date() < followUpUntil, Grammar.parse(text) != nil {
-                // …and so is a short fast command right after another command.
-            } else {
-                Log.debug("Ignorato (manca «\(settings.firstWakePhrase)»)")
-                if hud.model.phase == .listening { hud.hide() }
-                return
-            }
-        } else if let stripped = WakeWord.extract(text, phrases: settings.wakePhraseList), !stripped.isEmpty {
-            text = stripped
-        }
-
-        if mode != .off { followUpUntil = Date().addingTimeInterval(8) }
-        if mode == .session { restartSessionIdle() }
-        Log.speech(text)
         if dryRun {
-            switch Grammar.parse(text) {
-            case .type(let t)?:
-                onDryRun?("SCRIVEREI: «\(t)»")
-                startDictation(announce: false)
-                return
-            case .startDictation?:
-                onDryRun?("INIZIO DETTATURA")
-                startDictation(announce: true)
-                return
-            default:
-                break
-            }
-            let fast = Grammar.parse(text).map { "comando rapido \($0)" } ?? "dettatura o Claude"
-            onDryRun?("ESEGUIREI: «\(text)» → \(fast)")
-            hud.show(.success, text, detail: "(prova: \(fast))", autoHide: 2)
+            onDryRun?("DECISIONE: \(decision.label) · \(decision.reason) · \(ms) ms")
+            if case .ignore = decision {} else { hud.show(.success, raw, detail: "(prova: \(decision.label))", autoHide: 2) }
             return
         }
+        await perform(decision, screen: screen)
+    }
 
+    private func perform(_ decision: RouteDecision, screen: () -> ScreenContext) async {
+        switch decision {
+        case .ignore:
+            if hud.model.phase == .listening && !conversation.isWindowOpen { hud.hide() }
+            return
+        case .arm:
+            conversation.arm(seconds: 8)
+            Sound.listen()
+            hud.show(.listening, "Dimmi pure…", autoHide: 8)
+            return
+        case .number(let n, let method):
+            await clickNumber(n, method: method)
+            return
+        default:
+            break
+        }
+
+        if mode == .session { restartSessionIdle() }
         busy = true
         cancelRequested = false
-        defer { busy = false }
+        defer {
+            busy = false
+            if mode != .off { openConversation() }
+        }
 
-        if let p = pending {
+        switch decision {
+        case .confirmation(let yes):
+            guard let p = pending else { return }
             pending = nil
-            if Date() < p.expires && Grammar.isYes(text) {
+            if Date() < p.expires && yes {
                 await execute(p.plan, context: p.context)
             } else {
                 Sound.cancel()
                 hud.show(.info, "Annullato", autoHide: 1.5)
             }
-            return
-        }
-
-        if let macro = Memory.shared.macro(for: text) {
+        case .macro(let macro):
             await runMacro(macro)
-            return
-        }
-
-        if let cmd = Grammar.parse(text) {
+        case .fast(let cmd, let text):
             if case .stop = cmd {
-                if mode == .session { endSession() } else { hud.show(.info, "Ok", autoHide: 1) }
+                if mode == .session { endSession() } else { conversation.closeWindow(); hud.show(.info, "Ok", autoHide: 1) }
                 return
             }
             await runFast(cmd, original: text)
+            conversation.log.add(request: text, outcome: "comando rapido eseguito", app: screen().appName)
+        case .dictate(let text, _):
+            await dictateOnce(text, context: screen())
+        case .askToType(let text, let reason):
+            conversation.proposedText = (text, Date().addingTimeInterval(8))
+            Sound.confirm()
+            let detail = reason.contains("non è configurato") ? "Claude non è configurato · di' «scrivilo» per inserirlo"
+                                                               : "Di' «scrivilo» per inserirlo"
+            hud.show(.confirm, text, detail: detail, autoHide: 8)
+        case .typeProposed(let text):
+            conversation.proposedText = nil
+            await dictateOnce(text, context: ScreenContext.capture(includeLabels: false))
+        case .undoInsertion:
+            if let message = await executor.undoLastInsertion() {
+                done(message)
+            } else {
+                fail("Non ho scritto niente di recente")
+            }
+        case .closeConversation:
+            conversation.closeWindow()
+            hud.show(.info, "Ok, a dopo", autoHide: 1)
             return
+        case .forgetConversation:
+            conversation.log.clear()
+            conversation.closeWindow()
+            done("Conversazione dimenticata")
+            return
+        case .local(let action, let text):
+            await runLocal(action, text: text, app: screen().appName)
+        case .agent(let text, let deep, _):
+            await runSmart(text, deep: deep, context: screen())
+        case .reduced(_, let reason):
+            Sound.error()
+            hud.show(.info, reason.prefix(1).uppercased() + reason.dropFirst(),
+                     detail: "Dettatura, comandi rapidi e numeri funzionano", autoHide: 4)
+        case .ignore, .arm, .number:
+            break
         }
-        await runSmart(text)
+    }
+
+    /// After every response the conversation stays open for a while (FR-7).
+    private func openConversation() {
+        let seconds = settings.conversationSeconds
+        guard seconds > 0 else { return }
+        conversation.openWindow(seconds: seconds)
+        conversationHint?.cancel()
+        conversationHint = Task { @MainActor [weak self] in
+            // Let the response stay readable first, then show a discreet "still listening".
+            while let self, self.hud.isVisible, self.conversation.isWindowOpen {
+                try? await Task.sleep(for: .milliseconds(300))
+                if Task.isCancelled { return }
+            }
+            guard let self, !Task.isCancelled, !self.busy, self.conversation.isWindowOpen else { return }
+            let left = self.conversation.windowUntil.timeIntervalSinceNow
+            guard left > 1.5 else { return }
+            self.hud.show(.listening, "💬 Ti ascolto ancora", detail: "Continua senza «\(self.settings.firstWakePhrase)» · «basta così» per chiudere",
+                          autoHide: left)
+        }
+    }
+
+    /// One dictated sentence (not the long dictation mode).
+    private func dictateOnce(_ text: String, context: ScreenContext) async {
+        var out = text
+        if settings.cleanDictation, settings.aiAvailable {
+            hud.show(.thinking, text, detail: "Ripulisco il testo…")
+            out = (try? await planner.cleanDictation(text, appName: context.appName, model: settings.model,
+                                                     backend: settings.backend, apiKey: settings.apiKey)) ?? text
+        }
+        await executor.insertDictation(out, context: context)
+        done(out, detail: "✍️ Scritto · «cancella quello che hai scritto» per toglierlo")
+    }
+
+    /// Lane 2: a validated one-step action, run without the agent (FR-11).
+    private func runLocal(_ action: LocalAction, text: String, app: String) async {
+        do {
+            switch action {
+            case .keys(let combo, let label):
+                try executor.press(combo)
+                lastRepeatable = .keys(combo: combo, label: label, confirm: false)
+                done(label, detail: "⚡️ \(combo)")
+            case .openApp(let name):
+                let opened = try await executor.openApp(name)
+                done("Apro \(opened)", detail: "⚡️")
+            case .openURL(let url):
+                executor.openURL(url)
+                done("Apro \(url)", detail: "⚡️")
+            case .scroll(let direction):
+                await executor.scroll(direction, amount: 1)
+                lastRepeatable = .scroll(direction: direction, amount: 1)
+                done(direction == "up" ? "↑ Su" : "↓ Giù", detail: "⚡️")
+            }
+            conversation.log.add(request: text, outcome: "fatto in locale: \(action.summary)", app: app)
+        } catch {
+            // The local proposal did not work out: the agent can still try.
+            Log.info("Corsia locale fallita (\(error.localizedDescription)): passo all'agente")
+            await runSmart(text, deep: false, context: ScreenContext.capture(includeLabels: false))
+        }
     }
 
     // MARK: Dictation
@@ -408,7 +550,7 @@ final class Coordinator {
             dictationOpenedMic = false
             if mode == .off { Task { await engine.stopAudio() } }
         }
-        followUpUntil = Date().addingTimeInterval(8)
+        if mode != .off { conversation.openWindow(seconds: settings.conversationSeconds) }
         Log.info("Dettatura chiusa (\(reason))")
         hud.show(.success, "Dettatura chiusa", detail: reason, autoHide: 1.5)
     }
@@ -499,7 +641,7 @@ final class Coordinator {
             // "apri il file budget" or "clicca la seconda mail" may need real understanding.
             switch cmd {
             case .openApp where settings.aiAvailable, .click where settings.aiAvailable:
-                await runSmart(original)
+                await runSmart(original, deep: false, context: ScreenContext.capture(includeLabels: false))
             default:
                 fail(error.localizedDescription)
             }
@@ -532,34 +674,20 @@ final class Coordinator {
             hud.show(.working, step, detail: "Macro «\(macro.name)» · \(i + 1)/\(macro.steps.count)")
             if let cmd = Grammar.parse(step) {
                 await runFast(cmd, original: step)
-            } else if settings.aiAvailable && settings.backend == .subscription {
-                await runAgent(step, context: ScreenContext.capture(includeLabels: false))
+            } else if settings.aiAvailable {
+                await runSmart(step, deep: RouteHeuristics.isComplex(step), context: ScreenContext.capture(includeLabels: false))
             } else {
-                await runSmart(step)
+                fail("Non so eseguire «\(step)» senza Claude")
             }
             try? await Task.sleep(for: .milliseconds(500))
         }
         done("Macro «\(macro.name)» completata")
     }
 
-    // MARK: Lanes 2 and 3: dictation or Claude
+    // MARK: Lane 3: Claude
 
-    private func runSmart(_ text: String) async {
-        let ctx = ScreenContext.capture(includeLabels: false)
-        let looksLikeDictation = ctx.isEditable && !Grammar.startsWithActionVerb(text)
-
-        if looksLikeDictation || (!settings.aiAvailable && ctx.isEditable) {
-            var out = text
-            if settings.cleanDictation, settings.aiAvailable {
-                hud.show(.thinking, text, detail: "Ripulisco il testo…")
-                out = (try? await planner.cleanDictation(text, appName: ctx.appName, model: settings.model,
-                                                         backend: settings.backend, apiKey: settings.apiKey)) ?? text
-            }
-            await executor.insertDictation(out, context: ctx)
-            done(out, detail: "✍️ Scritto")
-            return
-        }
-
+    /// A request for Claude: the agent (subscription) or the single-shot planner (API key).
+    private func runSmart(_ text: String, deep: Bool, context ctx: ScreenContext) async {
         guard settings.aiAvailable else {
             fail("Non ho capito «\(text)»",
                  detail: settings.useAI ? "Claude non è configurato: controlla le impostazioni" : "")
@@ -567,7 +695,7 @@ final class Coordinator {
         }
 
         if settings.backend == .subscription {
-            await runAgent(text, context: ctx)
+            await runAgent(text, context: ctx, deep: deep)
             return
         }
 
@@ -578,17 +706,24 @@ final class Coordinator {
                                               backend: settings.backend, apiKey: settings.apiKey)
             guard !cancelRequested else { hud.show(.info, "Interrotto", autoHide: 1.2); return }
             await handlePlan(plan, context: full)
+            conversation.log.add(request: text, outcome: plan.hud, app: ctx.appName)
         } catch {
             fail("Claude non ha risposto", detail: error.localizedDescription)
         }
     }
 
-    /// Lane 3: the agent observes and acts until the request is done.
-    private func runAgent(_ text: String, context: ScreenContext) async {
-        hud.show(.thinking, text, detail: "🤖 Ci penso…")
+    /// The agent observes and acts until the request is done.
+    private func runAgent(_ text: String, context: ScreenContext, deep: Bool) async {
+        if case .paused = agent.availability {
+            hud.show(.info, "Agente in pausa", detail: "Dettatura, comandi rapidi e numeri funzionano", autoHide: 3)
+            return
+        }
+        hud.show(.thinking, text, detail: deep ? "🤖 Ci penso con calma…" : "🤖 Ci penso…")
         do {
             try await agent.start()
-            let answer = try await agent.run(text, context: context)
+            let answer = try await agent.run(text, context: context, recent: conversation.log.promptBlock, deep: deep)
+            conversation.log.add(request: text, outcome: answer.isEmpty ? "fatto" : answer, app: context.appName,
+                                 changes: agent.tools.changes)
             if cancelRequested {
                 hud.show(.info, "Interrotto", autoHide: 1.5)
             } else {
@@ -597,20 +732,22 @@ final class Coordinator {
             }
         } catch {
             let message = error.localizedDescription
+            conversation.log.add(request: text, outcome: "non riuscito: \(message.prefix(80))", app: context.appName,
+                                 changes: agent.tools.changes)
             if cancelRequested {
                 hud.show(.info, "Interrotto", autoHide: 1.5)
-            } else if message.localizedCaseInsensitiveContains("limit") {
-                // Subscription usage limit: say when it comes back, in plain words.
-                let reset = message.range(of: "resets ").map { String(message[$0.upperBound...]) } ?? ""
+            } else if case .paused(let until) = agent.availability {
+                // Subscription usage limit: reduced mode until it comes back (FR-14).
+                let f = DateFormatter()
+                f.dateFormat = "HH:mm"
                 fail("Limite della subscription raggiunto",
-                     detail: reset.isEmpty ? "Comandi rapidi e dettatura funzionano ancora" : "Riprende alle \(reset) · comandi rapidi e dettatura funzionano")
+                     detail: "Agente in pausa fino alle \(f.string(from: until)) · dettatura e comandi funzionano")
                 if settings.speakReplies { await speaker.say("Ho raggiunto il limite della subscription.") }
             } else {
                 fail("L'agente non ce l'ha fatta", detail: message)
                 if settings.speakReplies { await speaker.say("Non ci sono riuscito.") }
             }
         }
-        followUpUntil = Date().addingTimeInterval(8)
         agent.prewarm()
     }
 
@@ -623,7 +760,7 @@ final class Coordinator {
                 await execute(plan, context: context)
             }
         case "clarify":
-            armedUntil = Date().addingTimeInterval(15)
+            conversation.arm(seconds: 15)
             Sound.confirm()
             hud.show(.confirm, plan.hud, detail: "Rispondi riformulando la richiesta", autoHide: 8)
         default:
@@ -633,7 +770,6 @@ final class Coordinator {
 
     private func askConfirmation(_ plan: Plan, context: ScreenContext) {
         pending = PendingPlan(plan: plan, context: context, expires: Date().addingTimeInterval(20))
-        followUpUntil = Date().addingTimeInterval(20)
         Sound.confirm()
         let how = mode == .off ? "Tieni premuto \(settings.pttKey.short) e di' «sì»" : "Di' «sì»"
         hud.show(.confirm, plan.hud, detail: "\(how) per confermare, altro per annullare", autoHide: 20)
