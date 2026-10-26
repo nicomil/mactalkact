@@ -2,7 +2,7 @@
 title: MacTalkAct — Mi capisce al primo colpo, veloce e sempre disponibile
 status: final
 created: 2026-10-26
-updated: 2026-10-26
+updated: 2026-10-27
 inputs:
   - _bmad-output/planning-artifacts/research/analisi-limiti-mactalkact-2026-10-26.md
   - README.md
@@ -210,6 +210,53 @@ L'Agente dispone di uno strumento che sostituisce un testo dentro il campo attiv
 **Conseguenze (verificabili):**
 - In una cella Jupyter in Edge, la sostituzione di una riga riesce al primo tentativo e il testo finale corrisponde a quello richiesto.
 
+### 4.5 Gestione dell'app dalle impostazioni
+
+**Descrizione:** aggiunta il 27/10. Oggi la finestra delle impostazioni si apre vuota e molti comportamenti sono fissati nel codice (tempi, soglie, modelli, limiti dell'agente). Questa funzionalità non aggiunge capacità nuove: rende **visibile e modificabile** tutto ciò che l'app già fa, con valori predefiniti identici al comportamento attuale e un menu nella barra con gli interruttori più usati.
+
+#### FR-17: Finestra delle impostazioni utilizzabile
+
+Nico apre le impostazioni dal menu e vede una finestra con una barra laterale a sezioni (Ascolto, Conversazione, Comprensione, Agente, Voce e suoni, Numeri, Memoria e macro, Permessi, Stato e diagnostica).
+
+**Conseguenze (verificabili):**
+- La finestra si apre con il contenuto visibile, ridimensionabile, e ricorda l'ultima sezione aperta.
+
+#### FR-18: Tempi e soglie dell'ascolto
+
+Nico vede e modifica: silenzio che chiude una frase, sensibilità del rilevatore di voce, durata massima di una frase, silenzio che chiude la dettatura lunga, chiusura automatica della sessione a mani libere.
+
+**Conseguenze (verificabili):**
+- I valori predefiniti coincidono con quelli attuali (0,8 s; 0,006; 60 s; 4 s; 60 s).
+- Le modifiche valgono dalla frase successiva, senza riavviare l'app.
+
+#### FR-19: Tempi della conversazione
+
+Durata della Finestra di conversazione, dell'ascolto dopo «computer» da solo, della proposta «scrivilo», dell'attesa di una risposta all'Agente e di una conferma; numero e durata delle voci della Memoria di conversazione.
+
+#### FR-20: Comprensione e Agente
+
+Interruttori del Classificatore on-device e della Corsia locale, tempo massimo del classificatore, lunghezza massima per la Corsia locale; modelli rapido e profondo con il loro effort, numero massimo di passi e tempo massimo di un compito, finestra di validità di una conferma, accesso a Claude (abbonamento o chiave), ripulitura della dettatura.
+
+#### FR-21: Voce, suoni e messaggi
+
+Risposte a voce con volume e velocità, suoni sì/no e volume, durata dei messaggi dell'HUD (riuscita, risposta dell'Agente, errore).
+
+#### FR-22: Numeri, memoria e macro
+
+Durata e numero massimo dei numeri sullo schermo; elenco dei fatti e delle macro salvati con eliminazione e apertura del file; svuotamento della Memoria di conversazione.
+
+#### FR-23: Permessi e stato
+
+Stato di Accessibilità, Microfono e Registrazione schermo con il pulsante per concederli; disponibilità del modello Apple, comando `claude` trovato, stato dell'Agente (disponibile, in pausa fino alle…), file di log.
+
+#### FR-24: Menu ricco nella barra
+
+Il menu della barra mostra lo stato dell'Agente, un sottomenu «Impostazioni rapide» con gli interruttori principali e la durata della conversazione, e collegamenti diretti alle sezioni delle impostazioni.
+
+**Feature-specific NFRs:**
+- **NFR-6 Nessun cambiamento di comportamento.** Con i valori predefiniti l'app si comporta esattamente come prima; ogni sezione ha «Ripristina predefiniti».
+- **NFR-7 Effetto immediato.** Ogni modifica vale dall'azione successiva, senza riavvio.
+
 ## 5. Requisiti non funzionali trasversali
 
 - **NFR-1 Tempi.** Decisione del Router ≤ 0,8 s (90° percentile, modello caldo) dalla fine della Frase; azione della Corsia locale ≤ 1,5 s (90° percentile); primo strumento dell'Agente su richiesta semplice ≤ 3 s.
@@ -223,6 +270,7 @@ L'Agente dispone di uno strumento che sostituisce un testo dentro il campo attiv
 - Non si cambia il motore di riconoscimento vocale né il rilevatore di voce.
 - Non si aggiunge una parola di attivazione «sempre in ascolto» a basso consumo.
 - Non si sostituisce l'Agente Claude con il modello on-device per compiti a più passi.
+- La gestione dalle impostazioni (§4.5) non aggiunge capacità nuove all'app.
 - Non si risolvono in questo ciclo i limiti minori del README (profili del browser, verso dello scorrimento, ⌘[ e ⌘] con tastiera italiana).
 
 ## 7. Perimetro

@@ -7,8 +7,8 @@ paradigm: 'pipes-and-filters con orchestratore unico (Coordinator su MainActor)'
 scope: 'Instradamento delle Frasi, conversazione, Corsia locale, Agente efficiente (PRD 2026-10-26, FR-1…FR-16)'
 status: final
 created: '2026-10-26'
-updated: '2026-10-26'
-binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16]
+updated: '2026-10-27'
+binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-mactalkact-2026-10-26/prd.md
   - _bmad-output/planning-artifacts/research/analisi-limiti-mactalkact-2026-10-26.md
@@ -123,6 +123,18 @@ flowchart TD
 - **Prevents:** rifacimenti di parti che funzionano.
 - **Rule:** Coordinator e UI su `@MainActor`; l'Agente usa solo la CLI `claude` con la subscription; strumenti dell'Agente tramite il server MCP interno; conferme di `Safety` invariate; stringhe per l'utente in italiano, identificatori in inglese; build con `scripts/build-app.sh` e firma «MacTalkAct Local Signing».
 
+### AD-11 — Le impostazioni sono l'unica fonte dei comportamenti regolabili
+
+- **Binds:** FR-17…FR-24, NFR-7
+- **Prevents:** valori duplicati tra codice e impostazioni, modifiche che non hanno effetto finché l'app non riparte.
+- **Rule:** ogni tempo, soglia, modello o limite regolabile è una proprietà di `AppSettings`. I componenti la leggono nel momento in cui servono (`AppSettings.shared.x`) oppure, se vivono fuori dal main thread (rilevatore di voce), la ricevono con un aggiornamento esplicito quando cambia. Nessun componente la copia in una costante.
+
+### AD-12 — I predefiniti sono il comportamento di prima
+
+- **Binds:** NFR-6
+- **Prevents:** cambiamenti di comportamento introdotti di nascosto dalla finestra delle impostazioni.
+- **Rule:** i valori predefiniti stanno in un solo punto, `AppSettings.Defaults`, e coincidono con le costanti usate prima dell'Epic 3. Ogni sezione della finestra offre «Ripristina predefiniti» limitato alle proprie chiavi.
+
 ## Consistency Conventions
 
 | Concern | Convention |
@@ -154,6 +166,7 @@ Sources/MacTalkAct/
   IntentClassifier.swift   # protocollo, OnDeviceClassifier, RuleClassifier
   Conversation.swift       # ConversationState, ConversationLog, InsertionJournal
   LocalLane.swift          # LocalAction, LocalActionValidator
+  SettingsWindow.swift     # finestra impostazioni: barra laterale, sezioni, ripristino
 Tests/corpus/
   instradamento.tsv        # frase · editabile · decisione attesa · note
 ```
@@ -173,6 +186,8 @@ Tests/corpus/
 | FR-13 | `AgentRunner`, `Settings` | AD-6 |
 | FR-14 | `AgentRunner.availability`, `Coordinator`, `AppDelegate` (menu) | AD-7 |
 | FR-15, FR-16 | `AgentTools` | AD-8 |
+| FR-17…FR-23 | `SettingsWindow.swift`, `Settings.swift` | AD-11, AD-12 |
+| FR-24 | `AppDelegate` (menu) | AD-11 |
 
 ## Deferred
 

@@ -34,6 +34,14 @@ FR-13: Le richieste semplici usano un modello rapido con effort basso, quelle co
 FR-14: Al limite della subscription l'app entra in Modalità ridotta fino all'ora di ripresa, poi riprova e avvisa.
 FR-15: L'Agente può eseguire la stessa azione su più elementi numerati in una chiamata, con lo stato di ciascuno dopo l'azione.
 FR-16: L'Agente può sostituire testo in campi che non espongono il testo all'Accessibilità e verificare il risultato.
+FR-17: La finestra delle impostazioni si apre con il contenuto visibile, a sezioni con barra laterale, e ricorda l'ultima sezione.
+FR-18: Tempi e soglie dell'ascolto visibili e modificabili.
+FR-19: Tempi della conversazione e dimensione della Memoria di conversazione visibili e modificabili.
+FR-20: Comprensione e Agente (interruttori, modelli, effort, limiti, accesso a Claude) visibili e modificabili.
+FR-21: Voce, suoni e durata dei messaggi visibili e modificabili.
+FR-22: Numeri sullo schermo, fatti e macro (elenco, eliminazione, file) e svuotamento della Memoria di conversazione.
+FR-23: Stato dei permessi, del modello Apple, del comando claude, dell'Agente e del log.
+FR-24: Menu della barra con stato, impostazioni rapide e collegamenti alle sezioni.
 
 ### NonFunctional Requirements
 
@@ -42,6 +50,8 @@ NFR-2: Classificazione, Memoria di conversazione e Corpus restano sul Mac; la Ch
 NFR-3: Senza Classificatore on-device l'app funziona con regole deterministiche e non scrive Frasi ambigue.
 NFR-4: Accuratezza sul Corpus ≥ 95%, zero comandi o Chiacchiera decisi *Scrivi*.
 NFR-5: Le conferme esistenti per azioni rischiose restano obbligatorie in tutte le corsie.
+NFR-6: Con i valori predefiniti l'app si comporta come prima; ogni sezione ha «Ripristina predefiniti».
+NFR-7: Ogni modifica vale dall'azione successiva, senza riavvio.
 
 ### Additional Requirements
 
@@ -55,6 +65,8 @@ NFR-5: Le conferme esistenti per azioni rischiose restano obbligatorie in tutte 
 - AD-8: id degli elementi con numero di generazione; id scaduti rifiutati.
 - AD-9: log `Instradamento: <decisione> · <motivo> · <ms>` senza testo per *Ignora*.
 - AD-10: convenzioni esistenti ratificate (MainActor, CLI con subscription, server MCP interno, `Safety`, build e firma attuali).
+- AD-11: `AppSettings` unica fonte dei comportamenti regolabili, letti al momento dell'uso.
+- AD-12: predefiniti in `AppSettings.Defaults`, uguali alle costanti precedenti; ripristino per sezione.
 - Nessun template di partenza: progetto esistente (brownfield).
 
 ### UX Design Requirements
@@ -79,6 +91,14 @@ FR-13: Epic 2 — Modello proporzionato (Storia 2.2)
 FR-14: Epic 2 — Modalità ridotta (Storia 2.3)
 FR-15: Epic 2 — Azioni in blocco verificate (Storia 2.4)
 FR-16: Epic 2 — Modifica negli editor web (Storia 2.5)
+FR-17: Epic 3 — Finestra a sezioni (Storia 3.1)
+FR-18: Epic 3 — Ascolto (Storia 3.2)
+FR-19: Epic 3 — Conversazione (Storia 3.2)
+FR-20: Epic 3 — Comprensione e Agente (Storia 3.3)
+FR-21: Epic 3 — Voce e suoni (Storia 3.4)
+FR-22: Epic 3 — Numeri, memoria e macro (Storia 3.5)
+FR-23: Epic 3 — Permessi e stato (Storia 3.5)
+FR-24: Epic 3 — Menu della barra (Storia 3.6)
 
 ## Epic List
 
@@ -91,6 +111,12 @@ Nico parla in modo naturale, anche con il bambino o con altre persone nella stan
 
 I comandi a un passo vengono eseguiti in circa un secondo senza Claude, l'Agente usa il modello giusto per la difficoltà, lavora con precisione su liste ed editor web, e quando la subscription è esaurita l'app continua a funzionare in Modalità ridotta.
 **FRs covered:** FR-11, FR-12, FR-13, FR-14, FR-15, FR-16
+
+### Epic 3: Tutto sotto controllo dalle impostazioni
+
+Nico apre le impostazioni e trova, ordinato per sezioni, tutto ciò che l'app fa: può vederlo, cambiarlo e tornare ai valori di fabbrica, senza riavviare e senza che l'app cambi comportamento finché non tocca nulla. Dalla barra dei menu raggiunge in un clic gli interruttori più usati.
+**FRs covered:** FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24
+**Vincolo:** nessuna funzionalità nuova (NFR-6).
 
 **Perché due epic e non uno.** I due epic toccano in parte gli stessi file (`Coordinator.swift`, `AgentRunner.swift`), ma il confine è un confine di rischio: l'Epic 1 elimina il danno e si misura subito con SM-1; solo dopo una settimana d'uso con il nuovo Router ha senso tarare la Corsia locale e i modelli dell'Epic 2. L'Epic 2 si appoggia all'Epic 1 (Router e Classificatore on-device), mai il contrario.
 
@@ -352,3 +378,129 @@ So that «modifica la domanda» riesce al primo tentativo.
 **Given** un campo dove lo strumento non riesce
 **When** la verifica fallisce
 **Then** l'Agente lo dice chiaramente invece di dichiarare il compito riuscito
+
+## Epic 3: Tutto sotto controllo dalle impostazioni
+
+Ogni comportamento regolabile vive in `AppSettings` (AD-11) con predefiniti uguali a prima (AD-12); la finestra lo mostra per sezioni e il menu della barra offre le scorciatoie.
+
+### Story 3.1: Finestra delle impostazioni a sezioni
+
+As a Nico,
+I want che le impostazioni si aprano davvero, ordinate in sezioni con una barra laterale,
+So that trovo subito quello che cerco invece di una finestra vuota.
+
+**Acceptance Criteria:**
+
+**Given** il menu della barra
+**When** scelgo «Impostazioni…»
+**Then** si apre una finestra ridimensionabile (almeno 760×520) con barra laterale e contenuto visibile (FR-17)
+**And** le sezioni sono Ascolto, Conversazione, Comprensione, Agente, Voce e suoni, Numeri, Memoria e macro, Permessi, Stato e diagnostica
+
+**Given** ho chiuso la finestra sulla sezione Agente
+**When** la riapro
+**Then** si apre sulla sezione Agente
+
+**Given** le impostazioni già esistenti (tasto, frasi di attivazione, modelli, accesso a Claude, chiave API…)
+**When** apro la finestra
+**Then** le trovo nella sezione giusta e funzionano come prima
+
+### Story 3.2: Ascolto e conversazione regolabili
+
+As a Nico,
+I want vedere e cambiare i tempi dell'ascolto e della conversazione,
+So that posso adattare l'app a come parlo e a chi c'è nella stanza.
+
+**Acceptance Criteria:**
+
+**Given** la sezione Ascolto
+**When** la apro
+**Then** vedo silenzio di fine frase (0,8 s), sensibilità (0,006), rapporto sul rumore (4), durata massima di una frase (60 s), silenzio di fine dettatura lunga (4 s) e pausa della dettatura (1,6 s), chiusura della sessione a mani libere (60 s) (FR-18)
+**And** le soglie del rilevatore stanno in un gruppo «Avanzate» con una spiegazione
+
+**Given** cambio il silenzio di fine frase
+**When** pronuncio la frase successiva
+**Then** il rilevatore usa il nuovo valore senza riavvio (NFR-7, AD-11)
+
+**Given** la sezione Conversazione
+**When** la apro
+**Then** vedo finestra di conversazione (20 s), ascolto dopo «computer» (8 s), proposta «scrivilo» (8 s), attesa risposta all'Agente (25 s), attesa di una conferma (20 s), voci (5) e durata (10 min) della Memoria di conversazione (FR-19)
+
+**Given** una qualsiasi delle due sezioni
+**When** premo «Ripristina predefiniti»
+**Then** tornano i valori di prima solo per quella sezione (NFR-6, AD-12)
+
+### Story 3.3: Comprensione e Agente regolabili
+
+As a Nico,
+I want vedere come l'app capisce le frasi e come lavora l'Agente, e cambiarlo,
+So that decido io tra velocità, consumo della subscription e prudenza.
+
+**Acceptance Criteria:**
+
+**Given** la sezione Comprensione
+**When** la apro
+**Then** vedo i due interruttori (modello Apple, corsia locale), il tempo massimo del classificatore (1,5 s) e la lunghezza massima per la corsia locale (6 parole), con l'indicazione se il modello Apple è disponibile (FR-20)
+
+**Given** la sezione Agente
+**When** la apro
+**Then** vedo uso di Claude, accesso (abbonamento o chiave), percorso di `claude`, modelli rapido e profondo con il loro effort (basso, medio), passi massimi (60), turni massimi (40), tempo massimo di un compito (240 s), validità di una conferma (45 s), ripulitura della dettatura
+
+**Given** cambio l'effort del modello profondo
+**When** faccio la richiesta successiva
+**Then** il processo `claude` pronto viene sostituito con uno che usa il nuovo valore
+
+### Story 3.4: Voce, suoni e messaggi regolabili
+
+As a Nico,
+I want regolare voce, suoni e quanto restano visibili i messaggi,
+So that l'app non sveglia il bambino e i messaggi restano il tempo giusto.
+
+**Acceptance Criteria:**
+
+**Given** la sezione Voce e suoni
+**When** la apro
+**Then** vedo risposte a voce, volume (0,45) e velocità (1,05) della voce, suoni sì/no e volume (0,2), durata dei messaggi di riuscita (1,3 s), delle risposte dell'Agente (5 s) e degli errori (4 s) (FR-21)
+
+**Given** spengo i suoni
+**When** l'app conferma o segnala un errore
+**Then** non si sente nulla
+
+### Story 3.5: Numeri, memoria, permessi e stato
+
+As a Nico,
+I want vedere ciò che l'app ricorda, i permessi e lo stato di ogni componente,
+So that capisco perché qualcosa non funziona e tengo in ordine la memoria.
+
+**Acceptance Criteria:**
+
+**Given** la sezione Numeri
+**When** la apro
+**Then** vedo durata (30 s) e numero massimo (180) dei numeri sullo schermo (FR-22)
+
+**Given** la sezione Memoria e macro
+**When** la apro
+**Then** vedo l'elenco dei fatti e delle macro con un pulsante per eliminare ciascuno, «Apri il file» e «Svuota la memoria di conversazione»
+
+**Given** la sezione Permessi
+**When** la apro
+**Then** vedo lo stato aggiornato di Accessibilità, Microfono e Registrazione schermo e un pulsante per concederli (FR-23)
+
+**Given** la sezione Stato e diagnostica
+**When** la apro
+**Then** vedo modello Apple disponibile sì/no, comando `claude` trovato e percorso, stato dell'Agente (disponibile, in pausa fino alle…, non trovato), classificatore in uso, versione dell'app, e posso aprire il log e la guida
+
+### Story 3.6: Menu della barra ricco
+
+As a Nico,
+I want un menu nella barra con lo stato e gli interruttori più usati,
+So that cambio le cose al volo senza aprire la finestra.
+
+**Acceptance Criteria:**
+
+**Given** il menu della barra
+**When** lo apro
+**Then** vedo lo stato dell'Agente e del classificatore, le modalità di ascolto, un sottomenu «Impostazioni rapide» (modello Apple, corsia locale, modello rapido, risposte a voce, suoni, durata della conversazione) e un sottomenu «Impostazioni» con una voce per sezione (FR-24)
+
+**Given** spunto o tolgo un interruttore dal sottomenu
+**When** riapro le impostazioni
+**Then** la finestra mostra lo stesso valore (AD-11)
