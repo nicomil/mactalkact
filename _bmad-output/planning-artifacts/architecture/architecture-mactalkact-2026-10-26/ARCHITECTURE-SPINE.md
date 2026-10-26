@@ -1,0 +1,183 @@
+---
+name: 'MacTalkAct — Router, conversazione e corsie'
+type: architecture-spine
+purpose: build-substrate
+altitude: feature
+paradigm: 'pipes-and-filters con orchestratore unico (Coordinator su MainActor)'
+scope: 'Instradamento delle Frasi, conversazione, Corsia locale, Agente efficiente (PRD 2026-10-26, FR-1…FR-16)'
+status: final
+created: '2026-10-26'
+updated: '2026-10-26'
+binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16]
+sources:
+  - _bmad-output/planning-artifacts/prds/prd-mactalkact-2026-10-26/prd.md
+  - _bmad-output/planning-artifacts/research/analisi-limiti-mactalkact-2026-10-26.md
+  - Sources/MacTalkAct/
+companions: []
+---
+
+# Architecture Spine — MacTalkAct: Router, conversazione e corsie
+
+## Design Paradigm
+
+**Pipes-and-filters con un solo orchestratore.** Ogni Frase attraversa sempre la stessa catena; il Coordinator la fa scorrere ma non prende decisioni di instradamento.
+
+```mermaid
+flowchart LR
+  A[SpeechEngine<br/>Frase] --> R[IntentRouter<br/>RouteDecision]
+  R -->|Ignora| X[log]
+  R -->|Scrivi| E[Executor]
+  R -->|Comando rapido| E
+  R -->|Corsia locale| V[LocalActionValidator] --> E
+  R -->|Agente| G[AgentRunner<br/>CLI rapida o profonda] --> T[AgentTools] --> E
+  E --> J[InsertionJournal]
+  E --> H[HUD / Speaker]
+  G --> H
+```
+
+| Filtro | File (nuovi in corsivo) |
+| --- | --- |
+| Ascolto | `SpeechEngine.swift` (invariato) |
+| Instradamento | *`IntentRouter.swift`*, *`IntentClassifier.swift`*, `CommandGrammar.swift` |
+| Conversazione | *`Conversation.swift`* (ConversationState, ConversationLog, InsertionJournal) |
+| Corsia locale | *`LocalLane.swift`* (LocalAction, LocalActionValidator) |
+| Agente | `AgentRunner.swift`, `AgentTools.swift`, `ClaudeCLI.swift`, `MCPServer.swift` |
+| Esecuzione | `Executor.swift`, `Accessibility.swift`, `ScreenCapture.swift` |
+| Orchestrazione | `Coordinator.swift` |
+
+## Invariants & Rules
+
+```mermaid
+flowchart TD
+  Coordinator --> IntentRouter
+  Coordinator --> Conversation
+  Coordinator --> Executor
+  Coordinator --> AgentRunner
+  IntentRouter --> IntentClassifier
+  IntentRouter --> CommandGrammar
+  Coordinator --> LocalLane
+  LocalLane --> Executor
+  AgentRunner --> AgentTools
+  AgentTools --> Executor
+  IntentClassifier -.->|vietato| Executor
+  IntentRouter -.->|vietato| Executor
+```
+
+### AD-1 — Un solo Router, senza effetti
+
+- **Binds:** FR-1, FR-2, FR-3, FR-4, FR-5, FR-6
+- **Prevents:** euristiche di instradamento sparse tra `Coordinator.handle`, `runSmart` e `Grammar`, che oggi decidono in punti diversi e si contraddicono.
+- **Rule:** tutta la logica «scrivo, eseguo o ignoro» vive in `IntentRouter.decide(_ frase: String, screen: ScreenContext, state: RouterState) async -> RouteDecision`. `RouterState` è un valore (armato, finestra aperta, numeri visibili, dettatura, domanda dell'Agente in attesa). Il Router non chiama Executor, HUD o AgentRunner. Il Coordinator esegue la `RouteDecision` senza riesaminare il testo.
+
+### AD-2 — Il Classificatore on-device propone, non esegue
+
+- **Binds:** FR-3, FR-4, FR-11, FR-13, NFR-3
+- **Prevents:** azioni eseguite su un'uscita non verificata del modello locale (il test B dell'analisi ha prodotto 4 proposte errate su 12).
+- **Rule:** il Classificatore è il protocollo `IntentClassifier` con due implementazioni: `OnDeviceClassifier` (FoundationModels, generazione vincolata con struct `@Generable` e `@Guide(.anyOf)`) e `RuleClassifier` (deterministico, risponde «incerto» quando non sa). Timeout 1,0 s, poi esito «incerto». L'uscita è solo dati (`Classification`); non tocca lo schermo.
+
+### AD-3 — Proposta locale → Validatore → Executor
+
+- **Binds:** FR-11, FR-12, NFR-5
+- **Prevents:** combinazioni di tasti inventate o rischiose eseguite dalla Corsia locale.
+- **Rule:** una `LocalAction` raggiunge `Executor` solo tramite `LocalActionValidator.validate(_:) -> LocalAction?`. Elenco consentito di tasti, app trovate con `Executor.findApp`, URL con schema o dominio noto; tutto ciò che `Safety.isRiskyKeys` segnala è respinto. Respinta → `RouteDecision.agent`.
+
+### AD-4 — Stato di conversazione solo in RAM, posseduto dal Coordinator
+
+- **Binds:** FR-7, FR-8, FR-9, NFR-2
+- **Prevents:** finestre e memorie parallele (oggi `armedUntil` e `followUpUntil` sparsi) e dati di conversazione su disco.
+- **Rule:** `ConversationState` (scadenza della Finestra di conversazione, `ConversationLog` circolare di 5 voci, scadenza 10 minuti) è una proprietà del Coordinator su `@MainActor`. Il Router lo legge tramite `RouterState`; solo il Coordinator lo modifica. All'Agente arriva serializzato in un blocco `<recent>` del messaggio; il testo letto dallo schermo resta marcato come non affidabile, come oggi.
+
+### AD-5 — Ogni Inserimento passa dal registro
+
+- **Binds:** FR-10
+- **Prevents:** un «cancella quello che hai scritto» che rimuove testo dell'utente.
+- **Rule:** ogni testo scritto da `Executor` (dettatura, `type_text`, Corsia locale) registra in `InsertionJournal` app (pid), ruolo e identità dell'elemento, testo inserito e testo prima del cursore dopo l'inserimento. L'annullamento cancella solo se elemento e testo prima del cursore coincidono; altrimenti usa Cmd+Z e lo dichiara.
+
+### AD-6 — Due livelli di Agente, una sola esecuzione
+
+- **Binds:** FR-13
+- **Prevents:** due processi `claude` che agiscono insieme sullo schermo.
+- **Rule:** `AgentRunner` possiede due `ClaudeCLI.Config` (rapida: modello rapido, effort `low`; profonda: modello configurato, effort `medium`), entrambe riscaldate in anticipo. `RouteDecision.agent(complexity:)` sceglie il livello. Un solo `run` attivo alla volta; la seconda richiesta attende o viene rifiutata con un messaggio.
+
+### AD-7 — La disponibilità dell'Agente ha un solo proprietario
+
+- **Binds:** FR-14
+- **Prevents:** avvii della CLI durante il limite della subscription e messaggi incoerenti.
+- **Rule:** `AgentRunner.availability` (`available`, `paused(until: Date)`, `missing`) è l'unica fonte. Il Router la riceve in `RouterState` e, se non è `available`, produce `RouteDecision.reduced(reason:)` invece di `.agent`. Solo `AgentRunner` cambia lo stato, in base agli errori della CLI e a un timer di ripresa.
+
+### AD-8 — Gli strumenti agiscono su id con generazione
+
+- **Binds:** FR-15, FR-16
+- **Prevents:** clic sull'elemento sbagliato dopo uno scorrimento o un cambio di pagina.
+- **Rule:** il registro degli elementi di `AgentTools` ha un numero di generazione che aumenta a ogni `observe`, `screenshot` e `scroll`. Gli id portano la generazione; uno strumento che riceve un id scaduto risponde con errore e invita a osservare di nuovo. Le coordinate restano un ripiego e ogni risposta a un clic per coordinate chiede una verifica.
+
+### AD-9 — Il log delle decisioni rispetta la privacy
+
+- **Binds:** FR-1, NFR-2
+- **Prevents:** conversazioni private salvate in `~/Library/Logs/MacTalkAct.log`.
+- **Rule:** una riga per Frase nel formato `Instradamento: <decisione> · <motivo> · <ms>`; il testo compare solo per *Scrivi*, *Comando rapido*, *Corsia locale* e *Agente*. Per *Ignora* si registra la lunghezza.
+
+### AD-10 — Convenzioni esistenti ratificate [ADOPTED]
+
+- **Binds:** all
+- **Prevents:** rifacimenti di parti che funzionano.
+- **Rule:** Coordinator e UI su `@MainActor`; l'Agente usa solo la CLI `claude` con la subscription; strumenti dell'Agente tramite il server MCP interno; conferme di `Safety` invariate; stringhe per l'utente in italiano, identificatori in inglese; build con `scripts/build-app.sh` e firma «MacTalkAct Local Signing».
+
+## Consistency Conventions
+
+| Concern | Convention |
+| --- | --- |
+| Nomi | Tipi del dominio come nel Glossario del PRD: `RouteDecision`, `Classification`, `ConversationState`, `ConversationLog`, `InsertionJournal`, `LocalAction`, `LocalActionValidator`. |
+| `RouteDecision` | `enum` con casi `ignore(reason)`, `dictate(text)`, `fast(Command)`, `local(LocalAction)`, `agent(text, complexity)`, `reduced(reason)`, `askToType(text)`. Ogni caso ha un `reason: String` leggibile. |
+| Tempi | Ogni attesa ha un timeout esplicito: classificatore 1,0 s, Finestra di conversazione 20 s, «scrivilo» 8 s, Memoria di conversazione 10 min. Valori in `AppSettings` quando l'utente può volerli cambiare. |
+| Errori | Messaggi all'utente tramite `fail(_:detail:)` del Coordinator; nessun componente nuovo mostra l'HUD direttamente. |
+| Log | `Log.info` per le decisioni, `Log.debug` per i dettagli del classificatore; mai testo di Chiacchiera. |
+| Test | Ogni nuova regola del Router aggiunge almeno una riga al Corpus; `--route-test` deve passare prima di ogni build distribuita. |
+
+## Stack
+
+| Name | Version |
+| --- | --- |
+| Swift (modalità linguaggio 5) | 6.4 |
+| macOS (piattaforma minima del pacchetto) | 27.0 |
+| FoundationModels (framework di sistema, verificato con una build locale il 26/10) | macOS 27.0.1 |
+| Speech / SpeechAnalyzer | macOS 27.0.1 |
+| Claude Code CLI | 2.1.310 |
+| Modello Agente profondo | claude-opus-5-5 |
+| Modello Agente rapido | claude-sonnet-5-5 |
+
+## Structural Seed
+
+```text
+Sources/MacTalkAct/
+  IntentRouter.swift       # RouterState, RouteDecision, IntentRouter.decide
+  IntentClassifier.swift   # protocollo, OnDeviceClassifier, RuleClassifier
+  Conversation.swift       # ConversationState, ConversationLog, InsertionJournal
+  LocalLane.swift          # LocalAction, LocalActionValidator
+Tests/corpus/
+  instradamento.tsv        # frase · editabile · decisione attesa · note
+```
+
+`DebugCLI.swift` aggiunge `--route-test [file]`, che esegue il Router sul Corpus senza microfono né schermo e termina con codice ≠ 0 al primo comando deciso *Scrivi*.
+
+## Capability → Architecture Map
+
+| Capability | Lives in | Governed by |
+| --- | --- | --- |
+| FR-1, FR-2, FR-4, FR-5 | `IntentRouter` | AD-1, AD-9 |
+| FR-3 | `IntentClassifier` | AD-2 |
+| FR-6 | `Tests/corpus`, `DebugCLI` | AD-1, convenzione Test |
+| FR-7, FR-8, FR-9 | `Conversation`, `Coordinator`, `AgentRunner` (blocco `<recent>`) | AD-4 |
+| FR-10 | `InsertionJournal`, `Executor` | AD-5 |
+| FR-11, FR-12 | `LocalLane`, `Executor` | AD-2, AD-3 |
+| FR-13 | `AgentRunner`, `Settings` | AD-6 |
+| FR-14 | `AgentRunner.availability`, `Coordinator`, `AppDelegate` (menu) | AD-7 |
+| FR-15, FR-16 | `AgentTools` | AD-8 |
+
+## Deferred
+
+- **Distribuzione e aggiornamenti:** resta la build locale firmata con il certificato proprio; nessun aggiornamento automatico finché l'utente è uno solo.
+- **Persistenza della Memoria di conversazione:** esclusa per privacy; da riconsiderare solo se l'uso mostra il bisogno di riprendere il giorno dopo.
+- **Coda delle richieste durante la Modalità ridotta:** fuori perimetro del PRD.
+- **Classificatore personalizzato (adapter addestrato):** si valuta solo se l'accuratezza sul Corpus resta sotto il 95% con le sole istruzioni.
+- **Test automatici dell'interfaccia:** le verifiche sullo schermo restano manuali con i comandi di debug esistenti.

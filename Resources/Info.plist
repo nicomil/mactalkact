@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>it</string>
+	<key>CFBundleExecutable</key>
+	<string>MacTalkAct</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.mactalkact</string>
+	<key>CFBundleName</key>
+	<string>MacTalkAct</string>
+	<key>CFBundleDisplayName</key>
+	<string>MacTalkAct</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>27.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MacTalkAct ascolta la tua voce per scrivere e comandare il Mac al posto delle mani.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>MacTalkAct trascrive la tua voce direttamente sul Mac per eseguire i comandi.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>

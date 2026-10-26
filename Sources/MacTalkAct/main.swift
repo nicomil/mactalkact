@@ -1,0 +1,185 @@
+import AppKit
+
+let arguments = CommandLine.arguments
+
+func argument(after flag: String) -> String? {
+    guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
+    return arguments[i + 1]
+}
+
+if arguments.contains("--selftest") {
+    let ok = MainActor.assumeIsolated { DebugCLI.selfTest() }
+    exit(ok ? 0 : 1)
+}
+
+if let path = argument(after: "--transcribe") {
+    Task { @MainActor in
+        await DebugCLI.transcribe(path)
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if let path = argument(after: "--stream-test") {
+    Task { @MainActor in
+        await DebugCLI.streamTest(path)
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if let seconds = argument(after: "--mic-test") {
+    Task { @MainActor in
+        await DebugCLI.micTest(Double(seconds) ?? 10)
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if let seconds = argument(after: "--wake-test") {
+    MainActor.assumeIsolated {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        let hud = HUDController()
+        let coordinator = Coordinator(hud: hud, settings: AppSettings.shared)
+        coordinator.dryRun = true
+        coordinator.onDryRun = { print($0) }
+        Task { @MainActor in
+            await coordinator.prepare()
+            coordinator.setMode(.wakeWord)
+            print("Ascolto continuo attivo per \(seconds) s")
+            try? await Task.sleep(for: .seconds(Double(seconds) ?? 20))
+            exit(0)
+        }
+        withExtendedLifetime(coordinator) { app.run() }
+    }
+}
+
+if let request = argument(after: "--agent-test") {
+    Task { @MainActor in
+        let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+        agent.tools.onProgress = { print("  · \($0)") }
+        agent.tools.askUser = { q, _ in print("  ? \(q) → (test: nessuna risposta)"); return nil }
+        do {
+            try await agent.start()
+            agent.prewarm()
+            try await Task.sleep(for: .seconds(4))
+            let started = Date()
+            let answer = try await agent.run(request, context: ScreenContext.capture(includeLabels: false))
+            print(String(format: "Risposta (%.1fs, %d chiamate): %@", Date().timeIntervalSince(started), agent.tools.callCount, answer))
+        } catch {
+            print("Errore: \(error.localizedDescription)")
+        }
+        agent.shutdown()
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if arguments.contains("--observe-stats") {
+    // Debug: how much of the frontmost window the agent can see (no content printed).
+    Task { @MainActor in
+        AX.debugTargetBundle = argument(after: "--observe-stats").flatMap { $0.hasPrefix("-") ? nil : $0 }
+        let tools = AgentTools(executor: Executor())
+        let customQuery = ProcessInfo.processInfo.environment["MTA_QUERY"]
+        for query in (customQuery.map { [$0] } ?? [nil, "a"]) as [String?] {
+            let started = Date()
+            let r = await tools.call("observe", query.map { ["query": $0] } ?? [:])
+            let text = (r.content.first?["text"] as? String) ?? ""
+            let items = text.split(separator: "\n").filter { $0.hasPrefix("[") }
+            var roles: [String: Int] = [:]
+            for line in items {
+                let role = line.split(separator: " ").dropFirst().first.map(String.init) ?? "?"
+                roles[role, default: 0] += 1
+            }
+            print(String(format: "observe%@: %d elementi in %.2fs, cliccabili %d", query == nil ? "" : "(query)",
+                         items.count, Date().timeIntervalSince(started), items.filter { $0.contains("]*") }.count))
+            print("  ruoli: \(roles.sorted { $0.value > $1.value }.prefix(8).map { "\($0.key)=\($0.value)" }.joined(separator: ", "))")
+            print("  " + (text.split(separator: "\n").last.map(String.init) ?? ""))
+        }
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if let name = argument(after: "--activate-test") {
+    // Debug: only brings an app to the front (no typing, no clicks), then goes back.
+    Task { @MainActor in
+        let before = AX.frontmostApplication()
+        let ex = Executor()
+        let started = Date()
+        let opened = (try? await ex.openApp(name)) ?? "?"
+        let now = AX.frontmostApplication()?.localizedName ?? "?"
+        print(String(format: "Richiesto %@ → in primo piano: %@ (%.1fs)", opened, now, Date().timeIntervalSince(started)))
+        if let before { await ex.bringToFront(before) }
+        print("Tornato a: \(AX.frontmostApplication()?.localizedName ?? "?")")
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if arguments.contains("--phase3-test") {
+    // Debug: memory/macro round-trip (temporary macro, removed at the end), profiles, numbers.
+    Task { @MainActor in
+        let mem = Memory.shared
+        mem.saveMacro(name: "prova selftest", steps: ["apri Safari", "giù"])
+        let m = mem.macro(for: "Esegui la macro prova selftest")
+        print("macro salvata e trovata: \(m?.steps == ["apri Safari", "giù"])")
+        print("macro per nome diretto: \(mem.macro(for: "Prova selftest.") != nil)")
+        print("macro eliminata: \(mem.deleteMacro("prova selftest"))")
+        print("file memoria: \(mem.fileURL.path)")
+        for b in ["Microsoft Edge", "Google Chrome", "Brave"] {
+            Log.info("TEST profili \(b): \(BrowserProfiles.list(browser: b).count)")
+        }
+        AX.debugTargetBundle = "com.microsoft.edgemac"
+        let overlay = NumberOverlay()
+        let started = Date()
+        let n = overlay.show(timeout: 1)
+        overlay.hide()
+        print(String(format: "numeri su Edge: %d (%.2fs)", n, Date().timeIntervalSince(started)))
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if let out = argument(after: "--shot-test") {
+    // Debug: numbered screenshot of a given app's window (env MTA_TARGET), saved to a file.
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        AX.debugTargetBundle = ProcessInfo.processInfo.environment["MTA_TARGET"] ?? "com.apple.calculator"
+        let tools = AgentTools(executor: Executor())
+        let r = await tools.call("screenshot", [:])
+        if let b64 = r.content.first?["data"] as? String, let data = Data(base64Encoded: b64) {
+            try? data.write(to: URL(fileURLWithPath: out))
+            Log.info("TEST screenshot salvato: \(out) (\(data.count) byte)")
+        }
+        Log.info("TEST screenshot nota: \((r.content.last?["text"] as? String)?.prefix(300) ?? "-")")
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if let utterance = argument(after: "--plan") {
+    Task { @MainActor in
+        await DebugCLI.plan(utterance)
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if arguments.contains("--context") {
+    Task { @MainActor in
+        try? await Task.sleep(for: .seconds(3))
+        print(ScreenContext.capture(includeLabels: true).promptDescription)
+        exit(0)
+    }
+    dispatchMain()
+}
+
+MainActor.assumeIsolated {
+    let app = NSApplication.shared
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.setActivationPolicy(.accessory)
+    withExtendedLifetime(delegate) { app.run() }
+}
