@@ -17,6 +17,7 @@ struct RouterState {
     var aiAvailable = true
     var agentAvailability: AgentAvailability = .available
     var localLane = true
+    var localLaneMaxWords = 6
 }
 
 /// Is the agent usable right now? Owned by AgentRunner (AD-7).
@@ -201,7 +202,7 @@ final class IntentRouter {
     private func commandRoute(_ text: String, editable: () -> Bool, state: RouterState, why: String) async -> RouteDecision {
         // Only outside text fields: there, edits are about meaning and belong to the agent.
         // Long sentences are never one step: skip the model and save ~1 s for the agent.
-        if state.localLane, Grammar.normalize(text).split(separator: " ").count <= 6, !editable(),
+        if state.localLane, Grammar.normalize(text).split(separator: " ").count <= state.localLaneMaxWords, !editable(),
            let proposer, let proposal = await proposer.propose(text),
            let action = validator.validate(proposal, sentence: text) {
             return .local(action, text: text)

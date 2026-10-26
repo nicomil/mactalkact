@@ -41,8 +41,8 @@ final class ConversationLog {
     }
 
     private(set) var entries: [Entry] = []
-    let maxEntries = 5
-    let maxAge: TimeInterval = 10 * 60
+    var maxEntries: Int { max(1, AppSettings.shared.conversationMemoryCount) }
+    var maxAge: TimeInterval { AppSettings.shared.conversationMemoryMinutes * 60 }
 
     func add(request: String, outcome: String, app: String, changes: [String] = []) {
         expire()

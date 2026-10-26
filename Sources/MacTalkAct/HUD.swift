@@ -153,15 +153,17 @@ struct LevelBars: View {
     }
 }
 
-/// Short, quiet sounds: a sleeping baby should not wake up.
+/// Short, quiet sounds: a sleeping baby should not wake up. Volume and on/off from the settings.
+@MainActor
 enum Sound {
-    private static func play(_ name: String, volume: Float = 0.25) {
-        guard let s = NSSound(named: NSSound.Name(name))?.copy() as? NSSound else { return }
-        s.volume = volume
+    private static func play(_ name: String) {
+        let settings = AppSettings.shared
+        guard settings.soundsEnabled, let s = NSSound(named: NSSound.Name(name))?.copy() as? NSSound else { return }
+        s.volume = Float(settings.soundsVolume)
         s.play()
     }
-    static func listen() { play("Tink", volume: 0.2) }
-    static func confirm() { play("Glass", volume: 0.2) }
-    static func error() { play("Basso", volume: 0.2) }
-    static func cancel() { play("Pop", volume: 0.2) }
+    static func listen() { play("Tink") }
+    static func confirm() { play("Glass") }
+    static func error() { play("Basso") }
+    static func cancel() { play("Pop") }
 }

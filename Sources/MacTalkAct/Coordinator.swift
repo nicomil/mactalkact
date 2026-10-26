@@ -40,7 +40,6 @@ final class Coordinator {
     private var dictationOpenedMic = false
     private var dictationIdle: Task<Void, Never>?
     private var dictationChain: Task<Void, Never>?
-    private let dictationTimeout: Duration = .seconds(4)
     private var lastRepeatable: Command?
     private var busy = false
     private var cancelRequested = false
@@ -69,6 +68,14 @@ final class Coordinator {
             }
         }
         engine.onLevel = { [weak self] level in self?.hud.model.level = level }
+        applyListeningSettings()
+    }
+
+    /// Pushes the voice-detector settings to the audio thread (AD-11). Called at start and on every change.
+    func applyListeningSettings() {
+        engine.configureVAD(minStartRMS: Float(settings.vadMinStartRMS), noiseFactor: Float(settings.vadNoiseFactor),
+                            endSilence: dictating ? settings.dictationEndSilence : settings.vadEndSilence,
+                            maxSegment: settings.vadMaxSegment)
     }
 
     func prepare() async {
@@ -99,9 +106,10 @@ final class Coordinator {
     /// The router, rebuilt when the relevant settings change.
     var router: IntentRouter {
         let onDevice = settings.useOnDeviceRouter && OnDeviceClassifier.isAvailable
-        let key = "\(onDevice)"
+        let timeout = settings.classifierTimeout
+        let key = "\(onDevice)-\(timeout)"
         if let c = routerCache, c.key == key { return c.router }
-        let classifier: IntentClassifier = onDevice ? OnDeviceClassifier() : RuleClassifier()
+        let classifier: IntentClassifier = onDevice ? OnDeviceClassifier(timeout: .milliseconds(Int(timeout * 1000))) : RuleClassifier()
         let proposer = LocalActionProposer.isAvailable ? LocalActionProposer() : nil
         let executor = self.executor
         let validator = LocalActionValidator { spoken in
@@ -137,6 +145,7 @@ final class Coordinator {
         s.aiAvailable = settings.aiAvailable
         s.agentAvailability = settings.backend == .subscription ? agent.availability : .available
         s.localLane = settings.useLocalLane
+        s.localLaneMaxWords = settings.localLaneMaxWords
         return s
     }
 
@@ -181,14 +190,15 @@ final class Coordinator {
     private func askByVoice(_ question: String, confirmation: Bool) async -> String? {
         Sound.confirm()
         let how = mode == .off ? "Tieni premuto \(settings.pttKey.short) e rispondi" : "Rispondi a voce"
-        hud.show(.confirm, question, detail: confirmation ? "\(how): «sì» conferma, altro annulla" : how, autoHide: 25)
+        let wait = settings.agentQuestionSeconds
+        hud.show(.confirm, question, detail: confirmation ? "\(how): «sì» conferma, altro annulla" : how, autoHide: wait)
         if settings.speakReplies { await speaker.say(question) }
-        conversation.arm(seconds: 25)
+        conversation.arm(seconds: wait)
         return await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
             agentQuestion?.resume(returning: nil)
             agentQuestion = c
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(25))
+                try? await Task.sleep(for: .seconds(wait))
                 self?.answerAgent(nil)
             }
         }
@@ -252,7 +262,7 @@ final class Coordinator {
     private func restartSessionIdle() {
         sessionIdleTask?.cancel()
         sessionIdleTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(60))
+            try? await Task.sleep(for: .seconds(AppSettings.shared.sessionIdleSeconds))
             guard !Task.isCancelled, let self, self.mode == .session else { return }
             self.endSession()
         }
@@ -395,9 +405,9 @@ final class Coordinator {
             if hud.model.phase == .listening && !conversation.isWindowOpen { hud.hide() }
             return
         case .arm:
-            conversation.arm(seconds: 8)
+            conversation.arm(seconds: settings.armedSeconds)
             Sound.listen()
-            hud.show(.listening, "Dimmi pure…", autoHide: 8)
+            hud.show(.listening, "Dimmi pure…", autoHide: settings.armedSeconds)
             return
         case .number(let n, let method):
             await clickNumber(n, method: method)
@@ -438,11 +448,11 @@ final class Coordinator {
         case .dictate(let text, _):
             await dictateOnce(text, context: screen())
         case .askToType(let text, let reason):
-            conversation.proposedText = (text, Date().addingTimeInterval(8))
+            conversation.proposedText = (text, Date().addingTimeInterval(settings.proposalSeconds))
             Sound.confirm()
             let detail = reason.contains("non è configurato") ? "Claude non è configurato · di' «scrivilo» per inserirlo"
                                                                : "Di' «scrivilo» per inserirlo"
-            hud.show(.confirm, text, detail: detail, autoHide: 8)
+            hud.show(.confirm, text, detail: detail, autoHide: settings.proposalSeconds)
         case .typeProposed(let text):
             conversation.proposedText = nil
             await dictateOnce(text, context: ScreenContext.capture(includeLabels: false))
@@ -540,7 +550,7 @@ final class Coordinator {
     /// microphone stays on hands-free until the dictation ends.
     private func startDictation(announce: Bool) {
         dictating = true
-        engine.setEndSilence(1.6)
+        engine.setEndSilence(settings.dictationEndSilence)
         if mode == .off {
             dictationOpenedMic = true
             Task { try? await engine.startAudio(vad: true) }
@@ -555,7 +565,7 @@ final class Coordinator {
         guard dictating else { return }
         dictating = false
         dictationIdle?.cancel()
-        engine.setEndSilence(0.8)
+        engine.setEndSilence(settings.vadEndSilence)
         if dictationOpenedMic {
             dictationOpenedMic = false
             if mode == .off { Task { await engine.stopAudio() } }
@@ -569,7 +579,7 @@ final class Coordinator {
         dictationIdle?.cancel()
         dictationIdle = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: self.dictationTimeout)
+            try? await Task.sleep(for: .seconds(self.settings.dictationIdleSeconds))
             guard !Task.isCancelled else { return }
             self.stopDictation(reason: "silenzio")
         }
@@ -632,11 +642,11 @@ final class Coordinator {
             case .startDictation:
                 startDictation(announce: true)
             case .showNumbers:
-                let count = numbers.show()
+                let count = numbers.show(timeout: settings.numbersTimeout, limit: settings.numbersLimit)
                 if count == 0 {
                     fail("Non trovo elementi cliccabili in questa finestra")
                 } else {
-                    hud.show(.info, "Di' il numero da cliccare", detail: "\(count) elementi · «nascondi numeri» per chiudere", autoHide: 30)
+                    hud.show(.info, "Di' il numero da cliccare", detail: "\(count) elementi · «nascondi numeri» per chiudere", autoHide: settings.numbersTimeout)
                 }
             case .hideNumbers:
                 numbers.hide()
@@ -737,7 +747,7 @@ final class Coordinator {
             if cancelRequested {
                 hud.show(.info, "Interrotto", autoHide: 1.5)
             } else {
-                hud.show(.success, answer.isEmpty ? "Fatto" : answer, autoHide: 5)
+                hud.show(.success, answer.isEmpty ? "Fatto" : answer, autoHide: settings.hudAnswerSeconds)
                 if settings.speakReplies { await speaker.say(answer.isEmpty ? "Fatto" : answer) }
             }
         } catch {
@@ -779,10 +789,10 @@ final class Coordinator {
     }
 
     private func askConfirmation(_ plan: Plan, context: ScreenContext) {
-        pending = PendingPlan(plan: plan, context: context, expires: Date().addingTimeInterval(20))
+        pending = PendingPlan(plan: plan, context: context, expires: Date().addingTimeInterval(settings.confirmationSeconds))
         Sound.confirm()
         let how = mode == .off ? "Tieni premuto \(settings.pttKey.short) e di' «sì»" : "Di' «sì»"
-        hud.show(.confirm, plan.hud, detail: "\(how) per confermare, altro per annullare", autoHide: 20)
+        hud.show(.confirm, plan.hud, detail: "\(how) per confermare, altro per annullare", autoHide: settings.confirmationSeconds)
     }
 
     private func execute(_ plan: Plan, context: ScreenContext) async {
@@ -806,12 +816,12 @@ final class Coordinator {
 
     private func done(_ title: String, detail: String = "") {
         Log.info("✓ \(title)\(detail.isEmpty ? "" : " (\(detail))")")
-        hud.show(.success, title, detail: detail, autoHide: 1.3)
+        hud.show(.success, title, detail: detail, autoHide: settings.hudSuccessSeconds)
     }
 
     private func fail(_ title: String, detail: String = "") {
         Sound.error()
-        hud.show(.error, title, detail: detail, autoHide: 4)
+        hud.show(.error, title, detail: detail, autoHide: settings.hudErrorSeconds)
         Log.error("\(title) \(detail)")
     }
 }

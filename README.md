@@ -77,6 +77,14 @@ La guida completa è nel menu › Guida ai comandi.
 - Il testo letto dallo schermo viene passato a Claude come dato e mai come istruzione, per difendersi da email o pagine che cercano di dare ordini all'agente.
 - La chiave API sta nel Portachiavi. La trascrizione audio non lascia il Mac.
 
+## Impostazioni
+
+Dal menu ✋ › **Impostazioni** si apre una finestra con una barra laterale a sezioni: Ascolto, Conversazione, Comprensione, Agente, Voce e suoni, Numeri, Memoria e macro, Permessi, Stato e diagnostica. Ogni comportamento regolabile dell'app è lì, con il suo valore, una spiegazione e il valore predefinito: silenzio che chiude una frase, sensibilità del rilevatore di voce, durata della conversazione aperta, attese di conferma, modelli ed effort dell'agente, passi e tempo massimi di un compito, volume della voce e dei suoni, durata dei messaggi, numeri sullo schermo. Ogni sezione ha «Ripristina predefiniti»: i predefiniti coincidono con il comportamento dell'app prima che le impostazioni esistessero. Le modifiche valgono dall'azione successiva, senza riavviare.
+
+La sezione **Memoria e macro** elenca fatti e macro con un pulsante per eliminarli; **Permessi** mostra lo stato aggiornato dei tre permessi di macOS; **Stato e diagnostica** dice se il modello Apple è disponibile, dove si trova `claude`, se l'agente è in pausa e apre il log.
+
+Il menu della barra mostra lo stato dell'agente e della comprensione, un sottomenu **Impostazioni rapide** (modello Apple, corsia locale, modello rapido, Claude sì/no, risposte a voce, suoni, durata della conversazione, modello per i compiti lunghi) e un collegamento a ogni sezione.
+
 ## Numeri, memoria e macro
 
 ### «Mostra numeri»
@@ -167,7 +175,8 @@ L'agente ha due livelli, ognuno con il suo processo pronto: le richieste **sempl
 | `LLMPlanner.swift` | Prompt, schema del piano e rete di sicurezza; sceglie tra abbonamento e chiave API |
 | `ClaudeCLI.swift` | Esegue `claude -p` tenendo sempre pronto un processo in anticipo |
 | `HUD.swift` | La pillola in basso, che non prende mai il focus |
-| `Settings.swift` | Preferenze, Portachiavi, finestra impostazioni |
+| `Settings.swift` | Tutte le impostazioni con i loro predefiniti (`AppSettings.Defaults`), sezioni, Portachiavi |
+| `SettingsWindow.swift` | Finestra delle impostazioni: barra laterale, sezioni, ripristino dei predefiniti |
 
 ## Strumenti di test
 
@@ -177,6 +186,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build
 .build/debug/MacTalkAct --route-test               # Router sul Corpus (Tests/corpus/instradamento.tsv): accuratezza e tempi
 .build/debug/MacTalkAct --route-test Tests/corpus/instradamento-verifica.tsv   # frasi mai viste in taratura
 .build/debug/MacTalkAct --route-test --rules       # come si comporta senza il modello Apple
+.build/debug/MacTalkAct --settings-shot /tmp/shots     # un'immagine per sezione della finestra impostazioni, disegnata fuori schermo
 .build/debug/MacTalkAct --tools-test Tests/pages/prova-strumenti.html   # click_many e replace_text su una pagina di prova (agisce davvero!)
 say -v Alice -o /tmp/t.aiff "Scorri giù"
 .build/debug/MacTalkAct --transcribe /tmp/t.aiff   # riconoscimento vocale su un file

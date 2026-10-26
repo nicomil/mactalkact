@@ -134,6 +134,31 @@ enum DebugCLI {
         check("errore normale ≠ limite", !AgentRunner.isLimitMessage("Claude non ha risposto in tempo"))
         check("senza ora → nil", AgentRunner.resetDate(from: "limit reached", now: base) == nil)
 
+        print("Impostazioni:")
+        typealias Df = AppSettings.Defaults
+        check("predefiniti = comportamento di prima",
+              Df.vadEndSilence == 0.8 && Df.vadMinStartRMS == 0.006 && Df.vadNoiseFactor == 4 && Df.vadMaxSegment == 60
+              && Df.dictationEndSilence == 1.6 && Df.dictationIdleSeconds == 4 && Df.sessionIdleSeconds == 60
+              && Df.armedSeconds == 8 && Df.proposalSeconds == 8 && Df.agentQuestionSeconds == 25 && Df.confirmationSeconds == 20
+              && Df.conversationMemoryCount == 5 && Df.conversationMemoryMinutes == 10 && Df.classifierTimeout == 1.5
+              && Df.localLaneMaxWords == 6 && Df.deepEffort == "medium" && Df.fastEffort == "low" && Df.agentMaxSteps == 60
+              && Df.agentMaxTurns == 40 && Df.agentTimeout == 240 && Df.confirmValiditySeconds == 45 && Df.speechVolume == 0.45
+              && Df.speechRate == 1.05 && Df.soundsVolume == 0.2 && Df.hudSuccessSeconds == 1.3 && Df.hudAnswerSeconds == 5
+              && Df.hudErrorSeconds == 4 && Df.numbersTimeout == 30 && Df.numbersLimit == 180)
+        let st = AppSettings.shared
+        let saved = (st.armedSeconds, st.vadEndSilence)
+        st.armedSeconds = 17
+        st.vadEndSilence = 1.2
+        st.reset(.conversation)
+        check("ripristino solo della sezione", st.armedSeconds == Df.armedSeconds && st.vadEndSilence == 1.2)
+        st.armedSeconds = saved.0
+        st.vadEndSilence = saved.1
+        let audio = AudioRouter()
+        audio.configure(minStartRMS: 0.01, noiseFactor: 6, endSilence: 1.1, maxSegment: 30)
+        check("rilevatore di voce riconfigurato", audio.config.endSilence == 1.1 && audio.config.minStartRMS == 0.01
+              && audio.config.noiseFactor == 6 && audio.config.maxSegment == 30)
+        check("tutte le sezioni hanno titolo e icona", SettingsSection.allCases.allSatisfy { !$0.title.isEmpty && !$0.icon.isEmpty })
+
         print(failures == 0 ? "Tutto ok." : "\(failures) test falliti.")
         return failures == 0
     }
@@ -444,5 +469,33 @@ extension DebugCLI {
         agent.shutdown()
         try? ex.press("cmd+w")
         if let previous { await ex.bringToFront(previous) }
+    }
+}
+
+extension DebugCLI {
+    /// `--settings-shot <dir>`: builds the settings window with the app's own factory, off screen,
+    /// and saves one PNG per section (no Screen Recording permission needed).
+    static func settingsShot(dir: String) async {
+        let settings = AppSettings.shared
+        let original = settings.lastSettingsSection
+        var context = SettingsContext()
+        context.agentStatus = { "Disponibile (Sonnet 5.5 / Opus 5.5)" }
+        context.routerDescription = { "modello Apple + corsia locale" }
+        let window = SettingsWindowFactory.make(settings: settings, context: context)
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        window.orderFrontRegardless()
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        for section in SettingsSection.allCases {
+            settings.lastSettingsSection = section
+            try? await Task.sleep(for: .milliseconds(700))
+            guard let view = window.contentView?.superview ?? window.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            let url = URL(fileURLWithPath: dir).appendingPathComponent("\(SettingsSection.allCases.firstIndex(of: section)!)-\(section.rawValue).png")
+            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+            print("\(section.title): \(Int(view.bounds.width))×\(Int(view.bounds.height)) → \(url.lastPathComponent)")
+        }
+        settings.lastSettingsSection = original
+        window.close()
     }
 }

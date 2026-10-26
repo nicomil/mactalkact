@@ -26,7 +26,7 @@ final class AgentTools {
     /// The app the task works in: keystrokes and clicks stop if another app takes the front
     /// (the user switched app), unless the agent itself opened it.
     private var targetPID: pid_t?
-    private let maxCalls = 60
+    private var maxCalls: Int { AppSettings.shared.agentMaxSteps }
     var cancelled = false
 
     init(executor: Executor) {
@@ -379,7 +379,7 @@ final class AgentTools {
             guard let action = a["action"] as? String else { return .error("Missing action") }
             let answer = await askUser?(action, true)
             if let answer, Grammar.isYes(answer) {
-                confirmedUntil = Date().addingTimeInterval(45)
+                confirmedUntil = Date().addingTimeInterval(AppSettings.shared.confirmValiditySeconds)
                 return .text("approved")
             }
             return .text("denied — do not perform the action. Tell the user it was cancelled.")

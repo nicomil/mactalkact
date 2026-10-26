@@ -7,7 +7,7 @@
 # Stati: backlog · ready-for-dev · in-progress · review · done
 
 generated: 10-26-2026 23:10
-last_updated: 10-27-2026 00:30
+last_updated: 10-27-2026 00:20
 project: mactalkact
 project_key: NOKEY
 tracking_system: file-system
@@ -30,13 +30,13 @@ development_status:
   2-5-modifica-affidabile-negli-editor-web: done
   epic-2-retrospective: optional
 
-  epic-3: in-progress
-  3-1-finestra-delle-impostazioni-a-sezioni: in-progress
-  3-2-ascolto-e-conversazione-regolabili: ready-for-dev
-  3-3-comprensione-e-agente-regolabili: ready-for-dev
-  3-4-voce-suoni-e-messaggi-regolabili: ready-for-dev
-  3-5-numeri-memoria-permessi-e-stato: ready-for-dev
-  3-6-menu-della-barra-ricco: ready-for-dev
+  epic-3: done
+  3-1-finestra-delle-impostazioni-a-sezioni: done
+  3-2-ascolto-e-conversazione-regolabili: done
+  3-3-comprensione-e-agente-regolabili: done
+  3-4-voce-suoni-e-messaggi-regolabili: done
+  3-5-numeri-memoria-permessi-e-stato: done
+  3-6-menu-della-barra-ricco: done
   epic-3-retrospective: optional
 
 action_items: []

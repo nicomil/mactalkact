@@ -38,6 +38,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var permissionTimer: Timer?
     private var hadAccessibility = false
+    private var lastAgentConfigKey = ""
+
+    /// What the warm `claude` processes depend on: when it changes they are replaced.
+    private var agentConfigKey: String {
+        [settings.model, settings.fastModel, "\(settings.useFastModel)", settings.deepEffort, settings.fastEffort,
+         "\(settings.agentMaxTurns)", settings.backend.rawValue, settings.claudePath, "\(settings.useAI)"].joined(separator: "|")
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         hud = HUDController()
@@ -73,11 +80,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
-        // Restart the warm `claude` process when the model or backend changes.
-        settings.$model.combineLatest(settings.$backend).dropFirst()
-            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in self?.coordinator.prewarmAI() }
+        // Every change applies from the next action (AD-11): push the voice-detector values to the
+        // audio thread and get a `claude` process ready with the new model/effort/limits.
+        settings.objectWillChange
+            .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.coordinator.applyListeningSettings()
+                    let key = self.agentConfigKey
+                    if key != self.lastAgentConfigKey {
+                        self.lastAgentConfigKey = key
+                        self.coordinator.prewarmAI()
+                    }
+                }
+            }
             .store(in: &cancellables)
+        lastAgentConfigKey = agentConfigKey
 
         if !settings.aiAvailable { showSettings() }
     }
@@ -122,56 +141,172 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let header = NSMenuItem(title: "Tieni premuto \(settings.pttKey.short) e parla", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
-        if case .paused(let until) = coordinator.agent.availability {
-            let f = DateFormatter()
-            f.dateFormat = "HH:mm"
-            let paused = NSMenuItem(title: "Agente in pausa fino alle \(f.string(from: until)) (limite subscription)", action: nil, keyEquivalent: "")
-            paused.isEnabled = false
-            menu.addItem(paused)
-        } else if coordinator.agent.availability == .missing {
-            let missing = NSMenuItem(title: "Agente non disponibile: comando «claude» non trovato", action: nil, keyEquivalent: "")
-            missing.isEnabled = false
-            menu.addItem(missing)
-        }
+
+        // Status
+        let agentLine = NSMenuItem(title: "Agente: \(agentStatusText)", action: #selector(openStatusSection), keyEquivalent: "")
+        agentLine.target = self
+        agentLine.image = NSImage(systemSymbolName: coordinator.agent.availability == .available ? "sparkles" : "pause.circle",
+                                  accessibilityDescription: nil)
+        menu.addItem(agentLine)
+        let routerLine = NSMenuItem(title: "Comprensione: \(routerStatusText)", action: #selector(openUnderstandingSection), keyEquivalent: "")
+        routerLine.target = self
+        routerLine.image = NSImage(systemSymbolName: "brain", accessibilityDescription: nil)
+        menu.addItem(routerLine)
         menu.addItem(.separator())
 
+        // Listening modes
         let wake = NSMenuItem(title: "Ascolto continuo («\(settings.firstWakePhrase)»)", action: #selector(toggleWake), keyEquivalent: "")
         wake.state = coordinator.mode == .wakeWord ? .on : .off
         wake.target = self
         menu.addItem(wake)
-
         let session = NSMenuItem(title: "Sessione a mani libere (doppio tocco)", action: #selector(toggleSession), keyEquivalent: "")
         session.state = coordinator.mode == .session ? .on : .off
         session.target = self
         menu.addItem(session)
         menu.addItem(.separator())
 
-        let ax = NSMenuItem(title: Permissions.accessibility ? "Accessibilità: concessa ✓" : "Accessibilità: da concedere…",
-                            action: #selector(openAccessibility), keyEquivalent: "")
-        ax.target = self
-        menu.addItem(ax)
-        let mic = NSMenuItem(title: Permissions.microphone ? "Microfono: concesso ✓" : "Microfono: da concedere…",
-                             action: #selector(openMicrophone), keyEquivalent: "")
-        mic.target = self
-        menu.addItem(mic)
-        let screen = NSMenuItem(title: ScreenCapture.hasPermission ? "Registrazione schermo: concessa ✓" : "Registrazione schermo: da concedere… (per l'agente)",
-                                action: #selector(openScreenRecording), keyEquivalent: "")
-        screen.target = self
-        menu.addItem(screen)
+        // Quick settings
+        let quick = NSMenuItem(title: "Impostazioni rapide", action: nil, keyEquivalent: "")
+        quick.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: nil)
+        let q = NSMenu()
+        func toggle(_ title: String, _ on: Bool, _ key: String) {
+            let item = NSMenuItem(title: title, action: #selector(quickToggle(_:)), keyEquivalent: "")
+            item.state = on ? .on : .off
+            item.representedObject = key
+            item.target = self
+            q.addItem(item)
+        }
+        toggle("Modello Apple per capire le frasi", settings.useOnDeviceRouter, "useOnDeviceRouter")
+        toggle("Corsia locale ⚡️ (comandi semplici senza Claude)", settings.useLocalLane, "useLocalLane")
+        toggle("Modello rapido per le richieste semplici", settings.useFastModel, "useFastModel")
+        toggle("Usa Claude", settings.useAI, "useAI")
+        q.addItem(.separator())
+        toggle("Rispondi a voce", settings.speakReplies, "speakReplies")
+        toggle("Suoni", settings.soundsEnabled, "soundsEnabled")
+        toggle("All'avvio resta in ascolto", settings.startListening, "startListening")
+        q.addItem(.separator())
+        let conv = NSMenuItem(title: "Conversazione aperta dopo ogni risposta", action: nil, keyEquivalent: "")
+        let cm = NSMenu()
+        for seconds in [0, 10, 20, 30, 45, 60] {
+            let item = NSMenuItem(title: seconds == 0 ? "Disattivata" : "\(seconds) secondi", action: #selector(setConversationSeconds(_:)), keyEquivalent: "")
+            item.tag = seconds
+            item.state = Int(settings.conversationSeconds) == seconds ? .on : .off
+            item.target = self
+            cm.addItem(item)
+        }
+        conv.submenu = cm
+        q.addItem(conv)
+        let models = NSMenuItem(title: "Modello per i compiti lunghi", action: nil, keyEquivalent: "")
+        let mm = NSMenu()
+        for (id, name) in [("claude-opus-5-5", "Opus 5.5"), ("claude-sonnet-5-5", "Sonnet 5.5"), ("claude-haiku-5-5", "Haiku 5.5")] {
+            let item = NSMenuItem(title: name, action: #selector(setDeepModel(_:)), keyEquivalent: "")
+            item.representedObject = id
+            item.state = settings.model == id ? .on : .off
+            item.target = self
+            mm.addItem(item)
+        }
+        models.submenu = mm
+        q.addItem(models)
+        quick.submenu = q
+        menu.addItem(quick)
+
+        // Settings sections
+        let prefs = NSMenuItem(title: "Impostazioni", action: nil, keyEquivalent: "")
+        prefs.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        let pm = NSMenu()
+        let all = NSMenuItem(title: "Apri le impostazioni…", action: #selector(showSettings as () -> Void), keyEquivalent: ",")
+        all.target = self
+        pm.addItem(all)
+        pm.addItem(.separator())
+        for section in SettingsSection.allCases {
+            let item = NSMenuItem(title: section.title, action: #selector(openSection(_:)), keyEquivalent: "")
+            item.representedObject = section.rawValue
+            item.image = NSImage(systemSymbolName: section.icon, accessibilityDescription: nil)
+            item.target = self
+            pm.addItem(item)
+        }
+        prefs.submenu = pm
+        menu.addItem(prefs)
+
+        // Permissions that are missing
+        let missing = [("Accessibilità", Permissions.accessibility), ("Microfono", Permissions.microphone),
+                       ("Registrazione schermo", ScreenCapture.hasPermission)].filter { !$0.1 }
+        if !missing.isEmpty {
+            let p = NSMenuItem(title: "Permessi da concedere: \(missing.map(\.0).joined(separator: ", "))…",
+                               action: #selector(openPermissionsSection), keyEquivalent: "")
+            p.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
+            p.target = self
+            menu.addItem(p)
+        }
         menu.addItem(.separator())
 
-        let memory = NSMenuItem(title: "Memoria e macro…", action: #selector(openMemory), keyEquivalent: "")
+        let memory = NSMenuItem(title: "Memoria e macro…", action: #selector(openMemorySection), keyEquivalent: "")
         memory.target = self
         menu.addItem(memory)
         let help = NSMenuItem(title: "Guida ai comandi…", action: #selector(showHelp), keyEquivalent: "")
         help.target = self
         menu.addItem(help)
-        let prefs = NSMenuItem(title: "Impostazioni…", action: #selector(showSettings), keyEquivalent: ",")
-        prefs.target = self
-        menu.addItem(prefs)
+        let log = NSMenuItem(title: "Apri il log", action: #selector(openLog), keyEquivalent: "")
+        log.target = self
+        menu.addItem(log)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Esci da MacTalkAct", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
+
+    private var agentStatusText: String {
+        guard settings.useAI else { return "Claude disattivato" }
+        switch coordinator.agent.availability {
+        case .available:
+            if settings.backend == .apiKey { return "Disponibile (chiave API)" }
+            return settings.useFastModel ? "Disponibile (\(Self.short(settings.fastModel)) / \(Self.short(settings.model)))"
+                                         : "Disponibile (\(Self.short(settings.model)))"
+        case .paused(let until):
+            let f = DateFormatter()
+            f.dateFormat = "HH:mm"
+            return "In pausa fino alle \(f.string(from: until)) (limite subscription)"
+        case .missing:
+            return "Comando «claude» non trovato"
+        }
+    }
+
+    private var routerStatusText: String {
+        let model = settings.useOnDeviceRouter && OnDeviceClassifier.isAvailable ? "modello Apple" : "regole prudenti"
+        return settings.useLocalLane ? "\(model) + corsia locale" : model
+    }
+
+    private static func short(_ model: String) -> String {
+        model.replacingOccurrences(of: "claude-", with: "").replacingOccurrences(of: "-5-5", with: " 5.5").capitalized
+    }
+
+    @objc private func quickToggle(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        switch key {
+        case "useOnDeviceRouter": settings.useOnDeviceRouter.toggle()
+        case "useLocalLane": settings.useLocalLane.toggle()
+        case "useFastModel": settings.useFastModel.toggle()
+        case "useAI": settings.useAI.toggle()
+        case "speakReplies": settings.speakReplies.toggle()
+        case "soundsEnabled": settings.soundsEnabled.toggle()
+        case "startListening": settings.startListening.toggle()
+        default: break
+        }
+    }
+
+    @objc private func setConversationSeconds(_ sender: NSMenuItem) { settings.conversationSeconds = Double(sender.tag) }
+
+    @objc private func setDeepModel(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String { settings.model = id }
+    }
+
+    @objc private func openSection(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String, let section = SettingsSection(rawValue: raw) { showSettings(section: section) }
+    }
+
+    @objc private func openStatusSection() { showSettings(section: .status) }
+    @objc private func openUnderstandingSection() { showSettings(section: .understanding) }
+    @objc private func openPermissionsSection() { showSettings(section: .permissions) }
+    @objc private func openMemorySection() { showSettings(section: .memory) }
+    @objc private func openLog() { NSWorkspace.shared.open(Log.fileURL) }
 
     @objc private func toggleWake() {
         coordinator.setMode(coordinator.mode == .wakeWord ? .off : .wakeWord)
@@ -181,37 +316,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         coordinator.toggleSession()
     }
 
-    @objc private func openAccessibility() {
-        Permissions.promptAccessibility()
-        Permissions.openAccessibilitySettings()
-    }
 
-    @objc private func openMemory() {
-        Memory.shared.openInEditor()
-    }
 
-    @objc private func openScreenRecording() {
-        ScreenCapture.requestPermission()
-        Permissions.openScreenRecordingSettings()
-    }
 
-    @objc private func openMicrophone() {
-        Permissions.openMicrophoneSettings()
-    }
 
     // MARK: Windows
 
-    @objc func showSettings() {
+    @objc func showSettings() { showSettings(section: nil) }
+
+    func showSettings(section: SettingsSection?) {
+        if let section { settings.lastSettingsSection = section }
         if settingsWindow == nil {
-            let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(settings: settings)))
-            w.title = "MacTalkAct – Impostazioni"
-            w.styleMask = [.titled, .closable]
-            w.isReleasedWhenClosed = false
-            settingsWindow = w
+            settingsWindow = SettingsWindowFactory.make(settings: settings, context: settingsContext)
+            settingsWindow?.center()
         }
         NSApp.activate()
-        settingsWindow?.center()
         settingsWindow?.makeKeyAndOrderFront(nil)
+        settingsWindow?.orderFrontRegardless() // a menu-bar app may not be activated by macOS
+    }
+
+    private var settingsContext: SettingsContext {
+        var c = SettingsContext()
+        c.agentStatus = { [weak self] in self?.agentStatusText ?? "—" }
+        c.routerDescription = { [weak self] in self?.routerStatusText ?? "—" }
+        c.conversationCount = { [weak self] in
+            guard let self else { return 0 }
+            self.coordinator.conversation.log.expire()
+            return self.coordinator.conversation.log.entries.count
+        }
+        c.clearConversation = { [weak self] in self?.coordinator.conversation.log.clear() }
+        c.showHelp = { [weak self] in self?.showHelp() }
+        return c
     }
 
     @objc func showHelp() {
@@ -288,6 +423,10 @@ struct HelpView: View {
         ]),
         ("Voce", [
             "Impostazioni › «Rispondi a voce»: l'app dice a bassa voce com'è andata e ti fa le domande",
+        ]),
+        ("Impostazioni", [
+            "Menu ✋ › Impostazioni: ogni comportamento dell'app, per sezioni, con «Ripristina predefiniti»",
+            "Menu ✋ › Impostazioni rapide: gli interruttori più usati, al volo",
         ]),
         ("Sicurezza", [
             "Invio, eliminazione e acquisti chiedono sempre conferma: rispondi «sì»",

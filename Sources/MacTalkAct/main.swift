@@ -22,6 +22,18 @@ if arguments.contains("--route-test") {
     dispatchMain()
 }
 
+if let dir = argument(after: "--settings-shot") {
+    MainActor.assumeIsolated {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        Task { @MainActor in
+            await DebugCLI.settingsShot(dir: dir)
+            exit(0)
+        }
+        app.run()
+    }
+}
+
 if let page = argument(after: "--converse-test") {
     MainActor.assumeIsolated { _ = NSApplication.shared }
     Task { @MainActor in

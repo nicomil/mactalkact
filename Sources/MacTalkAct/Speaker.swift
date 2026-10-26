@@ -28,8 +28,8 @@ final class Speaker: NSObject, AVSpeechSynthesizerDelegate {
         stop()
         let u = AVSpeechUtterance(string: t)
         u.voice = voice
-        u.volume = 0.45
-        u.rate = AVSpeechUtteranceDefaultSpeechRate * 1.05
+        u.volume = Float(AppSettings.shared.speechVolume)
+        u.rate = min(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * Float(AppSettings.shared.speechRate))
         isSpeaking = true
         onSpeakingChange?(true)
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in

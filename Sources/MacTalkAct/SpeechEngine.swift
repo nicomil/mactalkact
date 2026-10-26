@@ -68,6 +68,15 @@ final class AudioRouter: @unchecked Sendable {
     }
 
     /// Longer pauses are allowed while dictating, so thinking pauses don't split the text.
+    func configure(minStartRMS: Float, noiseFactor: Float, endSilence: TimeInterval, maxSegment: TimeInterval) {
+        lock.withLock {
+            config.minStartRMS = minStartRMS
+            config.noiseFactor = noiseFactor
+            config.endSilence = endSilence
+            config.maxSegment = maxSegment
+        }
+    }
+
     func setEndSilence(_ seconds: TimeInterval) {
         lock.withLock { config.endSilence = seconds }
     }
@@ -357,6 +366,10 @@ final class SpeechEngine {
 
     func setEndSilence(_ seconds: TimeInterval) {
         router.setEndSilence(seconds)
+    }
+
+    func configureVAD(minStartRMS: Float, noiseFactor: Float, endSilence: TimeInterval, maxSegment: TimeInterval) {
+        router.configure(minStartRMS: minStartRMS, noiseFactor: noiseFactor, endSilence: endSilence, maxSegment: maxSegment)
     }
 
     func stopAudio() async {

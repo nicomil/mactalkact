@@ -20,12 +20,12 @@ final class NumberOverlay {
 
     /// Collects clickable elements and shows the numbers. Returns how many.
     @discardableResult
-    func show(timeout: TimeInterval = 30) -> Int {
+    func show(timeout: TimeInterval = 30, limit: Int = 180) -> Int {
         hide()
         guard let (app, _) = AX.frontApp(), let window = AX.focusedWindow(in: app),
               let windowFrame = AX.frame(window) else { return 0 }
 
-        let found = AXTree.clickables(in: window, windowFrame: windowFrame)
+        let found = AXTree.clickables(in: window, windowFrame: windowFrame, limit: limit)
         items = found.enumerated().map { Item(number: $0.offset + 1, element: $0.element.element, frame: $0.element.frame) }
         guard !items.isEmpty else { return 0 }
 

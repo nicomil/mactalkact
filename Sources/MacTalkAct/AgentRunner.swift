@@ -145,12 +145,12 @@ final class AgentRunner {
         return ClaudeCLI.Config(
             model: deep ? settings.model : settings.fastModel,
             systemPrompt: Self.systemPrompt,
-            effort: deep ? "medium" : "low",
+            effort: deep ? settings.deepEffort : settings.fastEffort,
             extraArgs: [
                 "--mcp-config", server.mcpConfigJSON,
                 "--permission-mode", "dontAsk",
                 "--permission-prompts", "none",
-                "--max-turns", "40",
+                "--max-turns", "\(settings.agentMaxTurns)",
                 "--allowedTools", "mcp__\(MCPServer.serverName)",
                 "--disallowedTools", "Agent", "TaskStop",
             ]
@@ -197,7 +197,7 @@ final class AgentRunner {
         """
         let started = Date()
         do {
-            let data = try await cli(deep: useDeep).run(config, message: message, timeout: 240)
+            let data = try await cli(deep: useDeep).run(config, message: message, timeout: settings.agentTimeout)
             let answer = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             Log.info(String(format: "Agente (%@): %d passi in %.1fs → %@", config.model, tools.callCount, Date().timeIntervalSince(started), answer))
             return answer
