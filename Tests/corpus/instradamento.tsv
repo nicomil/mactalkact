@@ -135,3 +135,9 @@ Sì	no	conferma	conferma
 No	no	conferma	conferma
 Dodici	no	numeri	numero
 Clicca il 7	no	numeri	numero
+#
+# --- Sessione a mani libere fuori da un campo di testo (aggiunte dopo la revisione del codice)
+Ma dove hai messo le chiavi?	no	sessione	ignora
+Che bello questo video	no	sessione	ignora|agente
+Apri la prima mail	no	sessione	agente
+Riapri la scheda che ho chiuso	no	sessione	locale|agente

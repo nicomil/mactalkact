@@ -4,11 +4,12 @@ Controlla il Mac con la voce quando hai le mani occupate. Funziona come un'app d
 
 ## Come funziona
 
-Ogni frase passa per tre corsie, dalla più veloce alla più intelligente:
+Ogni frase arriva a un **Router**, che prende una sola decisione: ignorarla, scriverla, eseguirla con un comando rapido, eseguirla in locale o affidarla all'agente. La decisione e il motivo finiscono nel log (`Instradamento: … · motivo · ms`).
 
-1. **Comandi rapidi** (sul Mac, nessuna AI, meno di 150 ms): «giù», «invio», «annulla», «apri Safari», «clicca Invia»…
-2. **Dettatura**: se il cursore è in un campo di testo e non stai dando un ordine, il testo viene scritto.
-3. **Agente**: tutto il resto («apri la mail di LangChain», «cancella l'ultima frase», «rispondi a Marco che confermo e invia») viene affidato a un agente Claude che guarda lo schermo, agisce, controlla il risultato e continua finché il compito è fatto, come il computer use di Claude o Codex.
+1. **Comandi rapidi** (grammatica fissa, nessuna AI, meno di 150 ms): «giù», «invio», «annulla», «apri Safari», «clicca Invia»…
+2. **Dettatura**: con il cursore in un campo di testo, il **modello linguistico Apple sul Mac** (FoundationModels) decide in circa 0,7 secondi se la frase è testo da scrivere, un comando o chiacchiera con chi è nella stanza. Funziona offline e non consuma la subscription. **Nel dubbio non scrive**: mostra la frase e aspetta «scrivilo».
+3. **Corsia locale** ⚡️: i comandi di un solo passo che la grammatica non conosce («riapri la scheda che ho chiuso», «metti a schermo intero», «aprimi il calendario») vengono tradotti dal modello Apple in un'azione, che regole fisse controllano prima di eseguirla. Circa 1,2 secondi, senza Claude.
+4. **Agente**: tutto il resto («apri la mail di LangChain», «modifica la domanda», «rispondi a Marco che confermo e invia») viene affidato a un agente Claude che guarda lo schermo, agisce, controlla il risultato e continua finché il compito è fatto, come il computer use di Claude o Codex. Le richieste semplici usano un modello più rapido.
 
 Il riconoscimento vocale avviene **interamente sul Mac** con il modello italiano di Apple (`SpeechAnalyzer` + `DictationTranscriber`, macOS 27). A Claude arriva solo il testo, insieme a una descrizione dello schermo letta tramite Accessibilità.
 
@@ -50,7 +51,9 @@ Al primo avvio:
 | **Sessione a mani libere** | **Doppio tocco** su ⌥ destro. Si chiude dicendo «basta» o dopo 60 s di silenzio | Sequenze di comandi |
 | **Ascolto continuo** | Dal menu: «Ascolto continuo». Poi di' «**Computer**, apri Mail» | Zero mani |
 
-Dopo un comando hai 8 secondi per dare un altro **comando rapido** («giù», «ancora») senza ripetere «Computer». Se dici solo «Computer», la frase successiva viene accettata qualunque sia.
+Dopo ogni risposta la **conversazione resta aperta per 20 secondi** (l'HUD mostra «💬 Ti ascolto ancora»): puoi continuare senza ripetere «Computer» («cambia anche la seconda», «no, quella sotto»), mentre la chiacchiera con chi è nella stanza viene ignorata. «Basta così» o «grazie» la chiudono subito; la durata si cambia nelle impostazioni. Se dici solo «Computer», la frase successiva viene accettata qualunque sia, e la parola «Computer» da sola non viene mai scritta.
+
+L'agente ricorda le **ultime 5 interazioni dei 10 minuti precedenti**, con il testo prima e dopo ogni modifica: «rimetti la domanda di prima» funziona. Questa memoria vive solo in RAM; «dimentica la conversazione» la svuota. Se l'app ha scritto qualcosa che non volevi, «**cancella quello che hai scritto**» toglie esattamente quel testo (se il campo è cambiato nel frattempo usa Annulla e te lo dice).
 
 In ascolto continuo un rilevatore di voce divide l'audio in frasi: una frase inizia quando cominci a parlare e finisce dopo 0,8 secondi di silenzio. Ogni frase viene trascritta da sola, come nel push-to-talk, e il comando parte circa 1,5 secondi dopo che hai smesso di parlare.
 
@@ -115,9 +118,13 @@ L'agente è `claude -p` (Claude Code, sulla tua subscription) collegato a un ser
 | `type_text`, `press_keys`, `scroll` | Scrivere (qualsiasi lunghezza), scorciatoie, scorrimento |
 | `open_app`, `open_url` | Apre e porta davvero in primo piano app e siti, anche nel browser indicato |
 | `get_text`, `edit_text` | Legge e modifica il campo di testo attivo (sostituire la selezione, riscrivere la frase prima del cursore) |
+| `replace_text` | Sostituisce un testo nel campo attivo **e verifica il risultato**, anche negli editor web (Jupyter, Colab, editor di codice) che non espongono il testo all'Accessibilità: prova l'Accessibilità, poi la riga corrente, poi l'intera cella |
+| `click_many` | Clic su più elementi in una chiamata (ad esempio tutte le caselle di una colonna), con lo stato di ognuno dopo il clic (spuntata o no) |
 | `browser_profiles` | Elenca i profili di Edge, Chrome e Brave, quando macOS lo consente |
 | `remember`, `forget`, `save_macro`, `delete_macro` | Memoria personale e macro vocali |
 | `ask_user`, `confirm` | Domande a voce; **conferma obbligatoria** per inviare, eliminare, comprare o chiudere: l'app blocca queste azioni finché non rispondi «sì» |
+
+Gli ID degli elementi non vengono mai riutilizzati durante un compito: dopo una nuova osservazione, un ID vecchio viene rifiutato invece di finire su un elemento diverso. Dopo uno scorrimento le coordinate dello screenshot precedente non valgono più.
 
 Durante un compito l'HUD mostra cosa sta facendo («Cerco «LangChain»…», «Clicco «Apri»»), e «stop» lo interrompe. Un compito tipico richiede 5–30 secondi; i comandi rapidi restano istantanei.
 
@@ -132,7 +139,7 @@ L'app lancia `claude -p` senza strumenti, server MCP, hook né plugin, con un pr
 
 L'avvio di `claude` richiede circa 2 secondi. Per non farli pesare, l'app tiene **sempre un processo pronto** in attesa della richiesta e, appena lo usa, ne avvia un altro. Così una richiesta libera risponde in circa 2–4 secondi dalla fine della frase. Il prezzo è un processo `claude` sempre in memoria.
 
-Il modello predefinito è **Claude Opus 5.5** con effort basso. **Claude Haiku 5.5** è un'alternativa più leggera, da scegliere nelle impostazioni. Le corsie 1 e 2 non usano mai l'AI e non consumano l'abbonamento.
+L'agente ha due livelli, ognuno con il suo processo pronto: le richieste **semplici** usano **Claude Sonnet 5.5** con effort basso, quelle **lunghe** (più passi, mail, ricerche, «tutte le…») usano **Claude Opus 5.5** con effort medio. Dire «pensaci bene» forza il secondo. Entrambi i modelli si scelgono nelle impostazioni. Le prime tre corsie non usano mai Claude e non consumano l'abbonamento.
 
 ## Struttura del codice
 
@@ -141,8 +148,12 @@ Il modello predefinito è **Claude Opus 5.5** con effort basso. **Claude Haiku 5
 | `SpeechEngine.swift` | Microfono → `AnalyzerInputConverter` → `SpeechAnalyzer` con `DictationTranscriber` italiano |
 | `HotkeyMonitor.swift` | Tasto push-to-talk: pressione prolungata, tocco, doppio tocco |
 | `CommandGrammar.swift` | Comandi rapidi in italiano, frase di attivazione, confronto tra etichette, diff del testo |
-| `Coordinator.swift` | Modalità di ascolto, dettatura lunga, router a tre corsie, domande dell'agente, feedback |
-| `AgentRunner.swift` | Prompt e avvio dell'agente `claude -p` collegato agli strumenti |
+| `IntentRouter.swift` | Il Router: una sola decisione per frase, con motivo, senza effetti collaterali |
+| `IntentClassifier.swift` | Classificatore on-device (modello Apple) e classificatore a regole prudente |
+| `LocalLane.swift` | Corsia locale: proposta del modello Apple e validatore con regole fisse |
+| `Conversation.swift` | Finestra di conversazione, memoria a breve termine, registro di ciò che l'app scrive |
+| `Coordinator.swift` | Modalità di ascolto, dettatura lunga, esecuzione delle decisioni del Router, domande dell'agente, feedback |
+| `AgentRunner.swift` | Prompt e avvio dell'agente `claude -p` (rapido o profondo), disponibilità e pausa per il limite |
 | `AgentTools.swift` | Gli strumenti dell'agente: osservare, cliccare, scrivere, confermare… |
 | `MCPServer.swift` | Server MCP HTTP locale (solo 127.0.0.1, con token) |
 | `ScreenCapture.swift` | Screenshot della finestra in primo piano (ScreenCaptureKit) |
@@ -163,6 +174,10 @@ Il modello predefinito è **Claude Opus 5.5** con effort basso. **Claude Haiku 5
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build
 .build/debug/MacTalkAct --selftest                 # test della grammatica e degli helper
+.build/debug/MacTalkAct --route-test               # Router sul Corpus (Tests/corpus/instradamento.tsv): accuratezza e tempi
+.build/debug/MacTalkAct --route-test Tests/corpus/instradamento-verifica.tsv   # frasi mai viste in taratura
+.build/debug/MacTalkAct --route-test --rules       # come si comporta senza il modello Apple
+.build/debug/MacTalkAct --tools-test Tests/pages/prova-strumenti.html   # click_many e replace_text su una pagina di prova (agisce davvero!)
 say -v Alice -o /tmp/t.aiff "Scorri giù"
 .build/debug/MacTalkAct --transcribe /tmp/t.aiff   # riconoscimento vocale su un file
 .build/debug/MacTalkAct --context                  # cosa vede l'app dello schermo (dopo 3 s)
@@ -183,6 +198,9 @@ tail -f ~/Library/Logs/MacTalkAct.log              # cosa sente e decide l'app, 
 - Il testo viene inserito con gli appunti (incolla e poi ripristino del contenuto precedente), come fa Wispr Flow.
 - L'agente costa tempo (2–4 secondi per passo) e consuma più subscription di una singola richiesta.
 - Durante un compito, una frase detta senza «Computer» può essere presa come risposta a una domanda dell'agente.
+- Il modello Apple richiede Apple Intelligence attiva. Senza, il Router usa regole prudenti: nei campi di testo chiede «scrivilo» prima di scrivere una frase ambigua, e nella finestra di conversazione riconosce solo i comandi della grammatica.
+- Nella finestra di conversazione la dettatura senza «Computer» viene ignorata, per prudenza: per dettare di seguito usa «scrivi…».
+- Il Router è tarato su 106 frasi (100%) e verificato su 41 frasi nuove (97,6%), senza scritture indebite; nell'uso reale la precisione sarà più bassa e il Corpus va arricchito con i casi sbagliati.
 
 ## Risposte a voce
 
@@ -190,7 +208,7 @@ Facoltative, da Impostazioni › «Rispondi a voce». L'app pronuncia a basso vo
 
 ## Limiti della subscription
 
-L'agente usa la stessa subscription di Claude Code. Se si raggiunge il limite d'uso, l'HUD lo dice chiaramente e indica quando riprende; nel frattempo comandi rapidi, dettatura e «mostra numeri» continuano a funzionare, perché non usano Claude.
+L'agente usa la stessa subscription di Claude Code. Se si raggiunge il limite d'uso, l'app entra in **modalità ridotta** fino all'ora di ripresa letta dal messaggio (o per 30 minuti): le richieste per l'agente ricevono subito una risposta chiara invece di un'attesa, il menu mostra «Agente in pausa fino alle …» e l'icona cambia. Comandi rapidi, corsia locale, dettatura e «mostra numeri» continuano a funzionare. All'ora di ripresa l'app riprepara Claude e avvisa che l'agente è tornato.
 
 ## Idee per il futuro
 

@@ -181,6 +181,11 @@ final class IntentRouter {
             }
         }
         if RouteHeuristics.isShortChatter(text) { return .ignore(reason: "chiacchiera breve") }
+        // Hands-free session without the wake phrase: talk with people in the room is not a request.
+        if state.listening == .session && !state.pushToTalk && wakeRest == nil && !state.armed {
+            let c = await classifier.classify(text, editable: false)
+            if c.kind == .chatter { return .ignore(reason: "chiacchiera in sessione (\(c.source))") }
+        }
         return await commandRoute(text, editable: editable, state: state, why: "richiesta fuori da un campo di testo")
     }
 

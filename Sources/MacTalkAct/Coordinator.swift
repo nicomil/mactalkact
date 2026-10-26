@@ -130,6 +130,7 @@ final class Coordinator {
         s.armed = conversation.isArmed
         s.windowOpen = conversation.isWindowOpen && mode != .off
         s.numbersVisible = numbers.isVisible
+        if let p = pending, Date() >= p.expires { pending = nil } // an expired question is not an answer
         s.pendingConfirmation = pending != nil
         s.proposedText = conversation.pendingProposal
         s.wakePhrases = settings.wakePhraseList
@@ -402,9 +403,10 @@ final class Coordinator {
         if mode == .session { restartSessionIdle() }
         busy = true
         cancelRequested = false
+        var reopen = mode != .off
         defer {
             busy = false
-            if mode != .off { openConversation() }
+            if reopen { openConversation() }
         }
 
         switch decision {
@@ -421,6 +423,7 @@ final class Coordinator {
             await runMacro(macro)
         case .fast(let cmd, let text):
             if case .stop = cmd {
+                reopen = false
                 if mode == .session { endSession() } else { conversation.closeWindow(); hud.show(.info, "Ok", autoHide: 1) }
                 return
             }
@@ -444,14 +447,15 @@ final class Coordinator {
                 fail("Non ho scritto niente di recente")
             }
         case .closeConversation:
+            reopen = false
             conversation.closeWindow()
+            conversationHint?.cancel()
             hud.show(.info, "Ok, a dopo", autoHide: 1)
-            return
         case .forgetConversation:
+            reopen = false
             conversation.log.clear()
             conversation.closeWindow()
             done("Conversazione dimenticata")
-            return
         case .local(let action, let text):
             await runLocal(action, text: text, app: screen().appName)
         case .agent(let text, let deep, _):
