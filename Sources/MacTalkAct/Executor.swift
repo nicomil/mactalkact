@@ -213,6 +213,9 @@ final class Executor {
     /// 2. the current line (web code editors, notebook cells): select line, copy, check, paste;
     /// 3. the whole field (short cells): select all, copy, check, paste.
     /// Each path verifies the result before reporting success.
+    /// Test switch: skip the Accessibility path to exercise the keyboard ones.
+    static var keyboardOnlyReplace = ProcessInfo.processInfo.environment["MTA_KEYBOARD_REPLACE"] != nil
+
     func replaceText(find: String, with new: String) async -> ReplaceResult {
         let ctx = ScreenContext.capture(includeLabels: false)
         guard let front = AX.frontmostApplication() else { return .noField }
@@ -220,7 +223,7 @@ final class Executor {
         let focused = AX.focusedElement(in: app)
 
         // 1. Accessibility
-        if let el = focused, AX.isSettable(el, kAXValueAttribute), let value = AX.string(el, kAXValueAttribute),
+        if !Self.keyboardOnlyReplace, let el = focused, AX.isSettable(el, kAXValueAttribute), let value = AX.string(el, kAXValueAttribute),
            let r = value.range(of: find) {
             let ns = NSRange(r, in: value)
             var cf = CFRange(location: ns.location, length: ns.length)

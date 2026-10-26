@@ -408,12 +408,24 @@ final class AgentTools {
     private static func toggleState(_ element: AXUIElement) -> String? {
         let role = AX.role(element)
         guard ["AXCheckBox", "AXRadioButton", "AXSwitch", "AXToggle", "AXCell", "AXRow", "AXMenuItem"].contains(role) else { return nil }
-        if let n = AX.value(element, kAXValueAttribute) as? NSNumber { return n.intValue == 0 ? "unchecked" : "checked" }
-        if let b = AX.value(element, kAXSelectedAttribute) as? Bool { return b ? "selected" : "not selected" }
-        // Web tables: the checkbox is often a child of the clicked cell.
-        for child in AX.children(element) where ["AXCheckBox", "AXRadioButton"].contains(AX.role(child)) {
-            if let n = AX.value(child, kAXValueAttribute) as? NSNumber { return n.intValue == 0 ? "unchecked" : "checked" }
+        if ["AXCheckBox", "AXRadioButton", "AXSwitch", "AXToggle"].contains(role),
+           let n = AX.value(element, kAXValueAttribute) as? NSNumber {
+            return n.intValue == 0 ? "unchecked" : "checked"
         }
+        // Web tables: the checkbox is often inside the clicked cell or row.
+        var queue = AX.children(element)
+        var visited = 0
+        while !queue.isEmpty, visited < 40 {
+            let child = queue.removeFirst()
+            visited += 1
+            if ["AXCheckBox", "AXRadioButton"].contains(AX.role(child)),
+               let n = AX.value(child, kAXValueAttribute) as? NSNumber {
+                return "contains a checkbox now " + (n.intValue == 0 ? "unchecked" : "checked")
+            }
+            queue += AX.children(child)
+        }
+        if role == "AXCell" || role == "AXRow" { return "this is a table \(role == "AXCell" ? "cell" : "row"), not a checkbox" }
+        if let b = AX.value(element, kAXSelectedAttribute) as? Bool { return b ? "selected" : "not selected" }
         return nil
     }
 

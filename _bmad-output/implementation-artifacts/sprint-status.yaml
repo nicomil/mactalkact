@@ -7,27 +7,27 @@
 # Stati: backlog · ready-for-dev · in-progress · review · done
 
 generated: 10-26-2026 23:10
-last_updated: 10-26-2026 23:40
+last_updated: 10-27-2026 00:00
 project: mactalkact
 project_key: NOKEY
 tracking_system: file-system
 story_location: "_bmad-output/implementation-artifacts"
 
 development_status:
-  epic-1: in-progress
-  1-1-router-unico-che-non-scrive-mai-per-errore: review
-  1-2-classificatore-on-device-nei-campi-di-testo: review
-  1-3-finestra-di-conversazione: review
-  1-4-l-agente-ricorda-le-ultime-cose-fatte: review
-  1-5-annulla-quello-che-hai-scritto: review
+  epic-1: done
+  1-1-router-unico-che-non-scrive-mai-per-errore: done
+  1-2-classificatore-on-device-nei-campi-di-testo: done
+  1-3-finestra-di-conversazione: done
+  1-4-l-agente-ricorda-le-ultime-cose-fatte: done
+  1-5-annulla-quello-che-hai-scritto: done
   epic-1-retrospective: optional
 
-  epic-2: in-progress
-  2-1-corsia-locale-per-i-comandi-a-un-passo: review
-  2-2-modello-proporzionato-alla-difficolta: review
-  2-3-modalita-ridotta-al-limite-della-subscription: review
-  2-4-azioni-in-blocco-verificate: review
-  2-5-modifica-affidabile-negli-editor-web: review
+  epic-2: done
+  2-1-corsia-locale-per-i-comandi-a-un-passo: done
+  2-2-modello-proporzionato-alla-difficolta: done
+  2-3-modalita-ridotta-al-limite-della-subscription: done
+  2-4-azioni-in-blocco-verificate: done
+  2-5-modifica-affidabile-negli-editor-web: done
   epic-2-retrospective: optional
 
 action_items: []

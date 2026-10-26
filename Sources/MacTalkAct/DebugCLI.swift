@@ -426,11 +426,13 @@ extension DebugCLI {
             try await agent.start()
             agent.prewarm()
             try await Task.sleep(for: .seconds(5))
-            for request in ["modifica la domanda: che cos'è il cloud computing diventa che cos'è Internet",
-                            "rimetti la domanda di prima"] {
+            let env = ProcessInfo.processInfo.environment
+            let requests = env["MTA_REQUESTS"].map { $0.components(separatedBy: "||") }
+                ?? ["modifica la domanda: che cos'è il cloud computing diventa che cos'è Internet", "rimetti la domanda di prima"]
+            for request in requests {
                 let ctx = ScreenContext.capture(includeLabels: false)
                 let started = Date()
-                let answer = try await agent.run(request, context: ctx, recent: log.promptBlock, deep: false)
+                let answer = try await agent.run(request, context: ctx, recent: log.promptBlock, deep: RouteHeuristics.isComplex(request))
                 log.add(request: request, outcome: answer, app: ctx.appName, changes: agent.tools.changes)
                 print(String(format: "«%@» → %.1fs, %d chiamate: %@", request, Date().timeIntervalSince(started), agent.tools.callCount, answer))
                 print("  modifiche: \(agent.tools.changes)")
