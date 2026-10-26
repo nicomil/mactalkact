@@ -7,7 +7,7 @@
 # Stati: backlog · ready-for-dev · in-progress · review · done
 
 generated: 10-26-2026 23:10
-last_updated: 10-27-2026 00:20
+last_updated: 10-27-2026 12:00
 project: mactalkact
 project_key: NOKEY
 tracking_system: file-system
@@ -39,5 +39,23 @@ development_status:
   3-6-menu-della-barra-ricco: done
   3-7-parola-di-attivazione-a-scelta: done
   epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-spike-codex-senza-interfaccia-con-gli-strumenti-di-mactalkact: backlog
+  4-2-motori-dietro-un-solo-protocollo: backlog
+  4-3-codex-come-motore: backlog
+  4-4-motore-locale-di-base-con-il-modello-apple: backlog
+  4-5-scelta-del-motore-e-catena-di-riserva: backlog
+  4-6-limite-a-meta-richiesta-senza-azioni-doppie: backlog
+  4-7-motori-nelle-impostazioni-nel-menu-e-nello-stato: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-banco-di-prova-dell-agente: backlog
+  5-2-spike-quale-modello-locale-su-questo-mac: backlog
+  5-3-modello-locale-esteso-tramite-server-sul-mac: backlog
+  5-4-motore-locale-ottimizzato: backlog
+  5-5-niente-cloud-dove-non-serve: backlog
+  epic-5-retrospective: optional
 
 action_items: []

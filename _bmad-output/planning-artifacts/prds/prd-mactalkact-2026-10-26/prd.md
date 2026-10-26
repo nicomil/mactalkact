@@ -5,6 +5,7 @@ created: 2026-10-26
 updated: 2026-10-27
 inputs:
   - _bmad-output/planning-artifacts/research/analisi-limiti-mactalkact-2026-10-26.md
+  - _bmad-output/planning-artifacts/research/valutazione-motori-agente-2026-10-27.md
   - README.md
   - Sources/MacTalkAct/
 ---
@@ -22,6 +23,8 @@ La promessa di MacTalkAct è «la mia voce diventa le mie mani». Oggi la promes
 Questo ciclo rende l'app **affidabile prima che potente**. Ogni frase riceve una sola decisione, presa da un unico Router che usa il modello linguistico Apple presente sul Mac per distinguere comandi, dettatura e chiacchiera in meno di un secondo, senza rete e senza consumare la subscription. La conversazione resta aperta dopo ogni risposta, così non serve ripetere «computer» a ogni frase, e l'agente ricorda le ultime cose fatte, così «rimetti com'era prima» diventa una richiesta valida.
 
 In secondo luogo l'app diventa **veloce e sempre disponibile**: i comandi a un passo vengono eseguiti in locale in circa un secondo, l'agente usa un modello Claude proporzionato alla difficoltà, e quando la subscription è esaurita l'app continua a funzionare in Modalità ridotta invece di fermarsi.
+
+Infine (aggiunta del 27/10) l'Agente **non dipende più da un solo fornitore**: Nico sceglie se farlo lavorare con Claude, con Codex o con il modello sul Mac; quando il Motore scelto esaurisce la quota l'app passa da sola all'altro e, se nessuno dei due è disponibile, al modello locale, avvisando. Il modello locale diventa abbastanza bravo da rendere l'app utilizzabile anche senza alcun abbonamento, eventualmente con un modello più capace servito da Ollama o MLX sul Mac.
 
 ## 2. Utente
 
@@ -49,6 +52,15 @@ Altri utenti, altre lingue oltre all'italiano, chi usa l'app senza Apple Intelli
 - **UJ-4. Nico spunta molte caselle in una tabella web.**
   Dice «computer, spunta le 18:30 per tutti quelli che hanno già le 21:30». L'Agente seleziona le caselle per numero, in blocco, e verifica che ognuna risulti spuntata, invece di cliccare decine di coordinate una alla volta.
 
+- **UJ-5. Codex finisce la quota, risponde Claude.** (aggiunto il 27/10)
+  Nico ha scelto Codex dal menu della barra. A metà pomeriggio chiede «computer, apri la mail di Marco» e Codex risponde con il limite d'uso. Prima che l'Agente abbia toccato lo schermo, l'app ripete la richiesta con Claude e l'HUD dice «Codex in pausa fino alle 17:40 · uso Claude». La mail si apre. Le richieste successive vanno a Claude senza altri avvisi; alle 17:40 l'HUD dice «Codex è tornato» e l'app torna a usarlo. **Caso limite:** se il limite arriva dopo che l'Agente ha già cliccato, l'app non ripete la richiesta (potrebbe fare due volte la stessa cosa): dice che cosa è stato fatto e che la prossima richiesta userà Claude.
+
+- **UJ-6. Sera, in treno, senza quota né rete.** (aggiunto il 27/10)
+  Claude e Codex sono entrambi in pausa, oppure manca la connessione. Alla prima richiesta l'HUD avvisa «Claude e Codex non disponibili · passo al modello locale». Nico chiede «apri il notebook del corso e vai all'ultima cella»: il Motore locale lo fa in pochi passi, senza rete. A una richiesta troppo lunga risponde con onestà che non ci riesce col modello locale, senza lasciare il lavoro a metà in modo silenzioso.
+
+- **UJ-7. Un modello più capace sul Mac.** (aggiunto il 27/10)
+  Nico avvia Ollama con un modello da 9 miliardi di parametri. In Impostazioni › Motori sceglie «Server locale», vede l'elenco dei modelli del server, ne sceglie uno e preme «Prova»: l'app mostra il tempo al primo strumento e lo stato «pronto». Da quel momento il Motore locale usa quel modello; se il server è spento torna al modello Apple e lo dice.
+
 ## 3. Glossario
 
 - **Frase** — un segmento di parlato chiuso dal rilevatore di voce o dal push-to-talk, già trascritto.
@@ -57,7 +69,15 @@ Altri utenti, altre lingue oltre all'italiano, chi usa l'app senza Apple Intelli
 - **Decisione di instradamento** — l'esito del Router per una Frase: *Ignora*, *Scrivi*, *Comando rapido*, *Corsia locale* o *Agente*, con un motivo leggibile.
 - **Comando rapido** — comando riconosciuto dalla grammatica fissa esistente (es. «annulla», «scorri giù»).
 - **Corsia locale** — esecuzione di un comando a un passo proposto dal Classificatore on-device e approvato dal Validatore.
-- **Agente** — Claude, eseguito tramite la CLI con la subscription, con gli strumenti di MacTalkAct.
+- **Agente** — chi esegue le richieste a più passi con gli strumenti di MacTalkAct. Gira su uno dei Motori.
+- **Motore** — il fornitore che fa ragionare l'Agente: *Claude* (CLI `claude`, abbonamento Claude), *Codex* (CLI `codex`, account ChatGPT) o *Locale* (modello sul Mac).
+- **Motore scelto** — il Motore selezionato da Nico nel menu o nelle impostazioni.
+- **Catena di riserva** — l'ordine in cui l'app prova i Motori quando il Motore scelto non è disponibile: prima l'altro Motore cloud, poi il Motore locale.
+- **Passaggio di Motore** — il momento in cui l'app passa a un Motore di riserva o torna al Motore scelto; viene sempre segnalato nell'HUD.
+- **Motore locale** — l'Agente eseguito interamente sul Mac, con il modello Apple oppure con un Modello locale esteso.
+- **Modello locale esteso** — un modello più capace di quello Apple, servito sul Mac da Ollama, LM Studio o un server MLX.
+- **Azione con effetti** — una chiamata di strumento che cambia qualcosa (clic, scrittura, tasti, apertura di app o siti); osservare e fare screenshot non lo sono.
+- **Banco di prova dell'Agente** — l'elenco di compiti su pagine di prova locali, con esito atteso, usato per misurare i Motori.
 - **Classificatore on-device** — il modello linguistico Apple sul Mac, usato per classificare Frasi e proporre azioni a un passo.
 - **Validatore** — regole deterministiche che approvano o respingono una proposta del Classificatore on-device prima dell'esecuzione.
 - **Chiacchiera** — Frase non rivolta al computer (parlare con altri, commenti, saluti).
@@ -65,7 +85,7 @@ Altri utenti, altre lingue oltre all'italiano, chi usa l'app senza Apple Intelli
 - **Finestra di conversazione** — periodo dopo una risposta dell'app in cui le Frasi vengono valutate anche senza Parola di attivazione.
 - **Memoria di conversazione** — elenco in RAM delle ultime interazioni (richiesta, esito, contesto) passato all'Agente. Diversa dalla **Memoria permanente** (`memoria.md`).
 - **Inserimento** — un blocco di testo scritto dall'app nel campo attivo, registrato per poterlo annullare.
-- **Modalità ridotta** — stato dell'app quando l'Agente non è disponibile (limite della subscription o CLI assente).
+- **Modalità ridotta** — stato dell'app quando nessun Motore è disponibile, compreso il Motore locale (per esempio modello Apple spento e Catena di riserva disattivata).
 - **Corpus** — l'elenco di Frasi di prova, con contesto ed esito atteso, usato per verificare il Router.
 
 ## 4. Funzionalità
@@ -257,6 +277,96 @@ Il menu della barra mostra lo stato dell'Agente, un sottomenu «Impostazioni rap
 - **NFR-6 Nessun cambiamento di comportamento.** Con i valori predefiniti l'app si comporta esattamente come prima; ogni sezione ha «Ripristina predefiniti».
 - **NFR-7 Effetto immediato.** Ogni modifica vale dall'azione successiva, senza riavvio.
 
+### 4.6 Più Motori per l'Agente
+
+**Descrizione:** aggiunta il 27/10. L'Agente può lavorare con Claude, con Codex o con il Motore locale. Nico sceglie il Motore; quando non è disponibile l'app usa la Catena di riserva e lo dice. Gli strumenti, il prompt, la memoria e le conferme sono gli stessi per tutti i Motori: cambia solo chi ragiona. Realizza UJ-5 e UJ-6.
+
+#### FR-25: Scelta del Motore
+
+Nico sceglie il Motore scelto tra Claude, Codex e Locale dal menu della barra e dalle impostazioni. La scelta vale dalla richiesta successiva e resta dopo il riavvio.
+
+**Conseguenze (verificabili):**
+- Il valore predefinito è Claude: senza toccare nulla l'app usa l'Agente come prima.
+- Un Motore non installato o non autenticato è visibile ma marcato («non trovato», «accesso da fare») e il menu lo spiega.
+
+#### FR-26: Codex come Motore
+
+Con Codex scelto, l'Agente esegue la richiesta con la CLI `codex` e il login ChatGPT dell'utente, usando solo gli strumenti di MacTalkAct, con due livelli (rapido e profondo) come per Claude (FR-13).
+
+**Conseguenze (verificabili):**
+- Codex non ha a disposizione shell, file, browser, computer use, plugin né la configurazione personale `~/.codex/config.toml`; non salva sessioni su disco.
+- Memoria permanente, blocco `<recent>`, conferme e verifica dei risultati funzionano come con Claude.
+- Il log riporta Motore e modello di ogni richiesta.
+
+#### FR-27: Catena di riserva
+
+Quando il Motore scelto non è disponibile (in pausa per limite, non installato, non autenticato), l'app usa il primo Motore disponibile della Catena di riserva: l'altro Motore cloud, poi il Motore locale. Quando il Motore scelto torna disponibile, l'app torna a usarlo.
+
+**Conseguenze (verificabili):**
+- Ogni Passaggio di Motore è segnalato una volta nell'HUD: «Codex in pausa fino alle 17:40 · uso Claude», «Claude e Codex non disponibili · passo al modello locale», «Codex è tornato».
+- Nessun processo di un Motore in pausa viene avviato.
+- La Catena di riserva si può disattivare; disattivata, l'app si comporta come la Modalità ridotta di FR-14.
+
+#### FR-28: Limite a metà richiesta
+
+Se un Motore si ferma per limite d'uso o errore di rete durante una richiesta, l'app ripete la richiesta con il Motore successivo della Catena di riserva solo se non è ancora stata eseguita nessuna Azione con effetti; altrimenti si ferma e dice che cosa è stato fatto.
+
+**Conseguenze (verificabili):**
+- Nessuna Azione con effetti viene mai eseguita due volte per effetto di un Passaggio di Motore.
+- Al massimo un nuovo tentativo per Motore e per richiesta.
+
+#### FR-29: Disponibilità di ogni Motore
+
+Ogni Motore ha il proprio stato: disponibile, in pausa fino a una data e ora, non trovato, accesso da fare. Il messaggio di limite di Codex («try again at …», «try again in …», anche con un giorno diverso per il limite settimanale) viene letto come quello di Claude.
+
+**Conseguenze (verificabili):**
+- Menu della barra e Stato e diagnostica mostrano lo stato di tutti i Motori e quale è in uso adesso.
+- Se l'ora di ripresa non è leggibile la pausa dura 30 minuti, come oggi.
+
+### 4.7 Bravo anche da solo
+
+**Descrizione:** aggiunta il 27/10. Il Motore locale deve dare risultati buoni senza Claude né Codex, con il modello Apple sempre presente e, se Nico lo vuole, con un Modello locale esteso servito sul Mac. La qualità si misura con un Banco di prova dell'Agente, non a sensazione. Realizza UJ-6 e UJ-7.
+
+#### FR-30: Agente locale
+
+Il Motore locale esegue richieste a più passi con gli strumenti di MacTalkAct, entro un numero massimo di passi più basso di quello cloud [ASSUMPTION: 8 passi]. Quando il compito supera le sue capacità si ferma e lo dice.
+
+**Conseguenze (verificabili):**
+- Senza rete e con entrambi i Motori cloud in pausa, «apri la mail di Marco» e «modifica la domanda in che cos'è Internet» riescono sulle pagine di prova del Banco.
+- Le conferme di sicurezza sono identiche a quelle dei Motori cloud (NFR-5).
+
+#### FR-31: Modello locale esteso
+
+Nico può collegare il Motore locale a un server compatibile OpenAI sul Mac (Ollama, LM Studio, `mlx_lm.server`, Rapid-MLX), scegliere il modello dall'elenco del server e provarlo. Se il server non risponde, il Motore locale usa il modello Apple e lo segnala.
+
+**Conseguenze (verificabili):**
+- Il pulsante «Prova» mostra esito e tempo al primo strumento.
+- Il modello viene tenuto in memoria solo per un tempo limitato dopo l'ultima richiesta [ASSUMPTION: 10 minuti], per lasciare memoria al resto del Mac.
+
+#### FR-32: Banco di prova dell'Agente
+
+Esiste un Banco di prova dell'Agente (almeno 20 compiti su pagine HTML locali e app di sistema, con esito atteso verificabile) e un comando di debug che lo esegue con un Motore scelto e riporta compiti riusciti, passi, tempo al primo strumento e tempo totale.
+
+**Conseguenze (verificabili):**
+- Lo stesso Banco gira con Claude, Codex, modello Apple e Modello locale esteso, e i risultati si confrontano in una tabella.
+- Le pagine di prova non contengono dati privati.
+
+#### FR-33: Niente cloud dove non serve
+
+Le funzioni dell'app diverse dall'Agente non richiedono Claude: la ripulitura della dettatura e i passi delle macro che la grammatica non conosce usano il Motore in uso, compreso quello locale.
+
+**Conseguenze (verificabili):**
+- Con tutti i Motori cloud non disponibili, una macro con un passo libero («apri la posta e cerca Marco») viene eseguita invece di fallire con «Non so eseguire … senza Claude».
+
+#### FR-34: Motori nelle impostazioni
+
+Una sezione «Motori» mostra il Motore scelto, l'interruttore della Catena di riserva e, per ogni Motore, percorso del comando, stato dell'accesso, modelli rapido e profondo con il loro sforzo; per il Motore locale il modello Apple o il server esteso (indirizzo, modello, «Prova»).
+
+**Feature-specific NFRs:**
+- **NFR-8 Stesse mani per tutti.** Ogni Motore agisce solo tramite gli strumenti di MacTalkAct; nessun Motore riceve shell, accesso ai file o strumenti propri.
+- **NFR-9 Tempi dei Motori.** Scelta del Motore ≤ 50 ms; primo strumento con Codex rapido ≤ 4 s [ASSUMPTION]; con il modello Apple ≤ 2 s; con il Modello locale esteso ≤ 5 s su M1 16 GB [ASSUMPTION da misurare con il Banco].
+- **NFR-10 Il locale resta locale.** Con il Motore locale nessun dato lascia il Mac: il server esteso è accettato senza avvisi solo su `localhost`; un indirizzo diverso richiede una conferma esplicita nelle impostazioni.
+
 ## 5. Requisiti non funzionali trasversali
 
 - **NFR-1 Tempi.** Decisione del Router ≤ 0,8 s (90° percentile, modello caldo) dalla fine della Frase; azione della Corsia locale ≤ 1,5 s (90° percentile); primo strumento dell'Agente su richiesta semplice ≤ 3 s.
@@ -269,7 +379,8 @@ Il menu della barra mostra lo stato dell'Agente, un sottomenu «Impostazioni rap
 
 - Non si cambia il motore di riconoscimento vocale né il rilevatore di voce.
 - Non si aggiunge una parola di attivazione «sempre in ascolto» a basso consumo.
-- Non si sostituisce l'Agente Claude con il modello on-device per compiti a più passi.
+- ~~Non si sostituisce l'Agente Claude con il modello on-device per compiti a più passi.~~ Superato il 27/10 da §4.6 e §4.7: il Motore locale esegue compiti a più passi, con un tetto di passi più basso.
+- Non si usano chiavi API OpenAI né il modello Apple su Private Cloud Compute in questo ciclo (vedi Domande aperte).
 - La gestione dalle impostazioni (§4.5) non aggiunge capacità nuove all'app.
 - Non si risolvono in questo ciclo i limiti minori del README (profili del browser, verso dello scorrimento, ⌘[ e ⌘] con tastiera italiana).
 
@@ -281,7 +392,7 @@ Router unico con Classificatore on-device, Finestra di conversazione, Memoria di
 
 ### 7.2 Escluso
 
-Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modificare il Corpus, coda delle richieste da eseguire quando torna l'Agente.
+Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modificare il Corpus, coda delle richieste da eseguire quando torna l'Agente, esecuzione contemporanea di più Motori sulla stessa richiesta, download dei modelli locali dall'app (si usano quelli del server).
 
 ## 8. Metriche di successo
 
@@ -293,15 +404,22 @@ Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modifica
 - **SM-3 Tempo dei comandi a un passo:** mediana sotto 1,5 s. Valida FR-11.
 - **SM-4 Uso di Opus:** almeno metà delle richieste all'Agente servite dal modello rapido. Valida FR-13.
 
+- **SM-5 Tempo senza Agente:** minuti in cui una richiesta per l'Agente non trova alcun Motore, da 35 minuti il 26/10 (18:25–19:00) a zero. Valida FR-27.
+- **SM-6 Qualità del Motore locale:** sul Banco di prova almeno il 70% dei compiti riusciti con il modello Apple e almeno l'85% con il Modello locale esteso [ASSUMPTION]. Valida FR-30, FR-31.
+
 **Contro-metriche (da non ottimizzare)**
 - **SM-C1 Comandi ignorati:** le Frasi rivolte al computer decise *Ignora* non devono crescere per abbassare SM-1. Bilancia SM-1.
 - **SM-C2 Conferme saltate:** nessuna riduzione dei tempi può passare dall'eliminare conferme. Bilancia SM-3.
+- **SM-C3 Azioni doppie:** zero azioni ripetute per effetto di un Passaggio di Motore. Bilancia SM-5.
 
 ## 9. Domande aperte
 
 1. La Finestra di conversazione di 20 secondi è giusta, o in presenza di altre persone serve più corta? Da tarare dopo una settimana d'uso con SM-C1.
 2. Il modello rapido (Sonnet 5.5, effort basso) è abbastanza preciso con gli strumenti di MacTalkAct? Da verificare con 10 richieste tipiche prima di renderlo predefinito.
 3. Lo strumento di modifica negli editor web funziona allo stesso modo in Jupyter, Colab e VS Code web? Da verificare durante FR-16.
+4. `codex exec` può essere avviato in anticipo e attendere la richiesta su stdin, come fa oggi `claude`? Se no, serve `codex app-server`. Da decidere nello spike della Storia 4.1.
+5. Quale Modello locale esteso conviene su un M1 con 16 GB (Qwen 3.5 4B o 9B, Gemma 4 E4B) e con quale server (Ollama o LM Studio)? Da decidere con il Banco di prova nella Storia 5.2.
+6. Un'app firmata localmente può ottenere l'entitlement per il modello Apple su Private Cloud Compute? Se sì, è un Motore intermedio gratuito tra locale e cloud.
 
 ## 10. Indice delle assunzioni
 
@@ -309,3 +427,8 @@ Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modifica
 - §4.4 FR-13 — Sonnet 5.5 ed Opus 5.5 come modelli predefiniti.
 - Generale — Apple Intelligence resta attiva sul Mac (verificato il 26/10 su macOS 27.0.1).
 - Generale — Memoria di conversazione: 5 interazioni, 10 minuti.
+- §4.7 FR-30 — 8 passi massimi per il Motore locale.
+- §4.7 FR-31 — Modello locale esteso tenuto in memoria 10 minuti dopo l'ultima richiesta.
+- §4.6 NFR-9 — tempi al primo strumento di Codex e del Modello locale esteso.
+- §8 SM-6 — soglie di qualità del Motore locale (70% Apple, 85% esteso).
+- Generale — Codex resta installato tramite ChatGPT.app con login ChatGPT (verificato il 27/10: codex-cli 0.164.0-alpha.11.1).
