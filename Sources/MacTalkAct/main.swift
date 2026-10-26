@@ -98,6 +98,8 @@ if let seconds = argument(after: "--wake-test") {
 if let request = argument(after: "--agent-test") {
     Task { @MainActor in
         let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+        if let e = argument(after: "--engine").flatMap(EngineID.init(rawValue:)) { agent.forcedEngine = e }
+        let deep = arguments.contains("--deep")
         agent.tools.onProgress = { print("  · \($0)") }
         agent.tools.askUser = { q, _ in print("  ? \(q) → (test: nessuna risposta)"); return nil }
         do {
@@ -105,8 +107,11 @@ if let request = argument(after: "--agent-test") {
             agent.prewarm()
             try await Task.sleep(for: .seconds(4))
             let started = Date()
-            let answer = try await agent.run(request, context: ScreenContext.capture(includeLabels: false))
-            print(String(format: "Risposta (%.1fs, %d chiamate): %@", Date().timeIntervalSince(started), agent.tools.callCount, answer))
+            agent.refreshAvailability()
+            try await Task.sleep(for: .seconds(1))
+            let answer = try await agent.run(request, context: ScreenContext.capture(includeLabels: false), deep: deep)
+            print(String(format: "Risposta (%@/%@, %.1fs, %d chiamate, %d con effetti): %@", agent.lastEngine?.rawValue ?? "?", agent.lastModel,
+                         Date().timeIntervalSince(started), agent.tools.callCount, agent.tools.effectfulCalls, answer))
         } catch {
             print("Errore: \(error.localizedDescription)")
         }

@@ -58,6 +58,8 @@ final class Coordinator {
         engine.onSpeechStart = { [weak self] in self?.dictationIdle?.cancel() }
         setupAgent()
         agent.onAvailabilityChange = { [weak self] a in self?.availabilityChanged(a) }
+        agent.onEngineAvailabilityChange = { [weak self] id, a in self?.engineAvailabilityChanged(id, a) }
+        agent.onEngineSwitch = { [weak self] change in self?.engineSwitched(change) }
         // Don't listen to our own voice.
         speaker.onSpeakingChange = { [weak self] speaking in
             guard let self else { return }
@@ -142,11 +144,25 @@ final class Coordinator {
         s.pendingConfirmation = pending != nil
         s.proposedText = conversation.pendingProposal
         s.wakePhrases = settings.wakePhraseList
-        s.aiAvailable = settings.aiAvailable
+        s.aiAvailable = agentReady
         s.agentAvailability = settings.backend == .subscription ? agent.availability : .available
         s.localLane = settings.useLocalLane
         s.localLaneMaxWords = settings.localLaneMaxWords
         return s
+    }
+
+    /// The agent can be used at all: a configured engine (maybe paused) or the API key.
+    var agentReady: Bool {
+        guard settings.useAI else { return false }
+        return settings.backend == .apiKey ? settings.apiKey != nil : agent.isConfigured
+    }
+
+    /// One engine changed state: «Codex è tornato» when the chosen one is back (FR-27).
+    private func engineAvailabilityChanged(_ id: EngineID, _ a: AgentAvailability) {
+        onModeChange?()
+        guard id == settings.agentEngine, a == .available, !busy, let message = agent.chosenEngineIsBack() else { return }
+        hud.show(.info, message, autoHide: 3)
+        if settings.speakReplies { Task { await speaker.say(message) } }
     }
 
     private func availabilityChanged(_ a: AgentAvailability) {
@@ -159,14 +175,14 @@ final class Coordinator {
             let f = DateFormatter()
             f.dateFormat = "HH:mm"
             Log.info("Modalità ridotta fino alle \(f.string(from: until))")
-        case .missing:
+        case .missing, .loginNeeded, .unavailable:
             break
         }
     }
 
     /// Keeps a `claude` process ready so free-form requests answer in ~2 s.
     func prewarmAI() {
-        guard settings.aiAvailable, settings.backend == .subscription else { return }
+        guard settings.useAI, settings.backend == .subscription else { return }
         Task {
             do {
                 try await agent.start()
@@ -177,9 +193,18 @@ final class Coordinator {
         }
     }
 
+    /// Shown with the agent's progress for the rest of the request (FR-27).
+    private var engineNotice: String?
+
+    private func engineSwitched(_ change: AgentRunner.EngineSwitch) {
+        engineNotice = "🔀 \(change.message)"
+        hud.show(.thinking, change.message, detail: "🤖 Agente · di' «stop» per fermarlo")
+        if settings.speakReplies { Task { await speaker.say(change.message.replacingOccurrences(of: " · ", with: ", ")) } }
+    }
+
     private func setupAgent() {
         agent.tools.onProgress = { [weak self] line in
-            self?.hud.show(.working, line, detail: "🤖 Agente · di' «stop» per fermarlo")
+            self?.hud.show(.working, line, detail: self?.engineNotice ?? "🤖 Agente · di' «stop» per fermarlo")
         }
         agent.tools.askUser = { [weak self] question, isConfirmation in
             await self?.askByVoice(question, confirmation: isConfirmation)
@@ -660,7 +685,7 @@ final class Coordinator {
         } catch {
             // "apri il file budget" or "clicca la seconda mail" may need real understanding.
             switch cmd {
-            case .openApp where settings.aiAvailable, .click where settings.aiAvailable:
+            case .openApp where agentReady, .click where agentReady:
                 await runSmart(original, deep: false, context: ScreenContext.capture(includeLabels: false))
             default:
                 fail(error.localizedDescription)
@@ -694,10 +719,10 @@ final class Coordinator {
             hud.show(.working, step, detail: "Macro «\(macro.name)» · \(i + 1)/\(macro.steps.count)")
             if let cmd = Grammar.parse(step) {
                 await runFast(cmd, original: step)
-            } else if settings.aiAvailable {
+            } else if agentReady {
                 await runSmart(step, deep: RouteHeuristics.isComplex(step), context: ScreenContext.capture(includeLabels: false))
             } else {
-                fail("Non so eseguire «\(step)» senza Claude")
+                fail("Non so eseguire «\(step)» senza l'agente")
             }
             try? await Task.sleep(for: .milliseconds(500))
         }
@@ -708,9 +733,9 @@ final class Coordinator {
 
     /// A request for Claude: the agent (subscription) or the single-shot planner (API key).
     private func runSmart(_ text: String, deep: Bool, context ctx: ScreenContext) async {
-        guard settings.aiAvailable else {
+        guard agentReady else {
             fail("Non ho capito «\(text)»",
-                 detail: settings.useAI ? "Claude non è configurato: controlla le impostazioni" : "")
+                 detail: settings.useAI ? "Nessun motore dell'agente configurato: controlla le impostazioni" : "")
             return
         }
 
@@ -734,10 +759,14 @@ final class Coordinator {
 
     /// The agent observes and acts until the request is done.
     private func runAgent(_ text: String, context: ScreenContext, deep: Bool) async {
-        if case .paused = agent.availability {
-            hud.show(.info, "Agente in pausa", detail: "Dettatura, comandi rapidi e numeri funzionano", autoHide: 3)
+        if agent.currentChoice() == nil {
+            hud.show(.info, "Agente non disponibile",
+                     detail: "\(EngineSelector.unavailableMessage(chosen: settings.agentEngine, engines: agent.engines.mapValues(\.availability))) · dettatura e comandi funzionano",
+                     autoHide: 4)
             return
         }
+        engineNotice = nil
+        defer { engineNotice = nil }
         hud.show(.thinking, text, detail: deep ? "🤖 Ci penso con calma…" : "🤖 Ci penso…")
         do {
             try await agent.start()
@@ -747,7 +776,7 @@ final class Coordinator {
             if cancelRequested {
                 hud.show(.info, "Interrotto", autoHide: 1.5)
             } else {
-                hud.show(.success, answer.isEmpty ? "Fatto" : answer, autoHide: settings.hudAnswerSeconds)
+                hud.show(.success, answer.isEmpty ? "Fatto" : answer, detail: engineNotice ?? "", autoHide: settings.hudAnswerSeconds)
                 if settings.speakReplies { await speaker.say(answer.isEmpty ? "Fatto" : answer) }
             }
         } catch {
@@ -756,13 +785,15 @@ final class Coordinator {
                                  changes: agent.tools.changes)
             if cancelRequested {
                 hud.show(.info, "Interrotto", autoHide: 1.5)
-            } else if case .paused(let until) = agent.availability {
-                // Subscription usage limit: reduced mode until it comes back (FR-14).
-                let f = DateFormatter()
-                f.dateFormat = "HH:mm"
-                fail("Limite della subscription raggiunto",
-                     detail: "Agente in pausa fino alle \(f.string(from: until)) · dettatura e comandi funzionano")
-                if settings.speakReplies { await speaker.say("Ho raggiunto il limite della subscription.") }
+            } else if case AgentRunner.RunError.stoppedMidway = error {
+                // A limit after the agent already acted: never repeated on another engine (FR-28).
+                fail("Mi sono fermato a metà", detail: message)
+                if settings.speakReplies { await speaker.say("Mi sono fermato a metà, controlla.") }
+            } else if case .paused = agent.availability {
+                // Usage limit and no other engine: reduced mode until it comes back (FR-14).
+                fail("Limite d'uso raggiunto",
+                     detail: "\(EngineSelector.unavailableMessage(chosen: settings.agentEngine, engines: agent.engines.mapValues(\.availability))) · dettatura e comandi funzionano")
+                if settings.speakReplies { await speaker.say("Ho raggiunto il limite d'uso.") }
             } else {
                 fail("L'agente non ce l'ha fatta", detail: message)
                 if settings.speakReplies { await speaker.say("Non ci sono riuscito.") }

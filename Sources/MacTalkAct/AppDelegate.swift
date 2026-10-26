@@ -98,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .store(in: &cancellables)
         lastAgentConfigKey = agentConfigKey
 
-        if !settings.aiAvailable { showSettings() }
+        if settings.useAI, !coordinator.agentReady { showSettings() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -254,19 +254,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var agentStatusText: String {
-        guard settings.useAI else { return "Claude disattivato" }
-        switch coordinator.agent.availability {
-        case .available:
-            if settings.backend == .apiKey { return "Disponibile (chiave API)" }
-            return settings.useFastModel ? "Disponibile (\(Self.short(settings.fastModel)) / \(Self.short(settings.model)))"
-                                         : "Disponibile (\(Self.short(settings.model)))"
-        case .paused(let until):
-            let f = DateFormatter()
-            f.dateFormat = "HH:mm"
-            return "In pausa fino alle \(f.string(from: until)) (limite subscription)"
-        case .missing:
-            return "Comando «claude» non trovato"
+        guard settings.useAI else { return "disattivato" }
+        if settings.backend == .apiKey { return "Claude con chiave API" }
+        let agent = coordinator.agent
+        guard let choice = agent.currentChoice() else {
+            return EngineSelector.unavailableMessage(chosen: settings.agentEngine, engines: agent.engines.mapValues(\.availability))
         }
+        let engine = agent.engines[choice.engine]
+        let models = settings.useFastModel
+            ? "\(Self.short(engine?.model(for: .fast) ?? "")) / \(Self.short(engine?.model(for: .deep) ?? ""))"
+            : Self.short(engine?.model(for: .deep) ?? "")
+        let name = choice.engine == .local ? "Locale" : choice.engine.displayName
+        if choice.isFallback { return "\(name) (\(choice.reason))" }
+        return "\(name) · \(models)"
     }
 
     private var routerStatusText: String {
@@ -275,7 +275,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private static func short(_ model: String) -> String {
-        model.replacingOccurrences(of: "claude-", with: "").replacingOccurrences(of: "-5-5", with: " 5.5").capitalized
+        if model.hasPrefix("claude-") {
+            return model.replacingOccurrences(of: "claude-", with: "").replacingOccurrences(of: "-5-5", with: " 5.5").capitalized
+        }
+        return model.replacingOccurrences(of: "gpt-", with: "GPT-")
     }
 
     @objc private func quickToggle(_ sender: NSMenuItem) {

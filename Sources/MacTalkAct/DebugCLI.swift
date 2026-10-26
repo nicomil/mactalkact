@@ -134,6 +134,86 @@ enum DebugCLI {
         check("errore normale ≠ limite", !AgentRunner.isLimitMessage("Claude non ha risposto in tempo"))
         check("senza ora → nil", AgentRunner.resetDate(from: "limit reached", now: base) == nil)
 
+        print("Motori (Epic 4):")
+        let now = Date()
+        let later = now.addingTimeInterval(3600)
+        typealias S = EngineSelector
+        let all: [EngineID: AgentAvailability] = [.claude: .available, .codex: .available, .local: .available]
+        check("scelto disponibile", S.select(chosen: .codex, engines: all, fallback: true) == EngineChoice(engine: .codex, isFallback: false, reason: "scelto"))
+        let codexPaused: [EngineID: AgentAvailability] = [.claude: .available, .codex: .paused(until: later), .local: .available]
+        check("Codex in pausa → Claude", S.select(chosen: .codex, engines: codexPaused, fallback: true)?.engine == .claude)
+        check("riserva segnata", S.select(chosen: .codex, engines: codexPaused, fallback: true)?.isFallback == true)
+        check("senza riserva → nessuno", S.select(chosen: .codex, engines: codexPaused, fallback: false) == nil)
+        let cloudsDown: [EngineID: AgentAvailability] = [.claude: .missing, .codex: .loginNeeded, .local: .available]
+        check("Claude e Codex giù → locale", S.select(chosen: .claude, engines: cloudsDown, fallback: true)?.engine == .local)
+        check("messaggio passaggio al locale",
+              S.fallbackMessage(chosen: .claude, using: .local, engines: cloudsDown) == "Claude e Codex non disponibili · passo al modello locale")
+        check("messaggio Codex → Claude", S.fallbackMessage(chosen: .codex, using: .claude, engines: codexPaused).hasPrefix("Codex in pausa fino alle "))
+        let nothing: [EngineID: AgentAvailability] = [.claude: .paused(until: later), .codex: .missing, .local: .unavailable("modello Apple spento")]
+        check("nessun motore → ridotta", S.select(chosen: .claude, engines: nothing, fallback: true) == nil)
+        check("locale scelto resta locale", S.select(chosen: .local, engines: [.claude: .available, .codex: .available, .local: .unavailable("x")], fallback: true) == nil)
+        check("esclusi dopo un errore", S.select(chosen: .claude, engines: all, fallback: true, excluding: [.claude])?.engine == .codex)
+        for chosen in EngineID.allCases {
+            for fb in [true, false] {
+                for a in [AgentAvailability.available, .paused(until: later), .missing, .loginNeeded, .unavailable("x")] {
+                    var states = all
+                    states[chosen] = a
+                    let pick = S.select(chosen: chosen, engines: states, fallback: fb)
+                    let expected: EngineID? = a == .available ? chosen : (fb ? chosen.chain.dropFirst().first { states[$0] == .available } : nil)
+                    if pick?.engine != expected { check("selettore \(chosen) \(a) riserva=\(fb)", false) }
+                }
+            }
+        }
+        check("selettore: tutte le combinazioni", true)
+
+        print("Messaggi di limite (Claude e Codex):")
+        let rome = cal
+        let b2 = rome.date(from: DateComponents(year: 2026, month: 10, day: 27, hour: 14, minute: 0))!
+        if let lines = try? String(contentsOfFile: "Tests/fixtures/codex/limit-messages.txt", encoding: .utf8) {
+            for line in lines.split(separator: "\n") where !line.hasPrefix("#") {
+                let parts = line.split(separator: "\t").map(String.init)
+                guard parts.count == 2 else { continue }
+                let (msg, want) = (parts[0], parts[1])
+                let got = LimitMessage.resetDate(from: msg, now: b2, calendar: rome)
+                let ok: Bool
+                if want == "30m" {
+                    ok = got == nil && LimitMessage.isLimit(msg)
+                } else if want.hasPrefix("+") {
+                    ok = got.map { Int($0.timeIntervalSince(b2) / 60) == Int(want.dropFirst()) } ?? false
+                } else if want.count == 5 {
+                    let hm = want.split(separator: ":").compactMap { Int($0) }
+                    ok = got.map { rome.component(.hour, from: $0) == hm[0] && rome.component(.minute, from: $0) == hm[1] && $0 > b2 } ?? false
+                } else {
+                    let f = DateFormatter()
+                    f.timeZone = rome.timeZone
+                    f.dateFormat = "yyyy-MM-dd HH:mm"
+                    ok = got.map { f.string(from: $0) == want } ?? false
+                }
+                check("limite: \(msg.suffix(38)) → \(want)", ok && LimitMessage.isLimit(msg))
+            }
+        } else {
+            print("  (fixture dei limiti non trovate: esegui dalla cartella del progetto)")
+        }
+
+        print("Codex (JSONL):")
+        func parse(_ file: String) -> CodexCLI.Outcome? {
+            guard let text = try? String(contentsOfFile: "Tests/fixtures/codex/\(file)", encoding: .utf8) else { return nil }
+            var p = CodexEventParser()
+            for line in text.split(separator: "\n") { if let o = p.feed(String(line)) { return o } }
+            return p.finish()
+        }
+        check("risposta finale", parse("success.jsonl") == .answer("In primo piano c’è Note."))
+        if case .failed(let m) = parse("unauthorized.jsonl") { check("401 → accesso da fare", CodexEventParser.isLogin(m)) } else { check("401 → accesso da fare", false) }
+        if case .failed(let m) = parse("limit-at-time.jsonl") { check("limite letto subito", LimitMessage.isLimit(m)) } else { check("limite letto subito", false) }
+        let cfg = CodexCLI.Config(model: "gpt-6-luna", effort: "low", instructionsFile: "/tmp/i.md", mcpURL: "http://127.0.0.1:1/mcp", mcpToken: "SEGRETO")
+        let args = CodexCLI.arguments(cfg)
+        check("token mai negli argomenti", !args.joined(separator: " ").contains("SEGRETO"))
+        check("niente configurazione dell'utente", args.contains("--ignore-user-config") && args.contains("--ephemeral"))
+        check("shell e computer use spenti", ["shell_tool", "unified_exec", "computer_use", "browser_use"].allSatisfy { f in
+            args.indices.contains { args[$0] == "--disable" && $0 + 1 < args.count && args[$0 + 1] == f } })
+        check("strumenti approvati senza chiedere", args.contains("mcp_servers.mactalk.default_tools_approval_mode=\"approve\""))
+        check("shim di altre app saltati", CodexCLI.isShim("/Users/x/.cmuxterm/cmux-cli-shims/A/codex") && !CodexCLI.isShim("/Users/x/.local/bin/codex"))
+
         print("Impostazioni:")
         typealias Df = AppSettings.Defaults
         check("predefiniti = comportamento di prima",

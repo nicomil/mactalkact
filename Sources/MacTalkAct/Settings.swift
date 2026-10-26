@@ -128,6 +128,20 @@ final class AppSettings: ObservableObject {
         static let agentTimeout = 240.0
         static let confirmValiditySeconds = 45.0
         static let cleanDictation = false
+        // Engines (Epic 4-5)
+        static let agentEngine = EngineID.claude
+        static let engineFallback = true
+        static let codexPath = ""
+        static let codexModel = "gpt-6.1-sol"
+        static let codexFastModel = "gpt-6-luna"
+        static let codexDeepEffort = "medium"
+        static let codexFastEffort = "low"
+        static let localMaxSteps = 8
+        static let localProvider = LocalProvider.apple
+        static let localServerURL = "http://127.0.0.1:11434/v1"
+        static let localServerModel = ""
+        static let localKeepAliveMinutes = 10.0
+        static let localServerAllowRemote = false
         // Voice and sounds
         static let speakReplies = false
         static let speechVolume = 0.45
@@ -192,6 +206,26 @@ final class AppSettings: ObservableObject {
     @Published var agentTimeout: Double { didSet { defaults.set(agentTimeout, forKey: "agentTimeout") } }
     @Published var confirmValiditySeconds: Double { didSet { defaults.set(confirmValiditySeconds, forKey: "confirmValiditySeconds") } }
     @Published var cleanDictation: Bool { didSet { defaults.set(cleanDictation, forKey: "cleanDictation") } }
+
+    // MARK: Engines
+    /// The engine chosen by the user (FR-25).
+    @Published var agentEngine: EngineID { didSet { defaults.set(agentEngine.rawValue, forKey: "agentEngine") } }
+    /// Use the other engines when the chosen one is not available (FR-27).
+    @Published var engineFallback: Bool { didSet { defaults.set(engineFallback, forKey: "engineFallback") } }
+    @Published var codexPath: String { didSet { defaults.set(codexPath, forKey: "codexPath") } }
+    @Published var codexModel: String { didSet { defaults.set(codexModel, forKey: "codexModel") } }
+    @Published var codexFastModel: String { didSet { defaults.set(codexFastModel, forKey: "codexFastModel") } }
+    @Published var codexDeepEffort: String { didSet { defaults.set(codexDeepEffort, forKey: "codexDeepEffort") } }
+    @Published var codexFastEffort: String { didSet { defaults.set(codexFastEffort, forKey: "codexFastEffort") } }
+    /// Step limit of the local engine, lower than the cloud one (FR-30).
+    @Published var localMaxSteps: Int { didSet { defaults.set(localMaxSteps, forKey: "localMaxSteps") } }
+    /// Apple's model, or a bigger model served on the Mac (FR-31).
+    @Published var localProvider: LocalProvider { didSet { defaults.set(localProvider.rawValue, forKey: "localProvider") } }
+    @Published var localServerURL: String { didSet { defaults.set(localServerURL, forKey: "localServerURL") } }
+    @Published var localServerModel: String { didSet { defaults.set(localServerModel, forKey: "localServerModel") } }
+    @Published var localKeepAliveMinutes: Double { didSet { defaults.set(localKeepAliveMinutes, forKey: "localKeepAliveMinutes") } }
+    /// The user confirmed that a server outside this Mac may receive the screen (NFR-10).
+    @Published var localServerAllowRemote: Bool { didSet { defaults.set(localServerAllowRemote, forKey: "localServerAllowRemote") } }
 
     // MARK: Voice and sounds
     @Published var speakReplies: Bool { didSet { defaults.set(speakReplies, forKey: "speakReplies") } }
@@ -266,6 +300,20 @@ final class AppSettings: ObservableObject {
         confirmValiditySeconds = double("confirmValiditySeconds", Defaults.confirmValiditySeconds)
         cleanDictation = bool("cleanDictation", Defaults.cleanDictation)
 
+        agentEngine = EngineID(rawValue: string("agentEngine", "")) ?? Defaults.agentEngine
+        engineFallback = bool("engineFallback", Defaults.engineFallback)
+        codexPath = string("codexPath", Defaults.codexPath)
+        codexModel = string("codexModel", Defaults.codexModel)
+        codexFastModel = string("codexFastModel", Defaults.codexFastModel)
+        codexDeepEffort = string("codexDeepEffort", Defaults.codexDeepEffort)
+        codexFastEffort = string("codexFastEffort", Defaults.codexFastEffort)
+        localMaxSteps = int("localMaxSteps", Defaults.localMaxSteps)
+        localProvider = LocalProvider(rawValue: string("localProvider", "")) ?? Defaults.localProvider
+        localServerURL = string("localServerURL", Defaults.localServerURL)
+        localServerModel = string("localServerModel", Defaults.localServerModel)
+        localKeepAliveMinutes = double("localKeepAliveMinutes", Defaults.localKeepAliveMinutes)
+        localServerAllowRemote = bool("localServerAllowRemote", Defaults.localServerAllowRemote)
+
         speakReplies = bool("speakReplies", Defaults.speakReplies)
         speechVolume = double("speechVolume", Defaults.speechVolume)
         speechRate = double("speechRate", Defaults.speechRate)
@@ -306,6 +354,12 @@ final class AppSettings: ObservableObject {
             agentMaxSteps = Defaults.agentMaxSteps; agentMaxTurns = Defaults.agentMaxTurns
             agentTimeout = Defaults.agentTimeout; confirmValiditySeconds = Defaults.confirmValiditySeconds
             cleanDictation = Defaults.cleanDictation
+            agentEngine = Defaults.agentEngine; engineFallback = Defaults.engineFallback
+            codexPath = Defaults.codexPath; codexModel = Defaults.codexModel; codexFastModel = Defaults.codexFastModel
+            codexDeepEffort = Defaults.codexDeepEffort; codexFastEffort = Defaults.codexFastEffort
+            localMaxSteps = Defaults.localMaxSteps; localProvider = Defaults.localProvider
+            localServerURL = Defaults.localServerURL; localServerModel = Defaults.localServerModel
+            localKeepAliveMinutes = Defaults.localKeepAliveMinutes; localServerAllowRemote = Defaults.localServerAllowRemote
         case .voice:
             speakReplies = Defaults.speakReplies; speechVolume = Defaults.speechVolume; speechRate = Defaults.speechRate
             soundsEnabled = Defaults.soundsEnabled; soundsVolume = Defaults.soundsVolume
@@ -320,6 +374,9 @@ final class AppSettings: ObservableObject {
 
     /// Path of the `claude` command, if installed (custom path wins).
     var claudeExecutable: String? { ClaudeCLI.locate(custom: claudePath) }
+
+    /// Path of the `codex` command, if installed (custom path wins).
+    var codexExecutable: String? { CodexCLI.locate(custom: codexPath) }
 
     /// The wake word as typed, or «computer» when the field is empty.
     var effectiveWakeWord: String {
@@ -365,6 +422,22 @@ final class AppSettings: ObservableObject {
         switch backend {
         case .subscription: return claudeExecutable != nil
         case .apiKey: return apiKey != nil
+        }
+    }
+}
+
+/// Which model the local engine uses (FR-31).
+enum LocalProvider: String, CaseIterable, Identifiable {
+    /// Apple's on-device model (always there with Apple Intelligence).
+    case apple
+    /// An OpenAI-compatible server on the Mac (Ollama, LM Studio, mlx_lm.server, Rapid-MLX).
+    case server
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .apple: return "Modello Apple"
+        case .server: return "Server sul Mac (Ollama, LM Studio, MLX)"
         }
     }
 }

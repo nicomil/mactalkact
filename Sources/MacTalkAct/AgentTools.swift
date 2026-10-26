@@ -21,6 +21,9 @@ final class AgentTools {
     private var lastShot: WindowShot?
     private var confirmedUntil = Date.distantPast
     private(set) var callCount = 0
+    /// Calls that changed something on the Mac in this task (AD-15): after the first one,
+    /// a request is never repeated on another engine.
+    private(set) var effectfulCalls = 0
     /// Text changes made during the current task, for the conversation memory (FR-8).
     private(set) var changes: [String] = []
     /// The app the task works in: keystrokes and clicks stop if another app takes the front
@@ -42,12 +45,16 @@ final class AgentTools {
         lastShot = nil
         confirmedUntil = .distantPast
         callCount = 0
+        effectfulCalls = 0
         changes = []
         cancelled = false
         targetPID = AX.realFrontmostApplication()?.processIdentifier
     }
 
     private static let actingTools: Set<String> = ["click", "click_many", "type_text", "press_keys", "replace_text", "edit_text", "scroll"]
+    /// Everything that changes the screen, an app or the user's data. Reading tools
+    /// (observe, screenshot, get_text, browser_profiles, wait) and questions are not here.
+    static let effectfulTools: Set<String> = actingTools.union(["open_app", "open_url", "save_macro", "delete_macro"])
 
     /// nil when it is safe to act; otherwise an error for the agent.
     private func frontmostChanged() -> String? {
@@ -152,6 +159,7 @@ final class AgentTools {
             Log.info("Agente: azione bloccata, app in primo piano cambiata")
             return .error(problem)
         }
+        if Self.effectfulTools.contains(name) { effectfulCalls += 1 }
         let result: Result
         do {
             result = try await dispatch(name, args)

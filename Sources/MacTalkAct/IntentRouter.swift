@@ -21,10 +21,25 @@ struct RouterState {
 }
 
 /// Is the agent usable right now? Owned by AgentRunner (AD-7).
-enum AgentAvailability: Equatable {
+enum AgentAvailability: Equatable, CustomStringConvertible {
     case available
     case paused(until: Date)
+    /// The command is not installed.
     case missing
+    /// Installed but not logged in.
+    case loginNeeded
+    /// Any other reason (local model off, server not reachable), as a short Italian phrase.
+    case unavailable(String)
+
+    var description: String {
+        switch self {
+        case .available: return "disponibile"
+        case .paused(let until): return "in pausa fino a \(until)"
+        case .missing: return "non trovato"
+        case .loginNeeded: return "accesso da fare"
+        case .unavailable(let why): return "non disponibile (\(why))"
+        }
+    }
 }
 
 /// The single decision taken for a sentence (AD-1). Every case carries a readable reason.
@@ -220,6 +235,10 @@ final class IntentRouter {
             return .reduced(text, reason: "agente in pausa fino alle \(f.string(from: until))")
         case .missing:
             return .reduced(text, reason: "comando «claude» non disponibile")
+        case .loginNeeded:
+            return .reduced(text, reason: "agente senza accesso")
+        case .unavailable(let why):
+            return .reduced(text, reason: "agente non disponibile: \(why)")
         }
     }
 }

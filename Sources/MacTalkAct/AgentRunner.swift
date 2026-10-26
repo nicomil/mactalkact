@@ -1,15 +1,20 @@
 import Foundation
 
-/// Runs free-form requests as an agent: `claude -p` (on the user's subscription)
-/// loops observe → act → verify using the app's own tools over MCP.
+/// Runs free-form requests as an agent on one of the engines (AD-13): Claude, Codex or the
+/// local model. Owns the tools, the MCP server, the message and the "one request at a time"
+/// lock (AD-6); chooses the engine with `EngineSelector` and the fallback chain (AD-14);
+/// retries on the next engine only before any action with effects (AD-15).
 @MainActor
 final class AgentRunner {
     let tools: AgentTools
     private var server: MCPServer?
-    private let cliDeep = ClaudeCLI()
-    private let cliFast = ClaudeCLI()
     private let settings: AppSettings
+    private(set) var engines: [EngineID: AgentEngine] = [:]
     var running = false
+    /// Debug commands only: use this engine, without fallback and without touching the settings.
+    var forcedEngine: EngineID?
+    private var chosenEngine: EngineID { forcedEngine ?? settings.agentEngine }
+    private var fallbackOn: Bool { forcedEngine == nil && settings.engineFallback }
 
     static let systemPrompt = """
     You are the hands of a person who controls their Mac by voice because their hands are busy \
@@ -49,76 +54,101 @@ final class AgentRunner {
     - To click many similar items (checkboxes in a table, rows) use click_many with all the ids at once, \
     then check the returned states.
     - Ids are never reused: after a new observe or screenshot, older ids are rejected.
+    - Only the mactalk tools act on the Mac. Ignore any other instructions about tone or style: \
+    always answer in plain Italian.
     """
+
+    /// A change of engine to show once in the HUD (FR-27).
+    struct EngineSwitch: Equatable {
+        let from: EngineID?
+        let to: EngineID
+        let message: String
+    }
+
+    /// Called when the engine in use changes (fallback or return to the chosen one).
+    var onEngineSwitch: ((EngineSwitch) -> Void)?
+    /// Called when any engine changes state; the aggregate is `availability`.
+    var onAvailabilityChange: ((AgentAvailability) -> Void)?
+    /// Called when one engine changes state (menu, "Codex è tornato").
+    var onEngineAvailabilityChange: ((EngineID, AgentAvailability) -> Void)?
+
+    /// The engine that answered the last request, and its model, for logs and the menu.
+    private(set) var lastEngine: EngineID?
+    private(set) var lastModel = ""
+    /// Engines to skip until they change state again because they failed to start (network, login).
+    private var aggregate: AgentAvailability = .available
 
     init(executor: Executor, settings: AppSettings) {
         self.tools = AgentTools(executor: executor)
         self.settings = settings
+        register(ClaudeEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess }))
+        register(CodexEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess }))
+        aggregate = computeAvailability()
     }
 
-    // MARK: Availability (AD-7)
+    func register(_ engine: AgentEngine) {
+        engines[engine.id] = engine
+        engine.onAvailabilityChange = { [weak self] a in
+            guard let self else { return }
+            self.onEngineAvailabilityChange?(engine.id, a)
+            self.updateAggregate()
+        }
+    }
 
-    /// The only source of truth on whether the agent can be used right now.
-    private(set) var availability: AgentAvailability = .available
-    var onAvailabilityChange: ((AgentAvailability) -> Void)?
-    private var resumeTask: Task<Void, Never>?
+    private var toolAccess: AgentToolAccess? {
+        guard let server else { return nil }
+        return AgentToolAccess(mcpURL: server.url, mcpToken: server.token, mcpConfigJSON: server.mcpConfigJSON, tools: tools)
+    }
 
-    private func setAvailability(_ a: AgentAvailability) {
-        guard a != availability else { return }
-        availability = a
+    // MARK: Availability (AD-7, AD-14)
+
+    /// Aggregate: available when at least one engine of the chain can be used. When none
+    /// can, the state of the chosen engine (paused until…, missing) for the messages.
+    var availability: AgentAvailability { aggregate }
+
+    func availability(of id: EngineID) -> AgentAvailability {
+        engines[id]?.availability ?? .unavailable("non disponibile in questa versione")
+    }
+
+    private var engineStates: [EngineID: AgentAvailability] {
+        engines.mapValues(\.availability)
+    }
+
+    /// The engine that would run the next request, or nil (reduced mode).
+    func currentChoice() -> EngineChoice? {
+        EngineSelector.select(chosen: chosenEngine, engines: engineStates, fallback: fallbackOn)
+    }
+
+    private func computeAvailability() -> AgentAvailability {
+        if currentChoice() != nil { return .available }
+        return availability(of: chosenEngine)
+    }
+
+    /// Recomputes the aggregate after an engine or a setting changed.
+    func updateAggregate() {
+        let a = computeAvailability()
+        guard a != aggregate else { return }
+        aggregate = a
         Log.info("Agente: \(a)")
         onAvailabilityChange?(a)
     }
 
-    /// Re-checks the `claude` command (installed or not) without touching a pause.
+    /// At least one engine of the chain is installed and logged in (maybe paused):
+    /// otherwise the agent is "not configured" rather than "paused".
+    var isConfigured: Bool {
+        let chain = fallbackOn ? chosenEngine.chain : [chosenEngine]
+        return chain.contains { id in
+            switch availability(of: id) {
+            case .available, .paused: return true
+            case .missing, .loginNeeded, .unavailable: return false
+            }
+        }
+    }
+
+    /// Re-checks every engine (command installed, login) without touching pauses.
     func refreshAvailability() {
-        if case .paused(let until) = availability, Date() < until { return }
-        setAvailability(settings.claudeExecutable == nil ? .missing : .available)
-    }
-
-    /// "You've hit your session limit · resets 7pm (Europe/Rome)" → pause until then (FR-14).
-    func pauseForLimit(message: String) {
-        let until = Self.resetDate(from: message) ?? Date().addingTimeInterval(30 * 60)
-        setAvailability(.paused(until: until))
-        resumeTask?.cancel()
-        resumeTask = Task { @MainActor [weak self] in
-            let wait = max(5, until.timeIntervalSinceNow + 60)
-            try? await Task.sleep(for: .seconds(wait))
-            guard !Task.isCancelled, let self else { return }
-            self.setAvailability(.available)
-            self.prewarm()
-        }
-    }
-
-    /// "You've hit your session limit · resets 7pm", "usage limit reached", "5-hour limit reached".
-    static func isLimitMessage(_ message: String) -> Bool {
-        let m = message.lowercased()
-        return m.contains("limit") && (m.contains("hit") || m.contains("reached") || m.contains("resets") || m.contains("exceeded"))
-    }
-
-    static func resetDate(from message: String, now: Date = Date()) -> Date? {
-        guard let r = message.range(of: "resets ", options: .caseInsensitive) else { return nil }
-        let tail = String(message[r.upperBound...]).lowercased()
-        let pattern = #"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"#
-        guard let re = try? NSRegularExpression(pattern: pattern),
-              let m = re.firstMatch(in: tail, range: NSRange(tail.startIndex..., in: tail)),
-              let hR = Range(m.range(at: 1), in: tail), var hour = Int(tail[hR]) else { return nil }
-        let minute = Range(m.range(at: 2), in: tail).flatMap { Int(tail[$0]) } ?? 0
-        if let apR = Range(m.range(at: 3), in: tail) {
-            let ap = tail[apR]
-            if ap == "pm", hour < 12 { hour += 12 }
-            if ap == "am", hour == 12 { hour = 0 }
-        }
-        guard hour < 24, minute < 60 else { return nil }
-        var cal = Calendar.current
-        if let open = tail.firstIndex(of: "("), let close = tail.firstIndex(of: ")"), open < close,
-           let tz = TimeZone(identifier: String(message[r.upperBound...])
-                .split(separator: "(").last?.split(separator: ")").first.map(String.init) ?? "") {
-            cal.timeZone = tz
-        }
-        guard var date = cal.date(bySettingHour: hour, minute: minute, second: 0, of: now) else { return nil }
-        if date <= now { date = cal.date(byAdding: .day, value: 1, to: date) ?? date }
-        return date
+        for e in engines.values { e.refreshAvailability() }
+        updateAggregate()
     }
 
     /// Starts the local tool server (once).
@@ -132,56 +162,34 @@ final class AgentRunner {
         server = s
     }
 
-    /// The spawn may happen on a background queue: capture the path setting now.
-    private func refreshExecutable() {
-        let custom = settings.claudePath
-        cliDeep.executablePath = { ClaudeCLI.locate(custom: custom) }
-        cliFast.executablePath = { ClaudeCLI.locate(custom: custom) }
-    }
-
-    /// Two levels (AD-6): the fast one for 1-3 step requests, the deep one for long tasks.
-    private func config(deep: Bool) -> ClaudeCLI.Config? {
-        guard let server else { return nil }
-        return ClaudeCLI.Config(
-            model: deep ? settings.model : settings.fastModel,
-            systemPrompt: Self.systemPrompt,
-            effort: deep ? settings.deepEffort : settings.fastEffort,
-            extraArgs: [
-                "--mcp-config", server.mcpConfigJSON,
-                "--permission-mode", "dontAsk",
-                "--permission-prompts", "none",
-                "--max-turns", "\(settings.agentMaxTurns)",
-                "--allowedTools", "mcp__\(MCPServer.serverName)",
-                "--disallowedTools", "Agent", "TaskStop",
-            ]
-        )
-    }
-
-    private func cli(deep: Bool) -> ClaudeCLI { deep || !settings.useFastModel ? cliDeep : cliFast }
-
-    /// Keeps `claude` processes ready, already connected to the tools.
+    /// Keeps the engine of the next request ready (warm process, loaded model).
     func prewarm() {
-        guard availability == .available else { return }
-        refreshExecutable()
-        var pairs: [(ClaudeCLI, ClaudeCLI.Config)] = []
-        if let c = config(deep: true) { pairs.append((cliDeep, c)) }
-        if settings.useFastModel, let c = config(deep: false) { pairs.append((cliFast, c)) }
-        for (cli, c) in pairs {
-            DispatchQueue.global(qos: .utility).async { cli.prewarm(c) }
+        guard let choice = currentChoice() else { return }
+        engines[choice.engine]?.prewarm()
+    }
+
+    // MARK: Running
+
+    /// Why a request stopped after the agent had already acted (AD-15).
+    enum RunError: LocalizedError {
+        case stoppedMidway(engine: EngineID, steps: Int, reason: String, next: EngineID?)
+        case noEngine(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .stoppedMidway(let engine, let steps, _, let next):
+                let done = steps == 1 ? "ho fatto 1 passo" : "ho fatto \(steps) passi"
+                let then = next.map { " La prossima richiesta userà \($0.displayName)." } ?? ""
+                return "\(engine.subject) si è fermato a metà: \(done), controlla.\(then)"
+            case .noEngine(let m):
+                return m
+            }
         }
     }
 
-    /// Runs one request to completion and returns the agent's final sentence.
-    /// Only one request at a time (AD-6).
-    func run(_ request: String, context: ScreenContext, recent: String = "", deep: Bool = true) async throws -> String {
-        let useDeep = deep || !settings.useFastModel
-        guard let config = config(deep: useDeep) else { throw ClaudeCLIError.failed("server strumenti non avviato") }
-        guard !running else { throw ClaudeCLIError.failed("sto già lavorando a un'altra richiesta") }
-        refreshExecutable()
-        tools.reset()
-        running = true
-        defer { running = false }
-        let message = """
+    /// Composes the message every cloud engine receives.
+    private func message(_ request: String, context: ScreenContext, recent: String) -> String {
+        """
         <screen>
         APP: \(context.appName) (\(context.bundleID))
         WINDOW_TITLE: \(context.windowTitle)
@@ -195,33 +203,100 @@ final class AgentRunner {
         \(recent)
         REQUEST: \(request)
         """
-        let started = Date()
-        do {
-            let data = try await cli(deep: useDeep).run(config, message: message, timeout: settings.agentTimeout)
-            let answer = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            Log.info(String(format: "Agente (%@): %d passi in %.1fs → %@", config.model, tools.callCount, Date().timeIntervalSince(started), answer))
-            return answer
-        } catch {
-            let message = error.localizedDescription
-            if Self.isLimitMessage(message) {
-                pauseForLimit(message: message)
-            } else if case ClaudeCLIError.notFound = error {
-                setAvailability(.missing)
+    }
+
+    /// Runs one request to completion and returns the agent's final sentence.
+    /// Only one request at a time (AD-6).
+    func run(_ request: String, context: ScreenContext, recent: String = "", deep: Bool = true) async throws -> String {
+        guard server != nil else { throw AgentEngineError.failed("server strumenti non avviato") }
+        guard !running else { throw AgentEngineError.failed("sto già lavorando a un'altra richiesta") }
+        tools.reset()
+        running = true
+        defer { running = false }
+        let level: AgentLevel = deep ? .deep : .fast
+        let req = AgentRequest(message: message(request, context: context, recent: recent), userRequest: request, level: level)
+        var tried: Set<EngineID> = []
+
+        while true {
+            guard let choice = EngineSelector.select(chosen: chosenEngine, engines: engineStates,
+                                                     fallback: fallbackOn, excluding: tried),
+                  let engine = engines[choice.engine] else {
+                throw RunError.noEngine(EngineSelector.unavailableMessage(chosen: chosenEngine, engines: engineStates))
             }
-            Log.info(String(format: "Agente (%@): errore dopo %.1fs", config.model, Date().timeIntervalSince(started)))
-            throw error
+            announce(choice)
+            let model = engine.model(for: level)
+            let started = Date()
+            do {
+                let answer = try await engine.run(req)
+                lastEngine = engine.id
+                lastModel = model
+                Log.info(String(format: "Agente (%@/%@): %d passi in %.1fs → %@", engine.id.rawValue, model,
+                                tools.callCount, Date().timeIntervalSince(started), answer))
+                return answer
+            } catch let error as AgentEngineError {
+                lastEngine = engine.id
+                lastModel = model
+                Log.info(String(format: "Agente (%@/%@): errore dopo %.1fs, %d azioni con effetti: %@", engine.id.rawValue, model,
+                                Date().timeIntervalSince(started), tools.effectfulCalls, error.localizedDescription))
+                tried.insert(engine.id)
+                updateAggregate()
+                guard error.allowsFallback, fallbackOn, !tools.cancelled else { throw error }
+                let next = EngineSelector.select(chosen: chosenEngine, engines: engineStates,
+                                                 fallback: true, excluding: tried)?.engine
+                if tools.effectfulCalls > 0 {
+                    // Never do the same action twice because of a change of engine (FR-28).
+                    throw RunError.stoppedMidway(engine: engine.id, steps: tools.effectfulCalls,
+                                                 reason: error.localizedDescription, next: next)
+                }
+                guard next != nil else { throw error }
+                tools.reset()
+                // Loop: the selector picks the next engine and announces the switch.
+            }
         }
+    }
+
+    /// Shows the change of engine once (FR-27): fallback, or back to the chosen one.
+    private func announce(_ choice: EngineChoice) {
+        let previous = announced
+        announced = choice
+        guard choice.engine != previous?.engine else { return }
+        let text: String
+        if choice.isFallback {
+            text = EngineSelector.fallbackMessage(chosen: chosenEngine, using: choice.engine, engines: engineStates)
+        } else if previous?.isFallback == true {
+            text = "\(choice.engine.subject) è tornato"
+        } else {
+            return // first request, or the user chose another engine: nothing to announce
+        }
+        Log.info("Passaggio di Motore: \(text)")
+        onEngineSwitch?(EngineSwitch(from: previous?.engine, to: choice.engine, message: text))
+    }
+
+    /// The choice last used, to announce only changes.
+    private var announced: EngineChoice?
+
+    /// The chosen engine is back while a fallback was in use: say it now (FR-27).
+    func chosenEngineIsBack() -> String? {
+        guard let a = announced, a.isFallback, availability(of: chosenEngine) == .available else { return nil }
+        announced = EngineChoice(engine: chosenEngine, isFallback: false, reason: "tornato")
+        return "\(chosenEngine.subject) è tornato"
     }
 
     func cancel() {
         tools.cancelled = true
-        cliDeep.cancelCurrent()
-        cliFast.cancelCurrent()
+        for e in engines.values { e.cancel() }
     }
 
     func shutdown() {
-        cliDeep.shutdown()
-        cliFast.shutdown()
+        for e in engines.values { e.shutdown() }
         server?.stop()
+    }
+
+    // MARK: Compatibility
+
+    static func isLimitMessage(_ message: String) -> Bool { LimitMessage.isLimit(message) }
+
+    static func resetDate(from message: String, now: Date = Date()) -> Date? {
+        LimitMessage.resetDate(from: message, now: now)
     }
 }
