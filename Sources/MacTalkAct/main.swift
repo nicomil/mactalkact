@@ -22,6 +22,15 @@ if arguments.contains("--route-test") {
     dispatchMain()
 }
 
+if let page = argument(after: "--converse-test") {
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        await DebugCLI.converseTest(page: page)
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if let page = argument(after: "--tools-test") {
     MainActor.assumeIsolated { _ = NSApplication.shared }
     Task { @MainActor in

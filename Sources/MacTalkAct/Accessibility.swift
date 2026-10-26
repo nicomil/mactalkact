@@ -88,6 +88,11 @@ enum AX {
            let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == override }) {
             return app
         }
+        return realFrontmostApplication()
+    }
+
+    /// Like `frontmostApplication`, ignoring the debug override: where keystrokes really go.
+    static func realFrontmostApplication() -> NSRunningApplication? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.5)
         if let focused = element(system, kAXFocusedApplicationAttribute) {

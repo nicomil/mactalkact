@@ -23,6 +23,9 @@ final class AgentTools {
     private(set) var callCount = 0
     /// Text changes made during the current task, for the conversation memory (FR-8).
     private(set) var changes: [String] = []
+    /// The app the task works in: keystrokes and clicks stop if another app takes the front
+    /// (the user switched app), unless the agent itself opened it.
+    private var targetPID: pid_t?
     private let maxCalls = 60
     var cancelled = false
 
@@ -41,6 +44,16 @@ final class AgentTools {
         callCount = 0
         changes = []
         cancelled = false
+        targetPID = AX.realFrontmostApplication()?.processIdentifier
+    }
+
+    private static let actingTools: Set<String> = ["click", "click_many", "type_text", "press_keys", "replace_text", "edit_text", "scroll"]
+
+    /// nil when it is safe to act; otherwise an error for the agent.
+    private func frontmostChanged() -> String? {
+        guard let target = targetPID, let now = AX.realFrontmostApplication() else { return nil }
+        if now.processIdentifier == target || now.bundleIdentifier == Bundle.main.bundleIdentifier { return nil }
+        return "The frontmost app changed to «\(now.localizedName ?? "?")»: the user probably switched app. Do not act there. Stop and tell the user in one short Italian sentence."
     }
 
     // MARK: Definitions (MCP tools/list)
@@ -135,6 +148,10 @@ final class AgentTools {
         callCount += 1
         if callCount > maxCalls { return .error("Step limit reached. Stop and tell the user what is left to do.") }
         Log.debug("Agente → \(name) \(Self.compact(args))")
+        if Self.actingTools.contains(name), let problem = frontmostChanged() {
+            Log.info("Agente: azione bloccata, app in primo piano cambiata")
+            return .error(problem)
+        }
         let result: Result
         do {
             result = try await dispatch(name, args)
@@ -275,6 +292,7 @@ final class AgentTools {
             try await Task.sleep(for: .milliseconds(500))
             let front = AX.frontmostApplication()?.localizedName ?? "?"
             if Grammar.normalize(front) == Grammar.normalize(opened) {
+                targetPID = AX.realFrontmostApplication()?.processIdentifier
                 return .text("\(opened) is now frontmost.")
             }
             return .error("\(opened) was opened but the frontmost app is still \(front).")
@@ -287,6 +305,7 @@ final class AgentTools {
             onProgress?("Apro \(url)")
             try await executor.openURL(url, in: a["browser"] as? String)
             try await Task.sleep(for: .milliseconds(1200))
+            targetPID = AX.realFrontmostApplication()?.processIdentifier
             return .text("Opened \(url). The page may still be loading.")
 
         case "browser_profiles":
@@ -415,6 +434,7 @@ final class AgentTools {
         try await Task.sleep(for: .milliseconds(1200))
         if let app = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle(url: appURL)?.bundleIdentifier ?? "").first {
             await executor.bringToFront(app)
+            targetPID = app.processIdentifier
         }
         return .text("Opened a \(browser) window with profile «\(p.name)» (\(p.directory)).")
     }
@@ -460,6 +480,8 @@ final class AgentTools {
         var emitted = 0
         var lastLabel = ""
         var truncated = false
+        // The same element can be reachable from two parents (web tables in Safari): visit it once.
+        var seen: [CFHashCode: [AXUIElement]] = [:]
 
         while index < queue.count {
             if emitted >= maxItems || index >= maxNodes || Date().timeIntervalSince(start) > deadline {
@@ -468,6 +490,9 @@ final class AgentTools {
             }
             let (el, depth) = queue[index]
             index += 1
+            let h = CFHash(el)
+            if seen[h]?.contains(where: { CFEqual($0, el) }) == true { continue }
+            seen[h, default: []].append(el)
             let v = AX.multi(el, Self.attrs)
             let role = (v[0] as? String) ?? ""
             let frame = AX.rect(position: v[5], size: v[6])

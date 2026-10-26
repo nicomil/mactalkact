@@ -346,6 +346,12 @@ final class Coordinator {
                 answerAgent(nil)
                 hud.show(.info, "Mi fermo", autoHide: 1.2)
             } else if agentQuestion != nil {
+                // «ok», «bravo», «ciao amore» said to someone in the room are not an answer.
+                let saidWake = WakeWord.extract(text, phrases: settings.wakePhraseList) != nil
+                if !saidWake && !addressed && RouteHeuristics.isShortChatter(spoken) && !Grammar.isYes(spoken) {
+                    Log.info("Instradamento: ignora · chiacchiera durante una domanda dell'agente · \(spoken.count) caratteri")
+                    return
+                }
                 Log.speech("Risposta all'agente: \(spoken)")
                 hud.show(.working, spoken, detail: "🤖 Ricevuto")
                 answerAgent(spoken)

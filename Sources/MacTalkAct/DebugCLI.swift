@@ -294,6 +294,7 @@ extension DebugCLI {
             case "proposta": state.proposedText = "testo proposto"; state.windowOpen = true
             case "conferma": state.pendingConfirmation = true
             case "numeri": state.numbersVisible = true
+            case "pausa": state.agentAvailability = .paused(until: Date().addingTimeInterval(3600))
             default: break
             }
             if !onDevice {
@@ -341,6 +342,7 @@ extension DebugCLI {
         }
         AX.debugTargetBundle = "com.apple.Safari"
         let tools = AgentTools(executor: ex)
+        tools.reset() // the task's app is Safari: actions stop if another app takes the front
         func text(_ r: AgentTools.Result) -> String { (r.content.first?["text"] as? String) ?? "" }
         func ids(_ observed: String, containing: String) -> [Int] {
             observed.split(separator: "\n").filter { $0.contains(containing) }.compactMap { line in
@@ -350,6 +352,10 @@ extension DebugCLI {
 
         // 1. click_many on the 18:30 boxes of the rows whose 21:30 is checked (Anna, Carla, Dario).
         let o1 = text(await tools.call("observe", ["query": "18:30"]))
+        if ProcessInfo.processInfo.environment["MTA_DEBUG"] != nil {
+            print(o1)
+            print(text(await tools.call("observe", [:])).split(separator: "\n").prefix(40).joined(separator: "\n"))
+        }
         let wanted = ["Anna", "Carla", "Dario"].flatMap { ids(o1, containing: "\($0) 18:30") }
         print("id trovati per Anna/Carla/Dario 18:30: \(wanted)")
         let many = await tools.call("click_many", ["ids": wanted, "method": "auto"])
@@ -358,7 +364,7 @@ extension DebugCLI {
 
         // 2. Stale ids are rejected after a new observe.
         _ = await tools.call("observe", ["query": "21:30"])
-        let stale = await tools.call("click", ["id": wanted.first ?? 1])
+        let stale = await tools.call("click", ["id": wanted.first ?? -1])
         print("id vecchio rifiutato: \(stale.isError) · \(text(stale).prefix(90))")
 
         // 3. replace_text in a native textarea.
@@ -380,6 +386,60 @@ extension DebugCLI {
         } else { print("cella non trovata") }
 
         print("modifiche registrate: \(tools.changes)")
+        try? ex.press("cmd+w")
+        if let previous { await ex.bringToFront(previous) }
+    }
+}
+
+extension DebugCLI {
+    /// `--converse-test <page.html>`: two real agent requests in a row on the test page (Safari),
+    /// with the conversation memory, using the fast model. Acts on the screen and uses the subscription.
+    static func converseTest(page: String) async {
+        let previous = AX.frontmostApplication()
+        let ex = Executor()
+        guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else { return }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        _ = try? await NSWorkspace.shared.open([URL(fileURLWithPath: page)], withApplicationAt: safari, configuration: config)
+        try? await Task.sleep(for: .seconds(2.5))
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").first {
+            await ex.bringToFront(app)
+        }
+        AX.debugTargetBundle = "com.apple.Safari"
+        let agent = AgentRunner(executor: ex, settings: AppSettings.shared)
+        agent.tools.onProgress = { print("  · \($0)") }
+        agent.tools.askUser = { q, _ in print("  ? \(q) → (test: nessuna risposta)"); return nil }
+        let log = ConversationLog()
+
+        // Put the caret in the native field, as the user would have it.
+        let o = (await agent.tools.call("observe", ["query": "Campo nativo"]).content.first?["text"] as? String) ?? ""
+        if let line = o.split(separator: "\n").first(where: { $0.contains("Campo nativo") }),
+           let id = line.split(separator: "]").first.flatMap({ Int($0.dropFirst()) }) {
+            _ = await agent.tools.call("click", ["id": id, "method": "mouse"])
+        }
+        func fieldText() -> String {
+            guard let app = AX.frontmostApplication(), let el = AX.focusedElement(in: AX.app(app.processIdentifier)) else { return "?" }
+            return (AX.string(el, kAXValueAttribute) ?? "?").replacingOccurrences(of: "\n", with: " ⏎ ")
+        }
+        print("campo all'inizio: \(fieldText())")
+        do {
+            try await agent.start()
+            agent.prewarm()
+            try await Task.sleep(for: .seconds(5))
+            for request in ["modifica la domanda: che cos'è il cloud computing diventa che cos'è Internet",
+                            "rimetti la domanda di prima"] {
+                let ctx = ScreenContext.capture(includeLabels: false)
+                let started = Date()
+                let answer = try await agent.run(request, context: ctx, recent: log.promptBlock, deep: false)
+                log.add(request: request, outcome: answer, app: ctx.appName, changes: agent.tools.changes)
+                print(String(format: "«%@» → %.1fs, %d chiamate: %@", request, Date().timeIntervalSince(started), agent.tools.callCount, answer))
+                print("  modifiche: \(agent.tools.changes)")
+                print("  campo dopo: \(fieldText())")
+            }
+        } catch {
+            print("Errore: \(error.localizedDescription)")
+        }
+        agent.shutdown()
         try? ex.press("cmd+w")
         if let previous { await ex.bringToFront(previous) }
     }
