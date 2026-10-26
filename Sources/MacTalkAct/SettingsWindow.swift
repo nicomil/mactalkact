@@ -213,12 +213,7 @@ private struct ListeningSection: View {
             Picker("Tasto da tenere premuto per parlare", selection: $settings.pttKey) {
                 ForEach(PTTKey.allCases) { Text($0.label).tag($0) }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Parole di attivazione, separate da virgola")
-                TextField("computer, ok computer", text: $settings.wakePhrases)
-                Text("La prima è quella mostrata nei suggerimenti. Le varianti servono quando il riconoscimento capisce «i computer» o «e computer».")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            WakeWordEditor(settings: settings)
             ToggleRow(title: "All'avvio resta in ascolto della parola di attivazione", isOn: $settings.startListening)
         }
         Card(title: "Frasi") {
@@ -245,6 +240,39 @@ private struct ListeningSection: View {
                       value: $settings.vadNoiseFactor, range: 2...8, step: 0.5, unit: "×", defaultValue: D.vadNoiseFactor)
         }
         ResetButton(section: .listening, settings: settings)
+    }
+}
+
+/// Story 3.7: the wake word chosen by the user, its variants and what the app will answer to.
+private struct WakeWordEditor: View {
+    @ObservedObject var settings: AppSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Parola di attivazione")
+                Spacer()
+                TextField("computer", text: $settings.wakeWord)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 220)
+            }
+            if let warning = AppSettings.wakeWordWarning(settings.wakeWord) {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            ToggleRow(title: "Accetta anche le varianti",
+                      help: "«ok \(settings.effectiveWakeWord)», «ehi \(settings.effectiveWakeWord)», «hey \(settings.effectiveWakeWord)» e le storpiature del riconoscimento «i \(settings.effectiveWakeWord)», «e \(settings.effectiveWakeWord)».",
+                      isOn: $settings.wakeVariants)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Altre parole o frasi (facoltative, separate da virgola)")
+                TextField("per esempio: ehi mac, assistente", text: $settings.extraWakePhrases)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Text("L'app risponde a: " + settings.wakePhraseList.map { "«\($0)»" }.joined(separator: ", "))
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Scegli una parola che il riconoscimento vocale italiano scrive sempre allo stesso modo e che in casa non si dice per caso. Se viene trascritta in modo diverso, aggiungi quella forma tra le altre parole (il log mostra cosa ha sentito).")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

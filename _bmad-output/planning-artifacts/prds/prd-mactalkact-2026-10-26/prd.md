@@ -223,7 +223,7 @@ Nico apre le impostazioni dal menu e vede una finestra con una barra laterale a 
 
 #### FR-18: Tempi e soglie dell'ascolto
 
-Nico vede e modifica: silenzio che chiude una frase, sensibilità del rilevatore di voce, durata massima di una frase, silenzio che chiude la dettatura lunga, chiusura automatica della sessione a mani libere.
+Nico vede e modifica: la parola di attivazione (al posto di «computer», con le varianti «ok …», «ehi …» generate da sole), silenzio che chiude una frase, sensibilità del rilevatore di voce, durata massima di una frase, silenzio che chiude la dettatura lunga, chiusura automatica della sessione a mani libere.
 
 **Conseguenze (verificabili):**
 - I valori predefiniti coincidono con quelli attuali (0,8 s; 0,006; 60 s; 4 s; 60 s).

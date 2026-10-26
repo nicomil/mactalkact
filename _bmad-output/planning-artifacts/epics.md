@@ -35,7 +35,7 @@ FR-14: Al limite della subscription l'app entra in Modalità ridotta fino all'or
 FR-15: L'Agente può eseguire la stessa azione su più elementi numerati in una chiamata, con lo stato di ciascuno dopo l'azione.
 FR-16: L'Agente può sostituire testo in campi che non espongono il testo all'Accessibilità e verificare il risultato.
 FR-17: La finestra delle impostazioni si apre con il contenuto visibile, a sezioni con barra laterale, e ricorda l'ultima sezione.
-FR-18: Tempi e soglie dell'ascolto visibili e modificabili.
+FR-18: Tempi e soglie dell'ascolto visibili e modificabili; parola di attivazione scelta dall'utente, con varianti generate da sole.
 FR-19: Tempi della conversazione e dimensione della Memoria di conversazione visibili e modificabili.
 FR-20: Comprensione e Agente (interruttori, modelli, effort, limiti, accesso a Claude) visibili e modificabili.
 FR-21: Voce, suoni e durata dei messaggi visibili e modificabili.
@@ -504,3 +504,33 @@ So that cambio le cose al volo senza aprire la finestra.
 **Given** spunto o tolgo un interruttore dal sottomenu
 **When** riapro le impostazioni
 **Then** la finestra mostra lo stesso valore (AD-11)
+
+### Story 3.7: Parola di attivazione a scelta
+
+As a Nico,
+I want scegliere io la parola che attiva l'app al posto di «computer»,
+So that uso una parola che mi viene naturale e che in casa non si dice per caso.
+
+**Acceptance Criteria:**
+
+**Given** la sezione Ascolto
+**When** scrivo «Jarvis» nel campo «Parola di attivazione»
+**Then** l'app risponde a «Jarvis», «ok Jarvis», «ehi Jarvis», «hey Jarvis» e alle storpiature «i Jarvis», «e Jarvis», e non più a «computer» (FR-18)
+**And** sotto il campo vedo l'elenco completo delle frasi a cui risponde
+
+**Given** non voglio le varianti
+**When** spengo «Accetta anche le varianti»
+**Then** l'app risponde solo alla parola e alle eventuali «Altre parole» che aggiungo a mano
+
+**Given** il campo vuoto o una parola molto corta o comune
+**When** la scrivo
+**Then** vedo un avviso (vuoto → resta «computer»; corta o comune → rischio di attivazioni per sbaglio)
+
+**Given** i valori predefiniti
+**When** non cambio nulla
+**Then** l'app risponde esattamente a «computer, ok computer, ehi computer, hey computer, i computer, e computer» come prima (NFR-6)
+**And** chi aveva già personalizzato l'elenco ritrova le sue parole
+
+**Given** suggerimenti, guida e messaggi dell'HUD
+**When** cambio parola
+**Then** mostrano la nuova parola invece di «computer»

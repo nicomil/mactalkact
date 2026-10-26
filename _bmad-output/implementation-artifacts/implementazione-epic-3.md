@@ -35,3 +35,11 @@ epics: [epic-3]
 
 - Nessuna funzionalità nuova (NFR-6). Unica aggiunta tecnica: il comando di prova `--settings-shot`.
 - Versione dell'app portata a 0.3.0 (3) per distinguere questa build nella sezione Stato.
+
+## Storia 3.7 — Parola di attivazione a scelta
+
+- `AppSettings`: `wakeWord` (predefinito «computer»), `wakeVariants` (prefissi «ok», «ehi», «hey», «i», «e»), `extraWakePhrases`. L'elenco a cui l'app risponde è calcolato in `wakePhrases(word:variants:extra:)`; con i predefiniti coincide con l'elenco di prima (verificato da `--selftest`).
+- Migrazione: chi aveva personalizzato il vecchio elenco ritrova la prima voce come parola e le altre come «altre parole», con le varianti spente.
+- Avvisi per campo vuoto (resta «computer»), parole corte (meno di 4 lettere) o comuni in casa («amore», «ciao», «basta»…).
+- Guida, menu e messaggi dell'HUD usano la parola scelta.
+- **Non verificato:** come il riconoscimento italiano trascrive parole diverse da «computer». La prova da file (`--transcribe`) oggi restituisce testo vuoto anche con «computer» e anche con la versione di partenza del codice, quindi è un problema del riconoscimento da file in questo momento, non una regressione; il microfono vero non è stato provato per non parlare ad alta voce di notte.

@@ -157,6 +157,18 @@ enum DebugCLI {
         audio.configure(minStartRMS: 0.01, noiseFactor: 6, endSilence: 1.1, maxSegment: 30)
         check("rilevatore di voce riconfigurato", audio.config.endSilence == 1.1 && audio.config.minStartRMS == 0.01
               && audio.config.noiseFactor == 6 && audio.config.maxSegment == 30)
+        check("parola predefinita = elenco di prima",
+              AppSettings.wakePhrases(word: Df.wakeWord, variants: true, extra: "")
+                == Df.legacyWakePhrases.split(separator: ",").map { Grammar.normalize(String($0)) })
+        let jarvis = AppSettings.wakePhrases(word: "Jarvis", variants: true, extra: "ehi mac, Jarvis")
+        check("parola scelta + varianti + altre", jarvis == ["jarvis", "ok jarvis", "ehi jarvis", "hey jarvis", "i jarvis", "e jarvis", "ehi mac"])
+        check("senza varianti", AppSettings.wakePhrases(word: "Jarvis", variants: false, extra: "") == ["jarvis"])
+        check("Jarvis, apri Safari", WakeWord.extract("Jarvis, apri Safari.", phrases: jarvis) == "apri Safari")
+        check("computer non attiva più", WakeWord.extract("Computer, apri Safari", phrases: jarvis) == nil)
+        check("avviso parola vuota", AppSettings.wakeWordWarning("  ") != nil)
+        check("avviso parola corta", AppSettings.wakeWordWarning("Bo") != nil)
+        check("avviso parola comune", AppSettings.wakeWordWarning("Amore") != nil)
+        check("nessun avviso per Jarvis", AppSettings.wakeWordWarning("Jarvis") == nil)
         check("tutte le sezioni hanno titolo e icona", SettingsSection.allCases.allSatisfy { !$0.title.isEmpty && !$0.icon.isEmpty })
 
         print(failures == 0 ? "Tutto ok." : "\(failures) test falliti.")

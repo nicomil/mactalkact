@@ -86,7 +86,13 @@ final class AppSettings: ObservableObject {
     enum Defaults {
         // Listening
         static let pttKey = PTTKey.rightOption
-        static let wakePhrases = "computer, ok computer, ehi computer, hey computer, i computer, e computer"
+        static let wakeWord = "computer"
+        static let wakeVariants = true
+        static let extraWakePhrases = ""
+        /// Before Story 3.7 the list was stored as is: still read to migrate a customised one.
+        static let legacyWakePhrases = "computer, ok computer, ehi computer, hey computer, i computer, e computer"
+        /// Prefixes added to the wake word: polite forms and what the recogniser hears instead ("i computer").
+        static let wakePrefixes = ["ok", "ehi", "hey", "i", "e"]
         static let startListening = false
         static let vadEndSilence = 0.8
         static let vadMinStartRMS = 0.006
@@ -138,7 +144,12 @@ final class AppSettings: ObservableObject {
 
     // MARK: Listening
     @Published var pttKey: PTTKey { didSet { defaults.set(pttKey.rawValue, forKey: "pttKey") } }
-    @Published var wakePhrases: String { didSet { defaults.set(wakePhrases, forKey: "wakePhrases") } }
+    /// The word that wakes the app ("computer", or what the user chooses).
+    @Published var wakeWord: String { didSet { defaults.set(wakeWord, forKey: "wakeWord") } }
+    /// Also accept "ok …", "ehi …", "hey …" and the recogniser's "i …", "e …".
+    @Published var wakeVariants: Bool { didSet { defaults.set(wakeVariants, forKey: "wakeVariants") } }
+    /// More phrases, comma separated.
+    @Published var extraWakePhrases: String { didSet { defaults.set(extraWakePhrases, forKey: "extraWakePhrases") } }
     @Published var startListening: Bool { didSet { defaults.set(startListening, forKey: "startListening") } }
     @Published var vadEndSilence: Double { didSet { defaults.set(vadEndSilence, forKey: "vadEndSilence") } }
     @Published var vadMinStartRMS: Double { didSet { defaults.set(vadMinStartRMS, forKey: "vadMinStartRMS") } }
@@ -207,7 +218,18 @@ final class AppSettings: ObservableObject {
         func string(_ k: String, _ v: String) -> String { d.string(forKey: k) ?? v }
 
         pttKey = PTTKey(rawValue: string("pttKey", "")) ?? Defaults.pttKey
-        wakePhrases = string("wakePhrases", Defaults.wakePhrases)
+        // Migration: a list customised before Story 3.7 becomes word + extra phrases.
+        let legacy = d.string(forKey: "wakePhrases")
+        if d.object(forKey: "wakeWord") == nil, let legacy, Grammar.normalize(legacy) != Grammar.normalize(Defaults.legacyWakePhrases) {
+            let parts = legacy.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            wakeWord = parts.first ?? Defaults.wakeWord
+            wakeVariants = false
+            extraWakePhrases = parts.dropFirst().joined(separator: ", ")
+        } else {
+            wakeWord = string("wakeWord", Defaults.wakeWord)
+            wakeVariants = bool("wakeVariants", Defaults.wakeVariants)
+            extraWakePhrases = string("extraWakePhrases", Defaults.extraWakePhrases)
+        }
         startListening = bool("startListening", Defaults.startListening)
         vadEndSilence = double("vadEndSilence", Defaults.vadEndSilence)
         vadMinStartRMS = double("vadMinStartRMS", Defaults.vadMinStartRMS)
@@ -263,7 +285,8 @@ final class AppSettings: ObservableObject {
     func reset(_ section: SettingsSection) {
         switch section {
         case .listening:
-            pttKey = Defaults.pttKey; wakePhrases = Defaults.wakePhrases; startListening = Defaults.startListening
+            pttKey = Defaults.pttKey; wakeWord = Defaults.wakeWord; wakeVariants = Defaults.wakeVariants
+            extraWakePhrases = Defaults.extraWakePhrases; startListening = Defaults.startListening
             vadEndSilence = Defaults.vadEndSilence; vadMinStartRMS = Defaults.vadMinStartRMS
             vadNoiseFactor = Defaults.vadNoiseFactor; vadMaxSegment = Defaults.vadMaxSegment
             dictationEndSilence = Defaults.dictationEndSilence; dictationIdleSeconds = Defaults.dictationIdleSeconds
@@ -298,12 +321,37 @@ final class AppSettings: ObservableObject {
     /// Path of the `claude` command, if installed (custom path wins).
     var claudeExecutable: String? { ClaudeCLI.locate(custom: claudePath) }
 
-    var wakePhraseList: [String] {
-        wakePhrases.split(separator: ",").map { Grammar.normalize(String($0)) }.filter { !$0.isEmpty }
+    /// The wake word as typed, or «computer» when the field is empty.
+    var effectiveWakeWord: String {
+        let w = wakeWord.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        return Grammar.normalize(w).isEmpty ? Defaults.wakeWord : w
     }
 
-    var firstWakePhrase: String {
-        wakePhrases.split(separator: ",").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? "computer"
+    /// Every phrase that wakes the app, normalised, without duplicates.
+    var wakePhraseList: [String] {
+        Self.wakePhrases(word: effectiveWakeWord, variants: wakeVariants, extra: extraWakePhrases)
+    }
+
+    static func wakePhrases(word: String, variants: Bool, extra: String) -> [String] {
+        let w = Grammar.normalize(word)
+        var list = [w]
+        if variants { list += Defaults.wakePrefixes.map { "\($0) \(w)" } }
+        list += extra.split(separator: ",").map { Grammar.normalize(String($0)) }
+        var seen = Set<String>()
+        return list.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    var firstWakePhrase: String { effectiveWakeWord }
+
+    /// A word that is likely to wake the app by mistake, with the reason; nil when it looks fine.
+    static func wakeWordWarning(_ word: String) -> String? {
+        let n = Grammar.normalize(word)
+        if n.isEmpty { return "Campo vuoto: resta «computer»." }
+        let common: Set<String> = ["si", "no", "ok", "ciao", "allora", "ecco", "dai", "casa", "mamma", "papa", "amore",
+                                   "bene", "senti", "guarda", "aspetta", "basta", "vai", "apri", "scrivi", "stop"]
+        if common.contains(n) { return "«\(word)» si dice spesso in casa o è già un comando: l'app potrebbe attivarsi per sbaglio." }
+        if n.replacingOccurrences(of: " ", with: "").count < 4 { return "Una parola così corta può essere riconosciuta per sbaglio: meglio almeno 4 lettere." }
+        return nil
     }
 
     var apiKey: String? {

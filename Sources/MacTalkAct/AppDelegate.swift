@@ -363,11 +363,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 struct HelpView: View {
-    private let sections: [(String, [String])] = [
+    @ObservedObject private var settings = AppSettings.shared
+
+    private var sections: [(String, [String])] {
+        let w = settings.effectiveWakeWord
+        let W = w.prefix(1).uppercased() + w.dropFirst()
+        return [
         ("Come attivarla", [
             "Tieni premuto ⌥ destro mentre parli, poi rilascia",
             "Doppio tocco su ⌥ destro: sessione a mani libere, di' «basta» per chiudere",
-            "Ascolto continuo dal menu: di' «Computer» seguito dal comando (es. «Computer, apri Mail»)",
+            "Ascolto continuo dal menu: di' «\(W)» seguito dal comando (es. «\(W), apri Mail»)",
+            "La parola di attivazione si cambia in Impostazioni › Ascolto",
         ]),
         ("Scrivere", [
             "Con il cursore in un campo di testo, detta: il modello Apple sul Mac capisce se è testo da scrivere, un comando o chiacchiera",
@@ -377,7 +383,7 @@ struct HelpView: View {
             "«a capo», «invio», «cancella», «cancella parola», «seleziona tutto»",
         ]),
         ("Conversazione", [
-            "Dopo ogni risposta hai 20 secondi per continuare senza dire «computer» («💬 Ti ascolto ancora»)",
+            "Dopo ogni risposta hai \(Int(settings.conversationSeconds)) secondi per continuare senza dire «\(w)» («💬 Ti ascolto ancora»)",
             "In quei secondi la chiacchiera con chi è nella stanza viene ignorata",
             "«basta così» o «grazie» chiudono subito la conversazione",
             "L'agente ricorda le ultime 5 cose fatte (10 minuti): «rimetti com'era prima», «fai lo stesso con l'altra»",
@@ -433,6 +439,7 @@ struct HelpView: View {
             "«stop» interrompe un'azione in corso",
         ]),
     ]
+    }
 
     var body: some View {
         ScrollView {
