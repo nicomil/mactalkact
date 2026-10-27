@@ -1271,6 +1271,25 @@ extension DebugCLI {
         let v = text(await tools.call("menu", ["path": m.contains("View") ? "View" : "Vista"]))
         check("voci del menu Vista con scorciatoie", v.contains("⌘"), v)
 
+        print("Osservazione a costo fisso (Storia 7.4):")
+        await open("grande.html")
+        let fixedWas = AppSettings.shared.fixedCostObservation
+        for on in [true, false] {
+            AppSettings.shared.fixedCostObservation = on
+            let t0 = Date()
+            let g = text(await tools.call("observe", [:]))
+            let dt = Date().timeIntervalSince(t0)
+            print(String(format: "  %@: %.2f s, %d righe, barra %@", on ? "costo fisso" : "come prima ", dt,
+                         g.split(separator: "\n").count, g.contains("«Archivia tutto»") ? "visibile" : "assente"))
+            if on {
+                check("costo fisso: la barra resta nell'osservazione", g.contains("«Archivia tutto»") && g.contains("«Impostazioni»"))
+                check("costo fisso: scansione sotto 1 s", dt < 1)
+            }
+        }
+        AppSettings.shared.fixedCostObservation = fixedWas
+        let found = text(await tools.call("observe", ["query": "Messaggio 900"]))
+        check("ricerca: trova anche fuori vista", found.contains("Messaggio 900"))
+
         print("Zoom:")
         await open("etichetta.html")
         let shot = await tools.call("screenshot", [:])

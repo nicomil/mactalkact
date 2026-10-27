@@ -489,3 +489,14 @@ Cosa resta da decidere (per la Storia 7.5 o un ciclo successivo):
 I compiti istantanei sono 13: 10 senza scalata (**77%**), 12 riusciti, compito in 5,0 s di mediana. Il costo della scalata ha una mediana di **4,7 s**: obiettivo ≤ 1 s, ancora non raggiunto. L'unico fallimento è `modulo-citta`: Haiku ha scelto Torino e poi ha premuto Invio, inviando il modulo. È un'azione non chiesta, ed è proprio il tipo di errore che il gate dell'Epic 9 deve fermare. `finder-rinomina` ora resta al rapido e riesce. Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2134-claude.tsv`.
 
 Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2113-claude.tsv` (giro 1, Banco completo), `…-2117-claude.tsv` (giro 2), `…-2121-claude.tsv` (giro 3).
+
+## 16. Osservazione a costo fisso (Storia 7.4, 27 ottobre 2026)
+
+Nuova pagina del Banco, `grande.html`: una lista di 1.000 messaggi e, dopo la lista nel documento ma fissa in alto sullo schermo, una barra di 5 pulsanti. Prova con `--hands-test`:
+
+| Scansione | Tempo | Righe | Barra |
+| --- | --- | --- | --- |
+| Come prima | 0,10 s | 149 | visibile |
+| Costo fisso (figli visibili, 60 per contenitore, niente discesa nei ruoli foglia) | 0,07 s | 150 | visibile |
+
+La ricerca con `query` trova ancora il messaggio 900, fuori vista. Il guadagno è piccolo perché la scansione di prima saltava già i rami fuori dalla finestra: su questa pagina la lista non esauriva il budget. Il criterio «sotto 1 s» è rispettato. La prova vera resta la webmail di prova (migliaia di elementi annidati), che manca: va fatta con `MACTALK_BENCH_WEBMAIL` prima di chiudere l'Epic 7. Electron e Chromium: alla prima osservazione l'app aspetta fino a 1 s che l'albero si popoli; non misurato, nessuna app Electron nel Banco.

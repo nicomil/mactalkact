@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco grande</title>
+<style>body{font:14px -apple-system;margin:0;padding:70px 24px 24px}#barra{position:fixed;top:0;left:0;right:0;background:#f4f4f4;padding:12px 24px;border-bottom:1px solid #ddd}li{padding:2px 0}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Posta in arrivo (1000)</h1>
+<ul id="lista" aria-label="Messaggi"></ul>
+<!-- La barra viene dopo la lista nel documento ma resta in alto sullo schermo: una scansione che
+     legge tutta la lista prima di arrivarci non la vede (Storia 7.4). -->
+<div id="barra" role="toolbar" aria-label="Azioni">
+  <button>Nuovo</button> <button>Aggiorna</button> <button>Segna tutti come letti</button>
+  <button>Archivia tutto</button> <button>Impostazioni</button>
+</div>
+<script>
+const ul = document.getElementById("lista");
+for (let i = 1; i <= 1000; i++) {
+  const li = document.createElement("li");
+  li.innerHTML = '<a href="#m' + i + '">Messaggio ' + i + ' · notifica automatica ' + i + '</a>';
+  ul.appendChild(li);
+}
+let fatto = "nessuna";
+document.querySelectorAll("#barra button").forEach(b => b.addEventListener("click", () => {
+  fatto = b.textContent;
+  banco("grande", ["azione=" + fatto]);
+}));
+banco("grande", ["azione=" + fatto]);
+</script>
+</body></html>

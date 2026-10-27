@@ -74,10 +74,21 @@ enum AX {
     static func prepare(_ app: AXUIElement, pid: pid_t, bundleID: String?) {
         guard !prepared.contains(pid) else { return }
         prepared.insert(pid)
-        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        if let id = bundleID, chromiumPrefixes.contains(where: id.hasPrefix) {
+        let set = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        let chromium = bundleID.map { id in chromiumPrefixes.contains(where: id.hasPrefix) } ?? false
+        if chromium {
             AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-            Log.debug("Accessibilità web attivata per \(id)")
+            Log.debug("Accessibilità web attivata per \(bundleID ?? "")")
+        }
+        // Electron (the attribute is accepted) and Chromium build the tree only now: wait until the
+        // window has some children, at most 1 s, so the first observation is not empty (FR-44).
+        if chromium || set == .success {
+            let deadline = Date().addingTimeInterval(1)
+            while Date() < deadline {
+                let window = focusedWindow(in: app)
+                if let window, children(window).count >= 3 { break }
+                Thread.sleep(forTimeInterval: 0.1)
+            }
         }
     }
 

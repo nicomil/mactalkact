@@ -448,6 +448,7 @@ private struct AgentSection: View {
                 }
                 Text("Solo con Claude. «Clicca il preventivo», «apri la mail di Laura»: un passo su qualcosa che l'app conosce (app, sito, elemento sullo schermo, conversazione) va a un modello veloce. Se la prima azione non cambia niente, o serve un secondo passo, la richiesta passa da sola al livello rapido, senza ripetere quello che è già stato fatto.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("Osservazione a costo fisso (liste lunghe lette solo per la parte visibile)", isOn: $settings.fixedCostObservation)
                 Toggle("Sessione lunga: Claude resta pronto tra una richiesta e l'altra", isOn: $settings.longSession)
                 Stepper("Riavvio dopo \(settings.sessionMaxRequests) richieste", value: $settings.sessionMaxRequests, in: 1...50)
                     .disabled(!settings.longSession)

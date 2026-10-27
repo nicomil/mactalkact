@@ -716,6 +716,12 @@ final class AgentTools {
         var truncated = false
     }
 
+    /// Observation at fixed cost (FR-44): children per container, roles with nothing useful below.
+    static let perContainer = 60
+    private static let containerRoles: Set<String> = ["AXList", "AXTable", "AXOutline", "AXBrowser", "AXGrid", "AXScrollArea"]
+    private static let leafRoles: Set<String> = ["AXStaticText", "AXImage", "AXScrollBar", "AXValueIndicator",
+                                                 "AXBusyIndicator", "AXProgressIndicator", "AXSplitter"]
+
     private static let attrs = [
         kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute,
         kAXChildrenAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXFocusedAttribute, kAXSubroleAttribute,
@@ -792,6 +798,7 @@ final class AgentTools {
         }
 
         let needle = query.map { Grammar.normalize($0) }
+        let fixedCost = AppSettings.shared.fixedCostObservation
         let maxItems = needle == nil ? 220 : 60
         let deadline: TimeInterval = needle == nil ? 1.8 : 4.0
         let maxNodes = needle == nil ? 12_000 : 40_000
@@ -872,8 +879,23 @@ final class AgentTools {
                     view.items.append((id, line))
                 }
             }
-            if depth < 60, let children = v[4] as? [AXUIElement] {
+            if depth < 60, var children = v[4] as? [AXUIElement] {
                 let childrenInWeb = inWeb || role == "AXWebArea"
+                if fixedCost, needle == nil {
+                    // Fixed cost (FR-44, AD-19): leaves bring nothing below them; a container offers what
+                    // is visible, and at most `Self.perContainer` children, so one long list never
+                    // takes the budget of the toolbar.
+                    if Self.leafRoles.contains(role) { children = [] }
+                    if Self.containerRoles.contains(role) {
+                        if let visible = (AX.value(el, "AXVisibleRows") ?? AX.value(el, "AXVisibleChildren")) as? [AXUIElement], !visible.isEmpty {
+                            children = visible
+                        }
+                        if children.count > Self.perContainer {
+                            children = Array(children.prefix(Self.perContainer))
+                            view.truncated = true
+                        }
+                    }
+                }
                 for c in children { queue.append((c, depth + 1, childrenInWeb)) }
             }
         }

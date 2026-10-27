@@ -135,6 +135,8 @@ final class AppSettings: ObservableObject {
         static let instantLevel = true
         static let instantModel = "claude-haiku-5-5"
         static let instantEffort = "low"
+        /// Screen reading at fixed cost (FR-44).
+        static let fixedCostObservation = true
         static let confirmValiditySeconds = 45.0
         static let cleanDictation = false
         // Engines (Epic 4-5)
@@ -227,6 +229,7 @@ final class AppSettings: ObservableObject {
     @Published var instantLevel: Bool { didSet { defaults.set(instantLevel, forKey: "instantLevel") } }
     @Published var instantModel: String { didSet { defaults.set(instantModel, forKey: "instantModel") } }
     @Published var instantEffort: String { didSet { defaults.set(instantEffort, forKey: "instantEffort") } }
+    @Published var fixedCostObservation: Bool { didSet { defaults.set(fixedCostObservation, forKey: "fixedCostObservation") } }
     @Published var confirmValiditySeconds: Double { didSet { defaults.set(confirmValiditySeconds, forKey: "confirmValiditySeconds") } }
     @Published var cleanDictation: Bool { didSet { defaults.set(cleanDictation, forKey: "cleanDictation") } }
 
@@ -356,6 +359,7 @@ final class AppSettings: ObservableObject {
         instantLevel = bool("instantLevel", Defaults.instantLevel)
         instantModel = d.string(forKey: "instantModel") ?? Defaults.instantModel
         instantEffort = d.string(forKey: "instantEffort") ?? Defaults.instantEffort
+        fixedCostObservation = bool("fixedCostObservation", Defaults.fixedCostObservation)
         confirmValiditySeconds = double("confirmValiditySeconds", Defaults.confirmValiditySeconds)
         cleanDictation = bool("cleanDictation", Defaults.cleanDictation)
 
@@ -425,6 +429,7 @@ final class AppSettings: ObservableObject {
             agentTimeout = Defaults.agentTimeout; confirmValiditySeconds = Defaults.confirmValiditySeconds
             longSession = Defaults.longSession; sessionMaxRequests = Defaults.sessionMaxRequests
             instantLevel = Defaults.instantLevel; instantModel = Defaults.instantModel; instantEffort = Defaults.instantEffort
+            fixedCostObservation = Defaults.fixedCostObservation
             cleanDictation = Defaults.cleanDictation
             agentEngine = Defaults.agentEngine; engineFallback = Defaults.engineFallback
             codexPath = Defaults.codexPath; codexModel = Defaults.codexModel; codexFastModel = Defaults.codexFastModel
