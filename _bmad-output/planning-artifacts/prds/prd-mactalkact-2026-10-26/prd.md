@@ -365,6 +365,7 @@ Una sezione «Motori» mostra il Motore scelto, l'interruttore della Catena di r
 **Feature-specific NFRs:**
 - **NFR-8 Stesse mani per tutti.** Ogni Motore agisce solo tramite gli strumenti di MacTalkAct; nessun Motore riceve shell, accesso ai file o strumenti propri.
 - **NFR-9 Tempi dei Motori.** Scelta del Motore ≤ 50 ms; primo strumento con Codex rapido ≤ 4 s [ASSUMPTION]; con il modello Apple ≤ 2 s; con il Modello locale esteso ≤ 5 s su M1 16 GB [ASSUMPTION da misurare con il Banco].
+  *Misurato il 27/10:* Codex rapido 3,4–4,3 s ✓; modello Apple: prima azione 5,6 s ma compito intero 6,5 s (l'app osserva e pianifica prima di agire; il «primo strumento» non è più il passo giusto da misurare); `qwen3.5:9b` su M1 ~19 s ✗, limite dell'hardware.
 - **NFR-10 Il locale resta locale.** Con il Motore locale nessun dato lascia il Mac: il server esteso è accettato senza avvisi solo su `localhost`; un indirizzo diverso richiede una conferma esplicita nelle impostazioni.
 
 ## 5. Requisiti non funzionali trasversali

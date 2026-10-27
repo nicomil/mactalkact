@@ -186,3 +186,14 @@ Stesso Banco, stesso motore locale in modalità piano, modello servito da **Olla
 1. **Predefinito: modello Apple.** È il più veloce (6,5 s a compito), non occupa memoria propria e supera la soglia di SM-6 (70%).
 2. **Modello locale esteso consigliato: `qwen3.5:9b` su Ollama.** Supera la soglia di SM-6 (85%) con il 90%, ma costa circa 20 s a compito e 10 GB: conviene quando la precisione conta più del tempo e il Mac ha memoria libera. **NFR-9 non è rispettato** per il modello esteso su M1 (prima azione 18,9 s contro 5 s): il limite viene dalla lettura del prompt su M1, non dal codice. Su Mac con più memoria e chip più recenti il quadro migliora.
 3. `qwen3.5:4b` non conviene: più lento e meno preciso del modello Apple.
+
+## 7. Confronto tra motori sul Banco (27/10)
+
+| Motore | Riusciti | Brevi | Medi | Prima azione (mediana) | Tempo (mediana / 90°) |
+| --- | --- | --- | --- | --- | --- |
+| Claude (Sonnet 5.5 rapido, Opus 5.5 per i medi) | 18/20 (90%) | 13/15 | 5/5 | 4,7 s | 9,4 s / 23,5 s |
+| Codex | vedi sotto | | | | |
+| Locale, modello Apple | 16/20 (80%) | 12/15 | 4/5 | 5,6 s | 6,5 s / 9,5 s |
+| Locale, qwen3.5:9b su Ollama | 18/20 (90%) | 13/15 | 5/5 | 18,9 s | 20,2 s / 47,2 s |
+
+Claude riesce dove il locale rinuncia (modifiche nel notebook, «tutti quelli che hanno già…») e ha mancato i due clic sul menu del sito (ha detto di non aver verificato). Il modello Apple, guidato dal piano, è **più rapido di Claude** sui compiti brevi perché non c'è rete né avvio di processi.

@@ -176,6 +176,8 @@ flowchart TD
 - **Prevents:** due cicli di agente locale diversi (uno per il modello Apple, uno per Ollama) e un prompt cloud troppo lungo per un modello piccolo.
 - **Rule:** `LocalEngine` esegue un `LanguageModelSession` con istruzioni corte in italiano, un sottoinsieme di strumenti (`observe` con `query`, `click`, `click_many`, `type_text`, `replace_text`, `press_keys`, `open_app`, `open_url`, `scroll`, `confirm`) e al massimo `localMaxSteps` passi. Il modello è un `any LanguageModel` (protocollo di macOS 27): `SystemLanguageModel.default` come predefinito, `OpenAICompatibleModel` (provider nostro verso `/v1/chat/completions` con `tools` e streaming) per il Modello locale esteso. Se il provider esteso non risponde, la stessa richiesta usa il modello Apple. `OpenAICompatibleModel` accetta senza conferma solo indirizzi `localhost`/`127.0.0.1` e chiede al server di tenere il modello in memoria per `localKeepAlive` (Ollama `keep_alive`).
 
+- **Emendata il 27/10 dopo il Banco (Storia 5.4):** il ciclo con gli strumenti nativi riusciva 1 compito su 20 col modello Apple. `LocalEngine` usa la modalità **piano** (`LocalStepAgent.runPlan`): una chiamata con generazione vincolata produce tutti i passi, ogni elemento indicato per testo; l'app osserva, risolve il testo in id solo dentro la pagina web, scarta i clic non pertinenti e quelli rischiosi non chiesti, non scrive su testi esistenti quando la richiesta è una modifica e riassume ciò che ha fatto. Risultato: 80% col modello Apple, 90% con `qwen3.5:9b`. Il provider esteso manda `reasoning_effort: "none"`.
+
 ### AD-18 — L'Agente si misura con un Banco di prova
 
 - **Binds:** FR-32, SM-6
