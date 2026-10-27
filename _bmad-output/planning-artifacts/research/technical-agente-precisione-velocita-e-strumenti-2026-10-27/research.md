@@ -500,3 +500,5 @@ Nuova pagina del Banco, `grande.html`: una lista di 1.000 messaggi e, dopo la li
 | Costo fisso (figli visibili, 60 per contenitore, niente discesa nei ruoli foglia) | 0,07 s | 150 | visibile |
 
 La ricerca con `query` trova ancora il messaggio 900, fuori vista. Il guadagno è piccolo perché la scansione di prima saltava già i rami fuori dalla finestra: su questa pagina la lista non esauriva il budget. Il criterio «sotto 1 s» è rispettato. La prova vera resta la webmail di prova (migliaia di elementi annidati), che manca: va fatta con `MACTALK_BENCH_WEBMAIL` prima di chiudere l'Epic 7. Electron e Chromium: alla prima osservazione l'app aspetta fino a 1 s che l'albero si popoli; non misurato, nessuna app Electron nel Banco.
+
+Dopo la review la scansione a costo fisso scende a 0,04 s. Il nuovo test della lista scorsa ha trovato un difetto: Safari dichiara «visibili» tutte le 1.000 righe, e il tetto teneva le prime 60, fuori vista, lasciando l'osservazione senza righe. Ora tra i candidati restano quelli che si vedono nella finestra.

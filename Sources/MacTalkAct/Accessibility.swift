@@ -74,22 +74,38 @@ enum AX {
     static func prepare(_ app: AXUIElement, pid: pid_t, bundleID: String?) {
         guard !prepared.contains(pid) else { return }
         prepared.insert(pid)
-        let set = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         let chromium = bundleID.map { id in chromiumPrefixes.contains(where: id.hasPrefix) } ?? false
         if chromium {
             AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
             Log.debug("Accessibilità web attivata per \(bundleID ?? "")")
         }
-        // Electron (the attribute is accepted) and Chromium build the tree only now: wait until the
-        // window has some children, at most 1 s, so the first observation is not empty (FR-44).
-        if chromium || set == .success {
-            let deadline = Date().addingTimeInterval(1)
-            while Date() < deadline {
-                let window = focusedWindow(in: app)
-                if let window, children(window).count >= 3 { break }
-                Thread.sleep(forTimeInterval: 0.1)
-            }
+        // Electron and Chromium build the web tree only now: at the first contact, wait until a web
+        // area has children, at most 1 s, so the first observation is not empty (FR-44). The main
+        // run loop keeps turning meanwhile; native apps (no Electron framework) never wait.
+        let electron = bundleID.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+            .map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path) } ?? false
+        guard (chromium || electron), UserDefaults.standard.object(forKey: "fixedCostObservation") as? Bool ?? true, let window = focusedWindow(in: app) else { return }
+        AXUIElementSetMessagingTimeout(app, 0.2)
+        defer { AXUIElementSetMessagingTimeout(app, 0) }
+        let started = Date()
+        while Date().timeIntervalSince(started) < 1, !webAreaReady(window) {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
+        Log.debug(String(format: "Accessibilità: albero di %@ pronto in %.2f s", bundleID ?? "", Date().timeIntervalSince(started)))
+    }
+
+    /// A web area with children within the first nodes of the window (Electron/Chromium ready).
+    static func webAreaReady(_ window: AXUIElement) -> Bool {
+        var queue = [window]
+        var i = 0
+        while i < queue.count, i < 300 {
+            let el = queue[i]
+            i += 1
+            if role(el) == "AXWebArea" { return !children(el).isEmpty }
+            queue += children(el)
+        }
+        return false
     }
 
     /// The app that really has the focus right now. Asked to the Accessibility

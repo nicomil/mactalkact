@@ -2,7 +2,7 @@
 title: 'Storia 7.4 — Osservazione a costo fisso'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-review'
+status: 'done'
 baseline_commit: '7332d19a4c7525f71f407a9c5c4723b4b1cecaf1'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -71,8 +71,25 @@ context:
 ## Implementation Notes
 
 - Spec approvata in autonomia (Nico: «committa e procedi»). Webmail di prova non disponibile: la pagina grande ne fa le veci per il criterio «sotto 1 s».
-- Risultato (ricerca §16): 0,07 s contro 0,10 s, barra visibile in entrambi i casi. Il filtro dei rami fuori finestra, che c'era già, faceva il grosso del lavoro.
+- Dopo la review: 0,04 s contro 0,10 s, barra visibile, lista scorsa corretta (bug trovato dal nuovo test).
+- Risultato prima della review (ricerca §16): 0,07 s contro 0,10 s, barra visibile in entrambi i casi. Il filtro dei rami fuori finestra, che c'era già, faceva il grosso del lavoro.
 
 ## Spec Change Log
 
 ## Review Triage Log
+
+Prima review (3 revisori). Nessun rilievo di intento o di spec; patch salvo due rinvii.
+
+| Rilievo | Verdetto | Evidenza / esito |
+|---|---|---|
+| Lista scorsa: il tetto tiene le prime 60 righe, fuori vista, e l'osservazione resta senza righe | high | Confermato dal nuovo test: Safari dà come «visibili» tutte le righe. Patch: tra i candidati si tengono quelli il cui frame è nella finestra |
+| Attesa Electron/Chromium: blocca il main thread, condizione sbagliata (bastano i pulsanti della finestra), vale anche per app native e con l'interruttore spento | high | Patch: solo Chromium o app con Electron Framework, solo con l'interruttore acceso e con una finestra; attesa di un `AXWebArea` con figli; run loop che gira; messaging timeout 0,2 s durante l'attesa; log del tempo |
+| `AXVisibleRows` fa sparire intestazioni e colonne delle tabelle | medium | Patch: i figli che non sono righe restano |
+| Tetto solo per sei ruoli: le liste fatte di `AXGroup` restano senza limite | medium | Patch: tetto su qualunque elemento con più di 60 figli; figli visibili letti solo per i contenitori |
+| Il tetto segna «troncato», e il Motore locale fa ricerche extra | medium | Patch: segnale separato («long lists show only their visible part») che `LocalStepAgent` non conta come troncamento |
+| Budget di tempo di FR-44 non applicato | medium | Patch: 0,9 s per l'osservazione semplice con il costo fisso |
+| Test che non distingue acceso da spento; ordine che falsa i tempi; impostazione non rimessa con `defer`; predefinito non controllato | gap | Patch: riscaldamento, verifica del segnale acceso/spento, lista scorsa con `scroll`, `defer`, predefinito in `--fallback-test` |
+| Interruttore sotto la didascalia «Solo con Claude» | low | Patch: spostato in cima con una didascalia propria |
+| Attesa Electron/Chromium senza verifica | gap | Rinviato: serve un browser Chromium nel Banco |
+| La copia di `kAXChildrenAttribute` costa ancora con la lunghezza della lista | low | Rinviato: il costo vero si misura sulla webmail di prova |
+| Tabella del Banco senza tempo della scansione | false | La colonna `scansione` esiste dalla Storia 7.1 |

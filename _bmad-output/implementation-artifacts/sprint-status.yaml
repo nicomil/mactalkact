@@ -7,7 +7,7 @@
 # Stati: backlog · ready-for-dev · in-progress · review · done
 
 generated: 10-26-2026 23:10
-last_updated: 10-27-2026 21:35
+last_updated: 10-27-2026 21:51
 project: mactalkact
 project_key: NOKEY
 tracking_system: file-system
@@ -71,7 +71,7 @@ development_status:
   7-1-riga-di-base-il-banco-misura-fase-per-fase-anche-fuori-dal-b: review
   7-2-sessione-lunga-sorvegliata-e-cli-sotto-controllo: review
   7-3-livello-istantaneo-per-i-comandi-a-un-passo: review
-  7-4-osservazione-a-costo-fisso: in-progress
+  7-4-osservazione-a-costo-fisso: review
   7-5-misura-finale-della-velocità: backlog
   epic-7-retrospective: optional
 

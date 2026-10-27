@@ -1062,6 +1062,7 @@ extension DebugCLI {
                   && ClaudeEngine.effective(.instant, instantOn: false, useFastModel: false) == .deep
                   && ClaudeEngine.effective(.fast, instantOn: true, useFastModel: true) == .fast)
             check("predefiniti dell'istantaneo", AppSettings.Defaults.instantModel == "claude-haiku-5-5" && AppSettings.Defaults.instantEffort == "low")
+            check("osservazione a costo fisso attiva per impostazione predefinita", AppSettings.Defaults.fixedCostObservation)
         }
         do {
             let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
@@ -1197,7 +1198,11 @@ extension DebugCLI {
         func open(_ page: String) async {
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
-            _ = try? await NSWorkspace.shared.open([base.appendingPathComponent(page)], withApplicationAt: safari, configuration: config)
+            // «grande.html#m500»: the anchor stays a fragment, not part of the file name.
+            let parts = page.split(separator: "#", maxSplits: 1).map(String.init)
+            var url = base.appendingPathComponent(parts[0])
+            if parts.count == 2, let withAnchor = URL(string: "#" + parts[1], relativeTo: url) { url = withAnchor.absoluteURL }
+            _ = try? await NSWorkspace.shared.open([url], withApplicationAt: safari, configuration: config)
             try? await Task.sleep(for: .seconds(2))
             if let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").first { await ex.bringToFront(app) }
             try? await Task.sleep(for: .seconds(0.4))
@@ -1274,21 +1279,34 @@ extension DebugCLI {
         print("Osservazione a costo fisso (Storia 7.4):")
         await open("grande.html")
         let fixedWas = AppSettings.shared.fixedCostObservation
-        for on in [true, false] {
+        defer { AppSettings.shared.fixedCostObservation = fixedWas }
+        _ = await tools.call("observe", [:]) // warm-up: the first read pays the cold tree
+        var seen: [Bool: (text: String, time: Double)] = [:]
+        for on in [false, true] {
             AppSettings.shared.fixedCostObservation = on
             let t0 = Date()
             let g = text(await tools.call("observe", [:]))
-            let dt = Date().timeIntervalSince(t0)
-            print(String(format: "  %@: %.2f s, %d righe, barra %@", on ? "costo fisso" : "come prima ", dt,
+            seen[on] = (g, Date().timeIntervalSince(t0))
+            print(String(format: "  %@: %.2f s, %d righe, barra %@", on ? "costo fisso" : "come prima ", seen[on]!.time,
                          g.split(separator: "\n").count, g.contains("«Archivia tutto»") ? "visibile" : "assente"))
-            if on {
-                check("costo fisso: la barra resta nell'osservazione", g.contains("«Archivia tutto»") && g.contains("«Impostazioni»"))
-                check("costo fisso: scansione sotto 1 s", dt < 1)
-            }
         }
-        AppSettings.shared.fixedCostObservation = fixedWas
+        if let on = seen[true], let off = seen[false] {
+            check("costo fisso: la barra resta nell'osservazione", on.text.contains("«Archivia tutto»") && on.text.contains("«Impostazioni»"))
+            check("costo fisso: scansione sotto 1 s", on.time < 1)
+            check("costo fisso: la lista lunga dice che mostra solo la parte visibile", on.text.contains("only their visible part"))
+            check("spento: come prima, senza quel limite", !off.text.contains("only their visible part"))
+        }
+        AppSettings.shared.fixedCostObservation = true
         let found = text(await tools.call("observe", ["query": "Messaggio 900"]))
         check("ricerca: trova anche fuori vista", found.contains("Messaggio 900"))
+        // A list scrolled far down: the rows on screen must be there, not the first 60 of the list.
+        _ = await tools.call("scroll", ["direction": "down", "amount": 10])
+        _ = await tools.call("scroll", ["direction": "down", "amount": 10])
+        try? await Task.sleep(for: .milliseconds(500))
+        let scrolled = text(await tools.call("observe", [:]))
+        let far = scrolled.range(of: #"Messaggio [2-9]\d\d "#, options: .regularExpression) != nil
+        check("lista scorsa: si vedono le righe sullo schermo, non le prime", far && !scrolled.contains("«Messaggio 1 ·"))
+        if !far { print("      " + scrolled.split(separator: "\n").filter { $0.contains("Messaggio") }.prefix(3).joined(separator: "\n      ")) }
 
         print("Zoom:")
         await open("etichetta.html")

@@ -15,6 +15,7 @@
 const ul = document.getElementById("lista");
 for (let i = 1; i <= 1000; i++) {
   const li = document.createElement("li");
+  li.id = "m" + i;
   li.innerHTML = '<a href="#m' + i + '">Messaggio ' + i + ' · notifica automatica ' + i + '</a>';
   ul.appendChild(li);
 }
@@ -24,5 +25,8 @@ document.querySelectorAll("#barra button").forEach(b => b.addEventListener("clic
   banco("grande", ["azione=" + fatto]);
 }));
 banco("grande", ["azione=" + fatto]);
+function vai() { if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView(); }
+vai();
+window.addEventListener("hashchange", vai);
 </script>
 </body></html>

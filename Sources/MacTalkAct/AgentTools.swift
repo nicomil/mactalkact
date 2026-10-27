@@ -714,10 +714,13 @@ final class AgentTools {
         var header: [String] = []
         var items: [(id: Int, line: String)] = []
         var truncated = false
+        /// Long containers showed only their visible part (fixed cost): what is on screen is complete.
+        var capped = false
     }
 
     /// Observation at fixed cost (FR-44): children per container, roles with nothing useful below.
     static let perContainer = 60
+    /// Roles that may expose `AXVisibleRows`/`AXVisibleChildren`. The cap itself applies to any element.
     private static let containerRoles: Set<String> = ["AXList", "AXTable", "AXOutline", "AXBrowser", "AXGrid", "AXScrollArea"]
     private static let leafRoles: Set<String> = ["AXStaticText", "AXImage", "AXScrollBar", "AXValueIndicator",
                                                  "AXBusyIndicator", "AXProgressIndicator", "AXSplitter"]
@@ -769,6 +772,8 @@ final class AgentTools {
         } else if view.truncated {
             lines.append(query != nil ? "(search stopped early: results may be incomplete)"
                                       : "(list truncated: use observe with a query to find something specific, or a screenshot)")
+        } else if view.capped {
+            lines.append("(long lists show only their visible part: scroll, or use observe with a query, for the rest)")
         }
         return lines.joined(separator: "\n")
     }
@@ -800,7 +805,8 @@ final class AgentTools {
         let needle = query.map { Grammar.normalize($0) }
         let fixedCost = AppSettings.shared.fixedCostObservation
         let maxItems = needle == nil ? 220 : 60
-        let deadline: TimeInterval = needle == nil ? 1.8 : 4.0
+        // Fixed cost: a time budget under a second for the plain observation (FR-44).
+        let deadline: TimeInterval = needle == nil ? (fixedCost ? 0.9 : 1.8) : 4.0
         let maxNodes = needle == nil ? 12_000 : 40_000
         let start = Date()
         // Third value: inside a web page (AXWebArea), as opposed to the browser's own toolbars and sidebars.
@@ -882,18 +888,33 @@ final class AgentTools {
             if depth < 60, var children = v[4] as? [AXUIElement] {
                 let childrenInWeb = inWeb || role == "AXWebArea"
                 if fixedCost, needle == nil {
-                    // Fixed cost (FR-44, AD-19): leaves bring nothing below them; a container offers what
-                    // is visible, and at most `Self.perContainer` children, so one long list never
+                    // Fixed cost (FR-44, AD-19): leaves bring nothing below them; a long element offers
+                    // what is visible, at most `Self.perContainer` children, so one long list never
                     // takes the budget of the toolbar.
                     if Self.leafRoles.contains(role) { children = [] }
-                    if Self.containerRoles.contains(role) {
-                        if let visible = (AX.value(el, "AXVisibleRows") ?? AX.value(el, "AXVisibleChildren")) as? [AXUIElement], !visible.isEmpty {
-                            children = visible
+                    if children.count > Self.perContainer {
+                        var candidates = children
+                        var extra: [AXUIElement] = []
+                        if Self.containerRoles.contains(role),
+                           let v = (AX.value(el, "AXVisibleRows") ?? AX.value(el, "AXVisibleChildren")) as? [AXUIElement], !v.isEmpty {
+                            candidates = v
+                            // Headers, columns and sort buttons are not rows: they stay.
+                            if role == "AXTable" || role == "AXOutline" { extra = Array(children.filter { AX.role($0) != "AXRow" }.prefix(10)) }
                         }
-                        if children.count > Self.perContainer {
-                            children = Array(children.prefix(Self.perContainer))
-                            view.truncated = true
+                        // Some apps (Safari lists) call every child «visible»: keep the ones whose frame is
+                        // in the window, never simply the first ones of the list.
+                        var visible: [AXUIElement] = []
+                        if candidates.count > Self.perContainer, let wf = windowFrame {
+                            let area = wf.insetBy(dx: -4, dy: -4)
+                            for c in candidates where visible.count < Self.perContainer {
+                                if let f = AX.frame(c), area.intersects(f) { visible.append(c) }
+                                else if !visible.isEmpty { break } // past the visible block of the list
+                            }
+                        } else {
+                            visible = candidates
                         }
+                        children = extra + Array((visible.isEmpty ? candidates : visible).prefix(Self.perContainer))
+                        view.capped = true
                     }
                 }
                 for c in children { queue.append((c, depth + 1, childrenInWeb)) }

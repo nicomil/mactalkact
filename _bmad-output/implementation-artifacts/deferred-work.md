@@ -13,3 +13,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-7-3-livello-istantaneo.md`
   summary: Test del collegamento Coordinator → `agent.run(instant:)`; verifica con la CLI vera di un interrupt arrivato dopo la fine del turno; misura della doppia lettura dello schermo sul percorso istantaneo.
   evidence: review della Storia 7.3 (rinvii).
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-4-osservazione-a-costo-fisso.md`
+  summary: Verificare l'attesa dell'albero su Chromium/Electron con un browser Chromium nel Banco, e misurare il costo fisso sulla webmail di prova (`MACTALK_BENCH_WEBMAIL`).
+  evidence: review della Storia 7.4; la pagina sintetica non riproduce il costo di una webmail vera.
