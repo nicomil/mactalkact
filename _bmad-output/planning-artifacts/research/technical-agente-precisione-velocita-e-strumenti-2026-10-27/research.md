@@ -583,3 +583,23 @@ Il riscaldamento parte in background all'avvio dell'app. Una lettura chiesta pri
 | Localizza (in alto, al centro, in basso) | inutile: risponde sempre «in alto, al centro» |
 
 Tempi: 2–8 s per la prima domanda, 0,7–1,8 s per le successive. Conclusione: il modello Apple vede e descrive, ma non legge in modo affidabile e non localizza. Per il testo resta `read_text`, esatto e dieci volte più veloce. Nessun requisito nuovo.
+
+## 21. Spike: azioni dirette via Apple Events (Storia 8.4, 27 ottobre 2026, 23:15)
+
+Comando di debug `--apple-events-spike`. Non è uno strumento dell'Agente (AD-20) e non usa `do shell script` né `execute javascript`. Ogni azione ha 3 s al massimo. Prima di agire chiede al sistema lo stato del consenso Automazione **senza mostrare finestre** (`AEDeterminePermissionToAutomateTarget` con `askUserIfNeeded = false`): se il consenso manca, l'azione non parte. L'invio della bozza di Mail non parte mai senza la conferma di Nico; lo spike prepara la bozza e la cancella. Sistema: macOS 27.0.1 (26A434).
+
+| App | Versione | Azione | Consenso | Tempo | Errore |
+| --- | --- | --- | --- | --- | --- |
+| Safari | 27.0.1 | aprire un indirizzo in una scheda | da chiedere (−1744) | — | non eseguita |
+| Brave Browser | 155.1.97.56 | aprire un indirizzo in una scheda | da chiedere (−1744) | — | non eseguita |
+| Calendario | 27.0 | creare un evento | app non avviata (−600) | — | non eseguita |
+| Finder | 27.0 | rivelare un file | concesso | **0,42 s** | — |
+| Mail | 16.0 | cercare in una casella | app non avviata (−600) | — | non eseguita |
+| Mail | 16.0 | preparare una bozza (invio solo con conferma) | app non avviata (−600) | — | non eseguita |
+
+Cosa dice:
+- Il Finder risponde in meno di mezzo secondo.
+- Per Safari e Brave serve il consenso Automazione, che va dato a mano una volta per l'eseguibile che invia gli eventi. Un binario ricompilato o un'app firmata in modo diverso lo chiedono di nuovo.
+- Calendario e Mail vanno avviati prima: un canale Apple Events dovrebbe aprirli, e la prima richiesta costerebbe l'avvio dell'app.
+
+Per completare la misura servono Nico davanti al Mac (per dare i consensi) e le due app aperte: `--apple-events-spike` va rilanciato così. **Decisione rimandata al ciclo seguente; nessuna integrazione in questo ciclo.**

@@ -99,6 +99,15 @@ if arguments.contains("--fallback-test") {
     dispatchMain()
 }
 
+if arguments.contains("--apple-events-spike") {
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        await AppleEventsSpike.run()
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--ocr-debug") {
     MainActor.assumeIsolated { _ = NSApplication.shared }
     Task { @MainActor in
