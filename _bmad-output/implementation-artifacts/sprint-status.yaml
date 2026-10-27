@@ -72,7 +72,7 @@ development_status:
   7-2-sessione-lunga-sorvegliata-e-cli-sotto-controllo: review
   7-3-livello-istantaneo-per-i-comandi-a-un-passo: review
   7-4-osservazione-a-costo-fisso: review
-  7-5-misura-finale-della-velocità: backlog
+  7-5-misura-finale-della-velocità: in-progress
   epic-7-retrospective: optional
 
   epic-8: backlog

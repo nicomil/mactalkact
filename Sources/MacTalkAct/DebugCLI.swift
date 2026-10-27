@@ -1399,6 +1399,9 @@ extension DebugCLI {
             return confirmation ? (yes ? "sì" : "no") : nil
         }
         do { try await agent.start() } catch { print("Server strumenti: \(error)"); return }
+        // Restarts of the Long session (Story 7.5): every one is announced with «Riavvio l'Agente».
+        let restarts = Box(0)
+        agent.onNotice = { _ in restarts.value += 1 }
         await closeBenchPages(ex)
         agent.refreshAvailability()
         try? await Task.sleep(for: .seconds(2))
@@ -1586,6 +1589,22 @@ extension DebugCLI {
                          instantRows.filter(\.ok).count, median(instantRows.map(\.total)),
                          costs.isEmpty ? "—" : String(format: "%.1f s", median(costs))))
         }
+        // NFR-12 (Story 7.5): the outcome is stated, passed or not.
+        let actionRows = ran.filter { !$0.task.kind.isPhrase }
+        let instantClean = instantRows.filter { $0.escalation.isEmpty }
+        let thresholds: [(String, Double?, Double)] = [
+            ("primo strumento", actionRows.isEmpty ? nil : median(actionRows.compactMap(\.first)), 1.5),
+            ("compito", actionRows.isEmpty ? nil : median(actionRows.map(\.total)), 4.5),
+            ("livello istantaneo", instantClean.isEmpty ? nil : median(instantClean.map(\.total)), 2.5),
+        ]
+        var verdicts: [String] = []
+        for (name, value, limit) in thresholds {
+            let v = value.map { String(format: "%.1f s", $0) } ?? "—"
+            let verdict = value.map { $0 <= limit ? "superata" : "non superata" } ?? "non misurata"
+            verdicts.append("\(name) \(v) (soglia \(String(format: "%.1f", limit)) s): \(verdict)")
+        }
+        print("  soglie NFR-12 (mediane): " + verdicts.joined(separator: " · "))
+        print("  riavvii della Sessione lunga: \(restarts.value)")
         print("  somma delle fasi = totale entro 0,2 s: \(ran.allSatisfy(\.sumOK) ? "sì, su ogni compito" : "NO su \(ran.filter { !$0.sumOK }.map(\.task.id).joined(separator: ", "))")")
 
         let f = DateFormatter()
@@ -1600,6 +1619,7 @@ extension DebugCLI {
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
             tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
+        tsv += "# soglie NFR-12: " + verdicts.joined(separator: " · ") + " · riavvii della Sessione lunga: \(restarts.value)\n"
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")
     }
