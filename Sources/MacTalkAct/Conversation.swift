@@ -71,6 +71,14 @@ final class ConversationLog {
     }
 
     /// The `<recent>` block sent to the agent. Empty when there is nothing recent.
+    static let outcomeWords = 40
+    static let maxWords = 300
+
+    static func shorten(_ text: String, words: Int) -> String {
+        let w = text.split(whereSeparator: \.isWhitespace)
+        return w.count <= words ? text : w.prefix(words).joined(separator: " ") + " …"
+    }
+
     var promptBlock: String { promptBlock(after: 0) }
 
     /// The block with only the entries after `seq`: what a Long session has not seen yet.
@@ -80,14 +88,18 @@ final class ConversationLog {
         guard !entries.isEmpty else { return "" }
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
-        var lines = ["<recent>", "Most recent last. Use it to resolve references like «di prima», «anche l'altra», «rimetti com'era»."]
-        for e in entries {
-            var line = "- \(f.string(from: e.time)) in \(e.app): «\(e.request)» → \(e.outcome)"
+        // Outcome and changed text, never the whole observation: at most `outcomeWords` per outcome
+        // and `maxWords` for the block, dropping the oldest entries first (FR-47).
+        var body: [String] = []
+        for e in entries.reversed() {
+            var line = "- \(f.string(from: e.time)) in \(e.app): «\(e.request)» → \(Self.shorten(e.outcome, words: Self.outcomeWords))"
             if !e.changes.isEmpty { line += "\n  changes: " + e.changes.joined(separator: " | ") }
-            lines.append(line)
+            let count = (body + [line]).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
+            if count > Self.maxWords, !body.isEmpty { break }
+            body.insert(line, at: 0)
         }
-        lines.append("</recent>")
-        return lines.joined(separator: "\n")
+        return (["<recent>", "Most recent last. Use it to resolve references like «di prima», «anche l'altra», «rimetti com'era»."]
+                + body + ["</recent>"]).joined(separator: "\n")
     }
 }
 

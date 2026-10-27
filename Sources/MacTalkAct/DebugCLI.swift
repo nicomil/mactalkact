@@ -77,6 +77,17 @@ enum DebugCLI {
             check("niente di nuovo: blocco vuoto", log.promptBlock(after: log.snapshot.lastSeq).isEmpty)
             log.clear()
             check("dimentica: generazione nuova", log.generation == g0 + 1 && log.entries.isEmpty)
+            // Story 8.2: outcome and changes only, at most 300 words.
+            let long = ConversationLog()
+            let essay = String(repeating: "spiegazione lunga della pagina ", count: 40)
+            for i in 1...12 { long.add(request: "richiesta \(i)", outcome: essay, app: "Safari", changes: ["prima → dopo \(i)"]) }
+            let block = long.promptBlock
+            let words = block.split(whereSeparator: \.isWhitespace).count
+            check("memoria entro 300 parole (più l'intestazione)", words <= ConversationLog.maxWords + 30)
+            check("esito accorciato", block.contains("…") && !block.contains(essay))
+            check("tiene le voci più recenti e i loro cambiamenti", block.contains("richiesta 12") && block.contains("prima → dopo 12") && !block.contains("richiesta 1 »"))
+            check("prompt con la regola della prova, e senza quando è spenta", AgentRunner.basePrompt.count < (AgentRunner.basePrompt + AgentRunner.evidenceRule).count
+                  && !AgentRunner.basePrompt.contains("evidence"))
         }
         print("Livello istantaneo (Storia 7.3):")
         do {
@@ -1506,6 +1517,8 @@ extension DebugCLI {
             var level = ""
             var escalation = ""
             var escalationCost: Double?
+            /// The answer claims success but the check fails (Story 8.2, FR-46).
+            var falseDone = false
             var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) + router - total) <= 0.2 }
         }
         var rows: [Row] = []
@@ -1621,6 +1634,10 @@ extension DebugCLI {
                           turns: ranAgent ? agent.lastTurns : nil, confirmations: ranAgent ? agent.tools.confirmationsAsked : 0,
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
             row.router = routerTime
+            if ranAgent, !ok, !note.hasPrefix("errore"), AgentTools.instantGaveUp(answer: note, effectfulCalls: 1) == nil {
+                row.falseDone = true
+                print("      ⚠︎ falso «fatto»: la risposta dice riuscito, la verifica no")
+            }
             if ranAgent {
                 let names: [AgentLevel: String] = [.instant: "istantaneo", .fast: "rapido", .deep: "profondo"]
                 let first = agent.firstLevel.flatMap { names[$0] } ?? ""
@@ -1684,6 +1701,7 @@ extension DebugCLI {
             print(String(format: "  (istantaneo senza scalata, solo informativo: %.2f s)", clean))
         }
         print("  riavvii della Sessione lunga: \(restartsText)")
+        print("  falsi «fatto» (riuscito a parole, fallito alla verifica): \(ran.filter(\.falseDone).count)")
         print("  somma delle fasi = totale entro 0,2 s: \(ran.allSatisfy(\.sumOK) ? "sì, su ogni compito" : "NO su \(ran.filter { !$0.sumOK }.map(\.task.id).joined(separator: ", "))")")
 
         let f = DateFormatter()
@@ -1691,12 +1709,12 @@ extension DebugCLI {
         let out = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
         let phaseHeader = BenchPhase.allCases.map { "\($0.rawValue)_s" }.joined(separator: "\t")
-        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tturni\tconferme\tbloccate\tmodello\trisposta\n"
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tfalso_fatto\tturni\tconferme\tbloccate\tmodello\trisposta\n"
         for r in rows {
             let esito = r.skipped != nil ? "saltato" : (r.ok ? "ok" : "no")
             let phases = BenchPhase.allCases.map { p in r.phases[p].map { String(format: "%.2f", $0) } ?? "" }.joined(separator: "\t")
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.falseDone ? "sì" : "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         // The verdict in a file of its own, next to the table: the TSV stays a plain table.

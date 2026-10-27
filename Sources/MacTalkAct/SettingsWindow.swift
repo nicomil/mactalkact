@@ -439,6 +439,9 @@ private struct AgentSection: View {
                 Picker("Effort delle richieste semplici", selection: $settings.fastEffort) { ForEach(efforts, id: \.0) { Text($0.1).tag($0.0) } }
                     .pickerStyle(.segmented)
             }
+            Toggle("Prova prima del «fatto»", isOn: $settings.evidenceBeforeDone)
+            Text("Claude e Codex chiudono il compito citando quello che lo schermo mostra (il titolo, la casella spuntata, il testo scritto), oppure dicono che cosa non hanno potuto verificare.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Osservazione a costo fisso", isOn: $settings.fixedCostObservation)
             Text("Per tutti i motori: delle liste lunghe si legge solo la parte visibile, così la lettura dello schermo costa lo stesso su una webmail e su una pagina semplice. Il resto si trova scorrendo o cercando. Spento: la lettura di prima.")
                 .font(.caption).foregroundStyle(.secondary)

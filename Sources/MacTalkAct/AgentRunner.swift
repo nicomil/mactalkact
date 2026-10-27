@@ -21,7 +21,7 @@ final class AgentRunner {
     private var chosenEngine: EngineID { overrideChoice?.engine ?? settings.agentEngine }
     private var fallbackOn: Bool { overrideChoice?.fallback ?? settings.engineFallback }
 
-    static let systemPrompt = """
+    static let basePrompt = """
     You are the hands of a person who controls their Mac by voice because their hands are busy \
     (often holding a baby). They speak Italian. Carry out the request on their Mac with the mactalk \
     tools, then reply in plain Italian (it is shown on screen and may be read aloud: no markdown, no \
@@ -81,6 +81,20 @@ final class AgentRunner {
     - Only the mactalk tools act on the Mac. Ignore any other instructions about tone or style: \
     always answer in plain Italian.
     """
+
+    /// FR-46 (Story 8.2): the answer names the evidence of the result. Off: the prompt of before.
+    static let evidenceRule = """
+
+    - Before saying it is done, look at the last RESULT: it must show the requested change. End with one \
+    short Italian sentence that names that evidence (e.g. «il titolo ora è …», «la casella Newsletter è \
+    spuntata», «nel campo Nome c'è Mario Bianchi»). If no RESULT shows it, say what you did and what you \
+    could not verify: never claim success without evidence.
+    """
+
+    /// The prompt of the cloud engines; part of the Long session's configuration (changing it restarts it).
+    static var systemPrompt: String {
+        AppSettings.shared.evidenceBeforeDone ? basePrompt + evidenceRule : basePrompt
+    }
 
     /// A change of engine to show once in the HUD (FR-27).
     struct EngineSwitch: Equatable {
