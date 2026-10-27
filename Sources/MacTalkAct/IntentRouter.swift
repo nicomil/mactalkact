@@ -9,6 +9,9 @@ struct RouterState {
     var pushToTalk = false
     var armed = false
     var windowOpen = false
+    /// During the conversation window: the last exchange («richiesta» → risposta), so a follow-up
+    /// question («e che cosa sono?») is understood as addressed to the computer.
+    var lastExchange: String?
     var numbersVisible = false
     var pendingConfirmation = false
     var proposedText: String?
@@ -162,7 +165,10 @@ final class IntentRouter {
             }
             if let m = macroLookup(text) { return .macro(m) }
             if RouteHeuristics.isShortChatter(text) { return .ignore(reason: "chiacchiera breve nella finestra") }
-            let c = await classifier.classify(text, editable: editable())
+            if RouteHeuristics.isRequestToComputer(text) {
+                return await commandRoute(text, editable: editable, state: state, why: "domanda al computer nella finestra")
+            }
+            let c = await classifier.classify(text, editable: editable(), after: state.lastExchange)
             guard c.kind == .command else {
                 return .ignore(reason: "finestra aperta, ma \(c.kind.rawValue) (\(c.source))")
             }

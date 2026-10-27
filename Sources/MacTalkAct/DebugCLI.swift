@@ -421,6 +421,10 @@ extension DebugCLI {
             switch stateName {
             case "armato": state.armed = true
             case "finestra": state.windowOpen = true
+            case "seguito":
+                // The window right after an answer of the agent: follow-up questions refer to it.
+                state.windowOpen = true
+                state.lastExchange = "«Cosa vedo in questa cartella?» → Nella cartella ci sono: _bmad, build, README.md, Sources e Tests."
             case "ptt": state.listening = .pushToTalk; state.pushToTalk = true
             case "sessione": state.listening = .session
             case "proposta": state.proposedText = "testo proposto"; state.windowOpen = true

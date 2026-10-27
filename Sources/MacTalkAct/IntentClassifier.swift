@@ -14,8 +14,16 @@ struct Classification: Equatable {
 @MainActor
 protocol IntentClassifier: AnyObject {
     var name: String { get }
-    func classify(_ text: String, editable: Bool) async -> Classification
+    /// `after`: the last exchange with the computer («richiesta» → risposta) when the sentence
+    /// comes during the conversation window: a follow-up question refers to it.
+    func classify(_ text: String, editable: Bool, after: String?) async -> Classification
     func prewarm()
+}
+
+extension IntentClassifier {
+    func classify(_ text: String, editable: Bool) async -> Classification {
+        await classify(text, editable: editable, after: nil)
+    }
 }
 
 // MARK: - Rules (fallback, prudent)
@@ -26,8 +34,10 @@ protocol IntentClassifier: AnyObject {
 final class RuleClassifier: IntentClassifier {
     let name = "regole"
 
-    func classify(_ text: String, editable: Bool) async -> Classification {
-        if Grammar.startsWithActionVerb(text) { return Classification(kind: .command, source: name) }
+    func classify(_ text: String, editable: Bool, after: String?) async -> Classification {
+        if Grammar.startsWithActionVerb(text) || RouteHeuristics.isRequestToComputer(text) {
+            return Classification(kind: .command, source: name)
+        }
         if RouteHeuristics.isShortChatter(text) { return Classification(kind: .chatter, source: name) }
         return Classification(kind: .uncertain, source: name)
     }
@@ -54,7 +64,7 @@ final class OnDeviceClassifier: IntentClassifier {
     Classifica una frase detta a voce da chi usa il Mac con un bambino in braccio.
     comando: chiede al computer di fare qualcosa (aprire, cambiare, rimettere, cliccare, scorrere), anche breve o riferito a prima.
     dettatura: testo da scrivere nel documento per un destinatario assente (messaggi, mail, appunti).
-    chiacchiera: parla a chi è nella stanza (bambino, partner): saluti, complimenti, domande a loro, esclamazioni.
+    chiacchiera: parla a chi è nella stanza (bambino, partner): saluti, complimenti, domande personali a loro, esclamazioni.
     """
 
     static var isAvailable: Bool {
@@ -78,11 +88,15 @@ final class OnDeviceClassifier: IntentClassifier {
         ready = s
     }
 
-    func classify(_ text: String, editable: Bool) async -> Classification {
+    func classify(_ text: String, editable: Bool, after: String?) async -> Classification {
         guard Self.isAvailable else { return Classification(kind: .uncertain, source: "on-device non disponibile") }
         let session = ready ?? makeSession()
         ready = nil
-        let prompt = editable ? "«\(text)»" : "«\(text)» (nessun campo di testo attivo)"
+        var prompt = editable ? "«\(text)»" : "«\(text)» (nessun campo di testo attivo)"
+        if let after, !after.isEmpty {
+            // Follow-ups («e che cosa sono?») only make sense next to what the computer just said.
+            prompt += "\nLa frase arriva subito dopo questo scambio col computer: \(after.prefix(300))\nSe è una domanda o una richiesta che continua quello scambio, è un comando."
+        }
         let limit = timeout
         let result: String? = await withTaskGroup(of: String?.self) { group in
             group.addTask { @MainActor in
@@ -112,6 +126,18 @@ enum RouteHeuristics {
         "ciao", "evvai", "dai", "ecco", "perfetto", "fantastico", "wow", "ah", "oh", "eh", "mmm", "uffa",
         "amore", "tesoro", "piccolo", "piccola", "stop", "basta", "aspetta",
     ]
+
+    private static let requestOpenings = [
+        "mi spieghi", "spiegami", "mi dici", "dimmi", "leggimi", "mi leggi", "riassumi", "mi riassumi", "traduci",
+        "mi traduci", "mostrami", "fammi vedere", "descrivimi", "cosa c'e scritto", "che cosa c'e scritto",
+    ]
+
+    /// «Mi spieghi cos'è questa app?», «dimmi cosa c'è scritto»: questions and requests to the computer
+    /// about the screen, recognizable from how they start.
+    static func isRequestToComputer(_ text: String) -> Bool {
+        let n = Grammar.normalize(text).replacingOccurrences(of: "'", with: " ")
+        return requestOpenings.contains { n.hasPrefix(Grammar.normalize($0).replacingOccurrences(of: "'", with: " ")) }
+    }
 
     /// "Bellissimo, ok, stop", "ciao amore": short sentences made only of exclamations.
     static func isShortChatter(_ text: String) -> Bool {

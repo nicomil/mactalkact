@@ -1,6 +1,6 @@
 # Corpus del Router di MacTalkAct. Una riga per frase, campi separati da TAB:
 # frase · campo di testo (si/no) · stato · decisione attesa (alternative separate da |) · nota
-# Stati: pausa (agente in pausa) · nessuno (ascolto continuo, niente in corso) · armato (dopo «computer» da solo) · finestra (conversazione aperta)
+# Stati: pausa (agente in pausa) · nessuno (ascolto continuo, niente in corso) · armato (dopo «computer» da solo) · finestra (conversazione aperta) · seguito (finestra subito dopo una risposta dell'agente)
 #        ptt (push-to-talk) · sessione (mani libere) · proposta (in attesa di «scrivilo») · conferma (piano da confermare) · numeri
 # Le frasi sono scritte a mano o riprese dalla sessione del 26/10 senza dati privati.
 #
@@ -149,3 +149,10 @@ Computer, apri nuova tab	no	pausa	rapido
 Computer, riapri la scheda che ho chiuso	no	pausa	locale
 Computer, caro Marco ti scrivo per confermare la riunione di domani	si	pausa	scrivi
 Computer, cambia la seconda domanda	si	pausa	ridotta
+Mi spieghi, che cos'è questa app?	si	finestra	agente	27/10 09:29, ignorata come chiacchiera
+E che cosa sono?	si	seguito	agente	27/10 09:30, domanda sulla risposta appena data
+Cosa c'è dentro Sources?	no	seguito	agente
+Dimmi cosa c'è scritto	no	finestra	agente
+Ma dove hai messo le chiavi?	si	seguito	ignora
+Vuoi la pappa?	no	seguito	ignora
+Che bravo il mio piccolo	no	seguito	ignora

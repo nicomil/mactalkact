@@ -141,6 +141,9 @@ final class Coordinator {
         s.pushToTalk = pushToTalk
         s.armed = conversation.isArmed
         s.windowOpen = conversation.isWindowOpen && mode != .off
+        if s.windowOpen, let last = conversation.log.entries.last {
+            s.lastExchange = "«\(last.request)» → \(last.outcome.prefix(200))"
+        }
         s.numbersVisible = numbers.isVisible
         if let p = pending, Date() >= p.expires { pending = nil } // an expired question is not an answer
         s.pendingConfirmation = pending != nil
