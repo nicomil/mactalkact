@@ -611,3 +611,10 @@ Cosa dice:
 Il report è in `~/Library/Logs/MacTalkAct-apple-events-2026-10-27-2316.txt`.
 
 Per completare la misura servono Nico davanti al Mac (per dare i consensi) e le due app aperte: `--apple-events-spike` va rilanciato così. **Decisione rimandata al ciclo seguente; nessuna integrazione in questo ciclo.**
+
+## 22. Server degli strumenti chiuso (Storia 9.1, 27 ottobre 2026)
+
+- **Token fuori dagli argomenti.** `claude` riceve `--mcp-config <file>`: il file ha permessi 0600 e contiene `Bearer ${MACTALK_MCP_TOKEN}`, mentre il token sta solo nell'ambiente del processo figlio. `claude` 2.1.311 espande la variabile; prova con il Banco: collegato, compito riuscito. Il file si cancella alla chiusura. Codex usava già `bearer_token_env_var`.
+- **Revisione del protocollo.** Claude Code apre con `MCP-Protocol-Version: 2026-07-28` e poi negozia `2025-11-25`, l'ultima supportata dal server.
+- **Origin e Host.** Il server risponde 403 a una richiesta con `Origin` di una pagina web e a una con `Host` di un altro dominio (DNS rebinding); accetta le CLI, che non mandano `Origin`. Prove automatiche in `--fallback-test`.
+- **Codex e `~/.codex/AGENTS.md`.** Il file di Nico esiste ed è vuoto. Con quel file Codex (0.164.0-alpha) risponde in italiano e usa solo gli strumenti di MacTalkAct (2/2 compiti). La prova con un file di stile ostile richiede una cartella `CODEX_HOME` separata con il login e resta da fare.

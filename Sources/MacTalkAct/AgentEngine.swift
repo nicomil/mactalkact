@@ -60,7 +60,8 @@ struct AgentToolAccess {
     /// MCP server for engines that run in another process (Claude, Codex).
     let mcpURL: String
     let mcpToken: String
-    let mcpConfigJSON: String
+    /// The `--mcp-config` file (0600) with a reference to the token, never the token itself.
+    let mcpConfigPath: String
     /// The tools themselves, for engines that run inside the app (local model).
     let tools: AgentTools
 }

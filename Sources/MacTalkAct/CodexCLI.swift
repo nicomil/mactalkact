@@ -121,7 +121,7 @@ final class CodexCLI: @unchecked Sendable {
     }
 
     /// The MCP token travels only in the child's environment, never in its arguments (AD-16).
-    static let tokenVariable = "MACTALK_MCP_TOKEN"
+    static let tokenVariable = MCPServer.tokenVariable
 
     private static func tomlString(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""

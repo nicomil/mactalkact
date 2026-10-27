@@ -145,6 +145,12 @@ enum DebugCLI {
             var other = CodexEventParser()
             check("Codex: «item.» dentro il testo non conta", other.phase(#"{"type":"error","message":"vedi \"item.started\""}"#) == nil)
         }
+        print("Origin e Host del server (Storia 9.1):")
+        check("CLI senza Origin", MCPServer.allowed(origin: nil, host: "127.0.0.1:5000", port: 5000))
+        check("Origin del server stesso", MCPServer.allowed(origin: "http://127.0.0.1:5000", host: "127.0.0.1:5000", port: 5000))
+        check("Origin di una pagina web", !MCPServer.allowed(origin: "https://evil.example", host: "127.0.0.1:5000", port: 5000))
+        check("Host sbagliato", !MCPServer.allowed(origin: nil, host: "evil.example", port: 5000) && !MCPServer.allowed(origin: nil, host: nil, port: 5000))
+        check("Origin «null» (file:// o iframe): rifiutato", !MCPServer.allowed(origin: "null", host: "127.0.0.1:5000", port: 5000))
         print("Frasi spurie (Storia 8.1):")
         do {
             let none: (String) -> Bool = { _ in false }
@@ -1162,6 +1168,37 @@ extension DebugCLI {
             _ = try? await agent2.run("clicca Salva", context: ScreenContext(), deep: false, instant: true)
             check("Codex: niente istantaneo, livello rapido", codex.levels == [.fast] && agent2.lastEscalation == nil)
             agent2.shutdown()
+        }
+
+        print("Server degli strumenti chiuso (Storia 9.1):")
+        do {
+            let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+            try? await agent.start()
+            if let access = agent.debugToolAccess {
+                let config = (try? String(contentsOfFile: access.mcpConfigPath, encoding: .utf8)) ?? ""
+                let perms = (try? FileManager.default.attributesOfItem(atPath: access.mcpConfigPath)[.posixPermissions] as? Int) ?? 0
+                check("file di configurazione 0600 con il riferimento, senza il token", perms == 0o600
+                      && config.contains("${MACTALK_MCP_TOKEN}") && !config.contains(access.mcpToken))
+                func post(origin: String?, host: String?) async -> Int {
+                    guard let url = URL(string: access.mcpURL) else { return -1 }
+                    var r = URLRequest(url: url)
+                    r.httpMethod = "POST"
+                    r.setValue("Bearer \(access.mcpToken)", forHTTPHeaderField: "Authorization")
+                    r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    if let origin { r.setValue(origin, forHTTPHeaderField: "Origin") }
+                    if let host { r.setValue(host, forHTTPHeaderField: "Host") }
+                    r.httpBody = Data(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.utf8)
+                    let response = try? await URLSession.shared.data(for: r)
+                    return (response?.1 as? HTTPURLResponse)?.statusCode ?? -1
+                }
+                check("client senza Origin (le CLI): risponde", await post(origin: nil, host: nil) == 200)
+                check("pagina web con Origin estraneo: 403", await post(origin: "http://evil.example", host: nil) == 403)
+                check("Host di un altro dominio (DNS rebinding): 403", await post(origin: nil, host: "evil.example:80") == 403)
+            } else {
+                check("server avviato", false)
+            }
+            agent.shutdown()
+            check("file di configurazione cancellato alla chiusura", agent.debugToolAccess.map { !FileManager.default.fileExists(atPath: $0.mcpConfigPath) } ?? true)
         }
 
         print("Classificatore oltre il tempo (Storia 8.1):")

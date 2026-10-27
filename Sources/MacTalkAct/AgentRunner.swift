@@ -156,9 +156,12 @@ final class AgentRunner {
         }
     }
 
+    /// Debug only (`--fallback-test`): what the engines receive.
+    var debugToolAccess: AgentToolAccess? { toolAccess }
+
     private var toolAccess: AgentToolAccess? {
         guard let server else { return nil }
-        return AgentToolAccess(mcpURL: server.url, mcpToken: server.token, mcpConfigJSON: server.mcpConfigJSON, tools: tools)
+        return AgentToolAccess(mcpURL: server.url, mcpToken: server.token, mcpConfigPath: server.configPath, tools: tools)
     }
 
     // MARK: Availability (AD-7, AD-14)
@@ -506,6 +509,7 @@ final class AgentRunner {
     }
 
     func shutdown() {
+        server?.removeConfig()
         for e in engines.values { e.shutdown() }
         server?.stop()
     }

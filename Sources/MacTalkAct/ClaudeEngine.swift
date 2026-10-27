@@ -86,11 +86,12 @@ final class ClaudeEngine: AgentEngine {
         case .deep: effort = settings.deepEffort
         }
         return ClaudeCLI.Config(
+            env: [MCPServer.tokenVariable: access.mcpToken],
             model: model(for: level),
             systemPrompt: AgentRunner.systemPrompt,
             effort: effort,
             extraArgs: [
-                "--mcp-config", access.mcpConfigJSON,
+                "--mcp-config", access.mcpConfigPath,
                 "--permission-mode", "dontAsk",
                 "--permission-prompts", "none",
                 "--max-turns", "\(settings.agentMaxTurns)",

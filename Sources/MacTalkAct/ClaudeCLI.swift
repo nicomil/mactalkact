@@ -31,6 +31,8 @@ enum ClaudeCLIError: LocalizedError {
 final class ClaudeCLI: @unchecked Sendable {
 
     struct Config: Equatable {
+        /// Extra environment of the child (the MCP token: never in the arguments, AD-16).
+        var env: [String: String] = [:]
         let model: String
         let systemPrompt: String
         /// JSON Schema for structured output; empty = plain text answer.
@@ -428,6 +430,7 @@ final class ClaudeCLI: @unchecked Sendable {
         // Use the subscription login, and don't look like a nested Claude Code session.
         // CLAUDE_CODE_SIMPLE would start the «bare» mode without the subscription login (AD-14).
         for key in ["ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SIMPLE"] { env.removeValue(forKey: key) }
+        for (k, v) in config.env { env[k] = v }
         p.environment = env
 
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()

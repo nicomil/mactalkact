@@ -82,8 +82,8 @@ development_status:
   8-4-spike-le-azioni-dirette-via-apple-events-reggono-su-macos-27: review
   epic-8-retrospective: optional
 
-  epic-9: backlog
-  9-1-server-degli-strumenti-chiuso: backlog
+  epic-9: in-progress
+  9-1-server-degli-strumenti-chiuso: in-progress
   9-2-conferma-legata-alla-singola-azione-e-un-solo-orologio-del-t: backlog
   9-3-campi-sicuri-e-livelli-di-accesso-per-app: backlog
   9-4-suite-di-sicurezza-e-copertura-del-riconoscimento: backlog
