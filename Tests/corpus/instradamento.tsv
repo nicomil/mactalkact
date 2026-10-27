@@ -175,3 +175,23 @@ apri la mail e rispondi a Marco	no	schermo	agente	più passi: niente istantaneo
 pensaci bene e clicca Salva	no	schermo	agente	«pensaci bene» chiede il livello profondo
 fammi vedere la nuova nota	no	schermo	locale|istantaneo	un passo su un elemento visibile, frase che la grammatica non conosce
 metti in archivio questa	no	schermo	agente	nessun bersaglio noto: livello rapido
+# Storia 8.1 — Frasi spurie senza parola di attivazione: esito «chiedi» (Vuoi che faccia qualcosa?) o «ignora», mai l'Agente
+Spegni invia	no	sessione	chiedi|ignora	dal log del 27/10, sentita male parlando col bambino
+Statico	no	sessione	chiedi|ignora	dal log del 27/10
+Selling counseling gesta	no	sessione	chiedi|ignora	dal log del 27/10: parole non italiane
+Spegni invia	no	finestra	chiedi|ignora	anche con la finestra aperta
+Statico	no	finestra	chiedi|ignora
+Selling counseling gesta	no	finestra	chiedi|ignora
+dai mangia	no	sessione	chiedi|ignora	al bambino
+no quello no	no	sessione	chiedi|ignora
+vieni qui	no	sessione	chiedi|ignora
+metti giù	no	sessione	chiedi|ignora
+pappa pronta	no	sessione	chiedi|ignora
+nanna adesso	no	finestra	chiedi|ignora
+ancora un po'	no	finestra	chiedi|ignora
+guarda che bello	no	sessione	chiedi|ignora
+okay let's go now	no	sessione	chiedi|ignora	parole non italiane
+the end of the story	no	finestra	chiedi|ignora	parole non italiane
+basta così amore	no	sessione	chiedi|ignora
+apri Safari	no	sessione	rapido	un comando resta un comando
+clicca Salva	no	sessione	rapido	la grammatica lo conosce

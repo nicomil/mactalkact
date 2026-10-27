@@ -185,7 +185,8 @@ final class Coordinator {
         // Instant level (FR-43): only when Claude would answer, and only for a target the app knows.
         s.instantLevel = settings.instantLevel && settings.backend == .subscription
             && agent.currentChoice()?.engine == .claude && PrivacyGuard.cloudBlockReason() == nil
-        if s.instantLevel {
+        // The known target serves the Instant level and the Frasi spurie (FR-48): read only when asked.
+        do {
             let executor = self.executor
             let log = conversation.log
             s.knownTarget = { text in
@@ -569,6 +570,13 @@ final class Coordinator {
             let detail = reason.contains("non è configurato") ? "Claude non è configurato · di' «scrivilo» per inserirlo"
                                                                : "Di' «scrivilo» per inserirlo"
             hud.show(.confirm, text, detail: detail, autoHide: settings.proposalSeconds)
+        case .askIntent(let text, _):
+            // Asks, without arming nor opening the window: the next sentence is judged as if the
+            // question was not there; with no answer it is simply forgotten (FR-48).
+            reopen = false
+            Sound.confirm()
+            hud.show(.confirm, "Vuoi che faccia qualcosa?", detail: "Ho sentito «\(text.prefix(60))» · di' «computer» e la richiesta",
+                     autoHide: 8)
         case .typeProposed(let text):
             conversation.proposedText = nil
             await dictateOnce(text, context: ScreenContext.capture(includeLabels: false))

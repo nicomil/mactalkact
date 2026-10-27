@@ -59,6 +59,9 @@ enum RouteDecision {
     case fast(Command, text: String)
     case dictate(String, reason: String)
     case askToType(String, reason: String)
+    /// A sentence heard by chance, without the wake word: ask «Vuoi che faccia qualcosa?» instead of
+    /// starting the agent (FR-48, AD-23). It does not arm the conversation nor open the window.
+    case askIntent(String, reason: String)
     case typeProposed(String)
     case undoInsertion
     case closeConversation
@@ -80,6 +83,7 @@ enum RouteDecision {
         case .fast: return "rapido"
         case .dictate: return "scrivi"
         case .askToType: return "chiedi"
+        case .askIntent: return "chiedi"
         case .typeProposed: return "scrivilo"
         case .undoInsertion: return "annulla-scritto"
         case .closeConversation: return "chiudi-conversazione"
@@ -99,7 +103,7 @@ enum RouteDecision {
         case .confirmation(let yes): return yes ? "sì" : "no"
         case .macro(let m): return "macro «\(m.name)»"
         case .fast(let c, _): return "grammatica: \(c)"
-        case .dictate(_, let r), .askToType(_, let r), .agent(_, _, let r), .reduced(_, let r): return r
+        case .dictate(_, let r), .askToType(_, let r), .askIntent(_, let r), .agent(_, _, let r), .reduced(_, let r): return r
         case .typeProposed: return "conferma della proposta"
         case .undoInsertion: return "richiesta esplicita"
         case .closeConversation: return "chiusura esplicita"
@@ -180,10 +184,12 @@ final class IntentRouter {
             // The last exchange is not given to the model: with it, Apple's model takes questions to
             // people in the room for follow-ups. Follow-ups are recognized by the rules above.
             let c = await classifier.classify(text, editable: editable())
+            if c.source == "timeout" { return .askIntent(text, reason: "finestra aperta, classificatore oltre il tempo") }
             guard c.kind == .command else {
                 return .ignore(reason: "finestra aperta, ma \(c.kind.rawValue) (\(c.source))")
             }
-            return await commandRoute(text, editable: editable, state: state, why: "comando nella finestra (\(c.source))")
+            return await commandRoute(text, editable: editable, state: state, why: "comando nella finestra (\(c.source))",
+                                      checkSpurious: true)
         }
 
         // 6. Addressed: macros and the fixed grammar first.
@@ -219,11 +225,14 @@ final class IntentRouter {
         }
         if RouteHeuristics.isShortChatter(text) { return .ignore(reason: "chiacchiera breve") }
         // Hands-free session without the wake phrase: talk with people in the room is not a request.
-        if state.listening == .session && !state.pushToTalk && wakeRest == nil && !state.armed {
+        let handsFree = state.listening == .session && !state.pushToTalk && wakeRest == nil && !state.armed
+        if handsFree {
             let c = await classifier.classify(text, editable: false)
             if c.kind == .chatter { return .ignore(reason: "chiacchiera in sessione (\(c.source))") }
+            if c.source == "timeout" { return .askIntent(text, reason: "sessione senza parola di attivazione, classificatore oltre il tempo") }
         }
-        return await commandRoute(text, editable: editable, state: state, why: "richiesta fuori da un campo di testo")
+        return await commandRoute(text, editable: editable, state: state, why: "richiesta fuori da un campo di testo",
+                                  checkSpurious: handsFree)
     }
 
     /// A grammar command, except «apri X» when X is neither an installed app nor a known site:
@@ -235,13 +244,19 @@ final class IntentRouter {
     }
 
     /// A command that the grammar does not know: local lane, agent, or reduced mode.
-    private func commandRoute(_ text: String, editable: () -> Bool, state: RouterState, why: String) async -> RouteDecision {
+    /// `checkSpurious`: no wake word (hands-free or the window): a Frase spuria asks instead (FR-48).
+    private func commandRoute(_ text: String, editable: () -> Bool, state: RouterState, why: String,
+                              checkSpurious: Bool = false) async -> RouteDecision {
         // Only outside text fields: there, edits are about meaning and belong to the agent.
         // Long sentences are never one step: skip the model and save ~1 s for the agent.
         if state.localLane, Grammar.normalize(text).split(separator: " ").count <= state.localLaneMaxWords, !editable(),
            let proposer, let proposal = await proposer.propose(text),
            let action = validator.validate(proposal, sentence: text) {
             return .local(action, text: text)
+        }
+        // In a text field the field itself is the target («modifica la domanda»).
+        if checkSpurious, let spurious = RouteHeuristics.spuriousReason(text, knownTarget: { editable() || state.knownTarget($0) }) {
+            return .askIntent(text, reason: "\(why), ma \(spurious)")
         }
         guard state.aiAvailable else {
             return .askToType(text, reason: "\(why), ma Claude non è configurato")

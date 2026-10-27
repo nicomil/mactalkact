@@ -1,3 +1,5 @@
+import NaturalLanguage
+import AppKit
 import Foundation
 import FoundationModels
 
@@ -267,6 +269,27 @@ enum RouteHeuristics {
         "delle", "degli", "nella", "nello", "sulla", "sullo", "con", "per", "che", "una", "uno", "gli", "dal", "dalla",
         "pulsante", "bottone", "tasto", "voce", "scheda", "finestra", "pagina", "questa", "questo", "quella", "quello",
     ]
+
+    /// Why a sentence without the wake word looks heard by chance (FR-48, AD-23), or nil:
+    /// at most three words and no known target, or mostly words that are not Italian.
+    @MainActor static func spuriousReason(_ text: String, knownTarget: (String) -> Bool) -> String? {
+        let words = Grammar.normalize(text).split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return nil }
+        if words.count <= 3, !knownTarget(text) { return "frase breve senza un bersaglio noto" }
+        if mostlyForeign(words) { return "parole che non sono italiane" }
+        return nil
+    }
+
+    /// The sentence is in another language: the Italian dictionary accepts many English words
+    /// («the», «story»), the language of the whole sentence does not (`NLLanguageRecognizer`).
+    static func mostlyForeign(_ words: [String]) -> Bool {
+        guard words.count >= 2 else { return false }
+        let r = NLLanguageRecognizer()
+        r.languageConstraints = [.italian, .english, .spanish, .french, .german, .portuguese]
+        r.processString(words.joined(separator: " "))
+        let it = r.languageHypotheses(withMaximum: 6)[.italian] ?? 0
+        return it < 0.2
+    }
 
     /// "pensaci bene" forces the deep model.
     static func wantsDeepThinking(_ text: String) -> Bool {

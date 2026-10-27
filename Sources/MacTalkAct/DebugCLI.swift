@@ -116,6 +116,16 @@ enum DebugCLI {
             var other = CodexEventParser()
             check("Codex: «item.» dentro il testo non conta", other.phase(#"{"type":"error","message":"vedi \"item.started\""}"#) == nil)
         }
+        print("Frasi spurie (Storia 8.1):")
+        do {
+            let none: (String) -> Bool = { _ in false }
+            check("«Spegni invia»: breve senza bersaglio", RouteHeuristics.spuriousReason("Spegni invia", knownTarget: none) != nil)
+            check("«Statico»: breve senza bersaglio", RouteHeuristics.spuriousReason("Statico", knownTarget: none) != nil)
+            check("«apri Safari»: bersaglio noto", RouteHeuristics.spuriousReason("apri Safari", knownTarget: { $0.contains("Safari") }) == nil)
+            check("frase inglese: non italiana", RouteHeuristics.spuriousReason("the end of the story", knownTarget: none) != nil)
+            check("frase italiana lunga: valida", RouteHeuristics.spuriousReason("rispondi a Marco che arrivo alle nove", knownTarget: none) == nil)
+            check("«metti in pausa la musica»: valida", RouteHeuristics.spuriousReason("metti in pausa la musica", knownTarget: none) == nil)
+        }
         print("Soglie NFR-12 (Storia 7.5):")
         do {
             check("mediana pari = media dei due centrali", median([1, 2, 3, 4]) == 2.5 && median([3, 1, 2]) == 2 && median([]) == nil)
@@ -1529,12 +1539,14 @@ extension DebugCLI {
                 var state = RouterState()
                 state.listening = .session
                 state.windowOpen = true
+                let labels = ScreenContext.capture(includeLabels: true).visibleLabels
+                state.knownTarget = { t in RouteHeuristics.hasKnownTarget(t, knownApp: { ex.findApp($0) != nil }, labels: labels, memory: []) }
                 let decision = await router.decide(task.request, editable: { false }, state: state)
                 routerTime = Date().timeIntervalSince(started)
                 switch decision {
                 case .agent(let text, let level, _):
                     do { note = try await agent.run(text, context: ctx, deep: level == .deep, instant: level == .instant) } catch { note = "errore: \(error.localizedDescription)" }
-                case .ignore, .askToType:
+                case .ignore, .askToType, .askIntent:
                     ranAgent = false
                     note = "router: \(String(describing: decision).prefix(60))"
                 default:

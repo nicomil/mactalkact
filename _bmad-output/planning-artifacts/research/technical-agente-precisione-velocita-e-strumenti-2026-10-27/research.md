@@ -526,3 +526,19 @@ Cosa dice:
 La mediana dell'istantaneo comprende anche il compito che è passato al rapido (13 compiti), come chiede NFR-12; ricalcolata dopo la review con la mediana vera, i valori non cambiano.
 
 Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2203-claude.tsv`.
+
+## 18. Frasi spurie filtrate dal Router (Storia 8.1, 27 ottobre 2026)
+
+Una frase senza Parola di attivazione, detta in ascolto a mani libere o con la Finestra di conversazione aperta, ora decide `.askIntent` («Vuoi che faccia qualcosa?», 8 s) in tre casi:
+- ha al massimo tre parole e nessun bersaglio noto (un campo di testo a fuoco conta come bersaglio);
+- non è italiana;
+- il Classificatore supera il tempo massimo.
+
+Per la lingua il dizionario italiano di `NSSpellChecker` non serve: accetta «the», «end», «story». Il riconoscimento della lingua della frase intera (`NLLanguageRecognizer`) invece separa bene: «the end of the story» esce inglese al 99%, «Spegni invia» italiana al 100%.
+
+| Frasi spurie del Banco | Prima (§17) | Dopo |
+| --- | --- | --- |
+| Tempo, mediana | 4,8 s (Claude al lavoro) | 1,6 s (solo il Router) |
+| Agente avviato | 5 su 5 | 0 su 5 |
+
+Il Corpus del Router ha 17 Frasi spurie nuove, tra cui le tre del log del 27/10 («Spegni invia», «Statico», «Selling counseling gesta»). Il risultato è 160/160, nessuna frase valida decisa `.askIntent`, e «apri Safari» e «clicca Salva» restano Comandi rapidi.
