@@ -195,6 +195,20 @@ La sessione si riavvia da sola, scrivendo il motivo nel log e «Riavvio l'Agente
 
 Se la sessione si chiude a metà senza aver fatto azioni, la richiesta viene ripetuta una volta. L'interruttore **Impostazioni › Agente › Claude › Sessione lunga** spento torna al comportamento di prima: un processo pronto, usato una volta per richiesta.
 
+**Livello istantaneo.** Le richieste a un passo su qualcosa che l'app conosce vanno a **Claude Haiku 5.5** con effort basso, in una Sessione lunga propria: per esempio «apri la mail di Laura» o «clicca il preventivo». Conta come noto un elemento visibile sullo schermo, un'app installata, un sito, o qualcosa detto prima nella conversazione.
+
+A questo livello l'Agente ha una sola chiamata di strumento (più azioni stanno in un solo `act`). La richiesta passa da sola al livello rapido, senza ripetere quello che è già stato fatto, in questi casi:
+- l'azione fallisce;
+- l'azione non cambia niente;
+- serve una seconda chiamata;
+- il turno finisce senza azioni, o con una risposta che ammette di non esserci riuscito.
+
+Il turno si interrompe senza chiudere la sessione. Vale solo con Claude: con Codex o con il modello locale si usa il livello rapido. Interruttore, modello ed effort sono in **Impostazioni › Agente › Claude**. «Clicca X» lo fa già la grammatica, ancora prima.
+
+**Osservazione a costo fisso.** Delle liste lunghe si legge solo la parte visibile, al massimo 60 elementi per contenitore, con un budget di 0,9 s. Così la lettura dello schermo costa lo stesso su una webmail e su una pagina semplice; il resto si trova scorrendo o con una ricerca (`observe` con `query`). Al primo contatto con un'app Electron o Chromium l'app aspetta fino a 1 s che la pagina sia leggibile. Interruttore in **Impostazioni › Agente**; spento, la lettura torna quella di prima.
+
+I numeri di ciascuna di queste parti (riga di base, Sessione lunga, Livello istantaneo, osservazione) sono nella ricerca `_bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md`, §13–§17. `--agent-bench` dichiara a ogni corsa se le soglie di velocità (NFR-12) sono superate.
+
 La Sessione lunga richiede `claude` 2.1.299 o successivo. L'app legge la versione con `claude --version` e la mostra in **Stato e diagnostica**, insieme a quella di `codex` (minima 0.131.0). Con una versione non verificata, o se `claude` parte senza il login dell'abbonamento, l'app usa un processo per richiesta. Le versioni minime vanno rilette entro il **1° novembre 2026**.
 
 L'agente ha due livelli, ognuno con il suo processo: le richieste **semplici** usano **Claude Sonnet 5.5** con effort basso, quelle **lunghe** (più passi, mail, ricerche, «tutte le…») usano **Claude Opus 5.5** con effort medio. Dire «pensaci bene» forza il secondo. Entrambi i modelli si scelgono nelle impostazioni. Le prime tre corsie non usano mai Claude e non consumano l'abbonamento.
