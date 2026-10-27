@@ -1,0 +1,16 @@
+{
+  "entries": 69,
+  "by_type": {
+    "claim": 45,
+    "decision": 3,
+    "event": 6,
+    "source": 15
+  },
+  "claims": {
+    "disputed": 1,
+    "overturned": 2,
+    "unverified": 4,
+    "verified": 31
+  },
+  "claims_total": 38
+}

@@ -1,13 +1,15 @@
 ---
-status: final
-stepsCompleted: [1, 2, 3, 4]
 inputDocuments:
-  - _bmad-output/planning-artifacts/prds/prd-mactalkact-2026-10-26/prd.md
+  - _bmad-output/planning-artifacts/prds/prd-mactalkact-2026-10-26/prd.md (aggiornato il 27/10 sera)
   - _bmad-output/planning-artifacts/prds/prd-mactalkact-2026-10-26/addendum.md
   - _bmad-output/planning-artifacts/architecture/architecture-mactalkact-2026-10-26/ARCHITECTURE-SPINE.md
   - _bmad-output/planning-artifacts/research/analisi-limiti-mactalkact-2026-10-26.md
   - _bmad-output/planning-artifacts/research/valutazione-motori-agente-2026-10-27.md
   - _bmad-output/planning-artifacts/research/computer-use-claude-codex-2026-10-27.md
+  - _bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md
+status: final
+updated: 2026-10-27
+stepsCompleted: [1, 2, 3, 4]
 ---
 
 # mactalkact - Epic Breakdown
@@ -60,6 +62,21 @@ FR-37: Mani complete: valore, azione secondaria, selezione di testo, trascinare,
 FR-38: Più azioni in una chiamata, ferme al primo errore, con gli stessi controlli di sicurezza.
 FR-39: Esc ferma l'Agente mentre lavora; gli Esc dell'Agente no.
 FR-40: Banco esteso con compiti per le nuove mani.
+FR-41: Banco con tempi scomposti per fase e compiti fuori dal browser (app native, webmail di prova, canvas, Frasi spurie); riga di base prima di ogni intervento.
+FR-42: Una Sessione lunga per livello del Motore Claude, riusata tra richieste; riavvio dopo N richieste, 10 min, timeout, cambio modello, «dimentica», modalità privata; mai su disco; Memoria a differenza; interruttore.
+FR-43: Livello istantaneo (Haiku 5.5) per i comandi a un passo con bersaglio noto, solo Claude; scalata al rapido con passaggio di consegne, giudicata dall'esecutore.
+FR-44: Osservazione a costo fisso: figli visibili, tetto per contenitore, filtro per ruolo, budget di tempo, accessibilità manuale per Electron/Chromium.
+FR-45: CLI sorvegliate: versione minima e verificata, Sessione lunga solo su versione verificata, modalità «bare» rilevata e neutralizzata, Codex su `exec`.
+FR-46: Evidenza prima del «fatto»: la risposta cita l'esito che prova il risultato; `<recent>` con esito e testo cambiato.
+FR-47: Lettura locale del testo nelle immagini con Vision (`read_text`), riscaldamento in background, ripiego veloce; prova del modello Apple con immagini.
+FR-48: Le Frasi spurie (senza bersaglio noto, ≤ 3 parole, o parole estranee; timeout del classificatore) non arrivano all'Agente: «Vuoi che faccia qualcosa?» senza aprire la Finestra.
+FR-49: Spike di misura delle azioni dirette via Apple Events (cinque verbi, timeout 3 s), nessuna integrazione.
+FR-50: Server degli strumenti chiuso: token mai negli argomenti (file 0600 o ambiente), `Origin`/`Host` controllati dopo una fase di sola misura, revisione MCP nel log, `AGENTS.md` di Codex verificato.
+FR-51: Conferma legata alla singola azione con bersaglio tipizzato, nella stessa richiesta e finestra; nessuna finestra temporale; la serie si sospende al passo.
+FR-52: Campi sicuri per sottoruolo, fail-closed sui campi a riga singola; mai valore né lunghezza; inserimento sicuro segnalato.
+FR-53: Gate dell'esecutore: blocco per costruzione (Invio in composizione, scorciatoie, Cestino) e per riconoscimento (pulsanti); suite di sicurezza ≥ 10 scenari; copertura dei pulsanti misurata.
+FR-54: Livelli di accesso per app su due assi (cloud sì/no; solo clic, tutto con conferma, tutto), tabella predefinita, applicati nell'AccessGate, visibili nell'HUD.
+FR-55: Classificatore on-device come secondo strato, prima dell'azione, con budget, che può solo aggiungere conferme.
 
 ### NonFunctional Requirements
 
@@ -74,6 +91,10 @@ NFR-8: Ogni Motore agisce solo tramite gli strumenti di MacTalkAct.
 NFR-9: Scelta del Motore ≤ 50 ms; primo strumento: Codex rapido ≤ 4 s, modello Apple ≤ 2 s, Modello locale esteso ≤ 5 s su M1 16 GB.
 NFR-10: Con il Motore locale nessun dato lascia il Mac; server esteso senza avvisi solo su localhost.
 NFR-11: Con Claude e Codex sui 20 compiti del Banco del 27/10: chiamate per compito −30%, tempo mediano −25%; locale senza peggioramenti.
+NFR-12: Sui 25 compiti del Banco del 27/10 con Claude: primo strumento ≤ 1,5 s e compito ≤ 4,5 s di mediana; Livello istantaneo ≤ 2,5 s per compito [ASSUMPTION].
+NFR-13: Compiti su app native e webmail ≥ 90% con Claude; zero Frasi spurie affidate all'Agente in una settimana d'uso.
+NFR-14: Suite di sicurezza nel Banco, bloccante prima di ogni build; l'oracolo è lo stato della pagina; ogni azione bloccata nell'uso diventa uno scenario.
+NFR-15: Reversibilità: interruttori per §4.9–§4.10 con ripiego al comportamento di oggi; in §4.11 regolabili solo gli elenchi (FR-50, FR-51, FR-53 senza interruttore).
 
 ### Additional Requirements
 
@@ -97,6 +118,18 @@ NFR-11: Con Claude e Codex sui 20 compiti del Banco del 27/10: chiamate per comp
 - AD-18: `Tests/bench/agente.tsv`, pagine in `Tests/bench/pages/`, `--agent-bench`.
 - AD-19: registro degli elementi con id stabili per richiesta; `settle()` e `outcome()` dopo ogni azione, differenze rispetto all'ultima vista (≤ 25 righe).
 - AD-20: tutti i nuovi strumenti e `act` passano da `AgentTools.call`/`dispatch`; eventi sintetici marcati; il monitor di Esc ignora quelli marcati.
+- AD-6 (emendata 27/10 sera): tre `AgentLevel` (`.instant`, `.fast`, `.deep`); una Sessione lunga per livello di Claude avviata alla prima richiesta (`--input-format stream-json`), riavvio per conteggio/inattività/`TurnClock`/cambio modello/dimentica/privata; nessun ping; cursore della Memoria per sessione; scalata istantaneo → rapido con `cancel()` senza `tools.reset()`; `.instant` solo Claude.
+- AD-13 (emendata): `AgentEngine.onPhase` e `cancel()` senza perdita di stato.
+- AD-14 (emendata): `CLIStatus` separato da `availability`; minime 2.1.299 / 2.1.293 / Codex ≥ 0.131.0; rimozione di `CLAUDE_CODE_SIMPLE` dall'ambiente del figlio.
+- AD-16 (emendata): `--mcp-config` da file 0600 con riferimento all'ambiente; `Origin`/`Host` misurati poi imposti (allowlist 127.0.0.1/localhost); log di `MCP-Protocol-Version`; verifica `AGENTS.md`.
+- AD-18 (emendata): `BenchPhase` marcate da `AgentRunner` con un orologio; riga di base obbligatoria prima di ogni storia; soglie NFR-12/13 come criteri di `--agent-bench`; `Tests/bench/sicurezza.tsv` con oracolo sullo stato della pagina; log delle azioni bloccate nello stesso formato.
+- AD-19 (emendata): scansione a costo fisso; prompt con evidenza prima del «fatto»; `read_text(region)` con Vision.
+- AD-20 (emendata): nessuna azione via Apple Events come strumento (spike solo in `DebugCLI`).
+- AD-21 (nuova): `ActionOrigin` su ogni chiamata all'Executor; `AccessGate` unico; `Safety.externalEffect` elenco canonico; `ConfirmationTarget` tipizzato (`.element`, `.shortcut`, `.keyInComposer`, `.drop`); grant per bersaglio, richiesta e finestra; la chiamata bloccata sospende, chiede, esegue; classificatore prima del `dispatch` con budget 0,7 s; `confirmValiditySeconds` rimossa; nessun interruttore.
+- AD-22 (nuova): `AccessLevel` su due assi in `PrivacyGuard`; riservate = cloud bloccato, locale con conferma; Terminal/iTerm `.clickOnly` senza contenuto al cloud; campi sicuri per sottoruolo; `InsertionJournal` non registra in campi sicuri.
+- AD-23 (nuova): `.askIntent` nel Router prima dell'Agente, senza armare la conversazione; precedenza di `.askToType` con Parola di attivazione.
+- AD-24 (nuova): `TurnClock` in `AgentRunner` (pausa durante le domande); `PendingQuestion` unica nel Coordinator; `RouterState.pending` → decisione `.answer`.
+- Convenzioni: `--route-test` e la suite di sicurezza passano prima di ogni build distribuita; interruttori solo per §4.9–§4.10; nuovo file `Safety.swift` (estratto da `LLMPlanner.swift`), `OCR.swift`; versioni di classe «versione» da rileggere entro il 1° novembre 2026.
 - Nessun template di partenza: progetto esistente (brownfield).
 
 ### UX Design Requirements
@@ -144,6 +177,21 @@ FR-37: Epic 6 — Mani complete (Storia 6.3)
 FR-38: Epic 6 — Azioni in serie (Storia 6.4)
 FR-39: Epic 6 — Esc e disciplina dell'Agente (Storia 6.5)
 FR-40: Epic 6 — Banco esteso (Storia 6.1), misura finale (Storia 6.6)
+FR-41: Epic 7 — Banco con tempi per fase e compiti fuori dal browser (Storia 7.1)
+FR-42: Epic 7 — Sessione lunga sorvegliata (Storia 7.2)
+FR-43: Epic 7 — Livello istantaneo (Storia 7.3)
+FR-44: Epic 7 — Osservazione a costo fisso (Storia 7.4)
+FR-45: Epic 7 — CLI sorvegliate (Storia 7.2), misura finale (Storia 7.5)
+FR-46: Epic 8 — Evidenza prima del «fatto» (Storia 8.2)
+FR-47: Epic 8 — Lettura locale del testo nelle immagini (Storia 8.3)
+FR-48: Epic 8 — Le Frasi spurie non arrivano all'Agente (Storia 8.1)
+FR-49: Epic 8 — Spike sulle azioni dirette (Storia 8.4)
+FR-50: Epic 9 — Server degli strumenti chiuso (Storia 9.1)
+FR-51: Epic 9 — Conferma legata alla singola azione, orologio del turno (Storia 9.2)
+FR-52: Epic 9 — Campi sicuri (Storia 9.3)
+FR-53: Epic 9 — Gate dell'esecutore e suite di sicurezza (Storie 9.2, 9.4)
+FR-54: Epic 9 — Livelli di accesso per app (Storia 9.3)
+FR-55: Epic 9 — Classificatore on-device come secondo strato (Storia 9.5)
 
 ## Epic List
 
@@ -181,6 +229,20 @@ L'Agente usa il Mac come il computer use di Claude e di Codex: ogni azione dice 
 **Perché due epic e non uno (Epic 4 e 5).** L'Epic 4 rende l'Agente sempre raggiungibile ed è soprattutto lavoro di integrazione con rischio contenuto: Codex usa lo stesso server MCP di Claude. L'Epic 5 è lavoro di qualità, con esito incerto: dipende dal modello e dalla memoria del Mac e va guidato da misure. L'Epic 4 contiene già un Motore locale di base (Storia 4.4) perché la Catena di riserva deve finire da qualche parte; l'Epic 5 lo rende buono. L'Epic 5 si appoggia all'Epic 4 (protocollo `AgentEngine`), mai il contrario.
 
 **Perché due epic e non uno (Epic 1 e 2).** I due epic toccano in parte gli stessi file (`Coordinator.swift`, `AgentRunner.swift`), ma il confine è un confine di rischio: l'Epic 1 elimina il danno e si misura subito con SM-1; solo dopo una settimana d'uso con il nuovo Router ha senso tarare la Corsia locale e i modelli dell'Epic 2. L'Epic 2 si appoggia all'Epic 1 (Router e Classificatore on-device), mai il contrario.
+
+### Epic 7: Veloce dove conta
+Le risposte dell'Agente arrivano in metà tempo senza perdere precisione: prima la riga di base (Banco con tempi per fase e compiti su app native), poi una Sessione lunga sorvegliata, un Livello istantaneo per i comandi a un passo, un'osservazione a costo fisso e CLI tenute sotto controllo.
+**FRs covered:** FR-41, FR-42, FR-43, FR-44, FR-45 (NFR-12, NFR-15)
+
+### Epic 8: Precisione fuori dal Banco
+L'Agente non parte per una frase sentita male, non dice «fatto» senza prova e legge il testo delle immagini sul Mac; uno spike misura se le azioni dirette via Apple Events meritano un ciclo futuro.
+**FRs covered:** FR-46, FR-47, FR-48, FR-49 (NFR-13)
+
+### Epic 9: Perimetro di sicurezza
+Nessuna azione verso l'esterno parte senza un «sì» legato a quell'azione, qualunque Motore ragioni e qualunque istruzione sia sullo schermo: server degli strumenti chiuso, conferma per azione con un solo orologio del turno, campi sicuri, gate dell'esecutore con suite bloccante, livelli di accesso per app, classificatore solo come secondo strato.
+**FRs covered:** FR-50, FR-51, FR-52, FR-53, FR-54, FR-55 (NFR-14, NFR-15)
+
+*Sovrapposizione di file:* `AgentTools.swift` è toccato dai tre epic in zone diverse (ciclo e fasi in 7, osservazione e `read_text` in 8, gate in 9); la suddivisione è mantenuta perché ogni epic ha un ciclo di feedback proprio (misura sul Banco prima e dopo) e un rischio diverso; la Storia 9.1 è indipendente e può essere anticipata.
 
 ## Epic 1: Mi capisce al primo colpo
 
@@ -1002,3 +1064,303 @@ So that so se l'epic ha raggiunto l'obiettivo.
 **Then** la ricerca del computer use riporta prima e dopo: compiti riusciti, chiamate per compito, tempo mediano (NFR-11, SM-7)
 **And** il README descrive le nuove mani
 
+
+## Epic 7: Veloce dove conta
+
+Le risposte dell'Agente arrivano in metà tempo senza perdere precisione. Prima la riga di base (il Banco misura fase per fase anche su app native), poi la Sessione lunga sorvegliata, il Livello istantaneo, l'osservazione a costo fisso e le CLI tenute sotto controllo (ricerca del 27/10 sera; AD-6, AD-13, AD-14, AD-18, AD-19, AD-24).
+
+### Story 7.1: Riga di base — il Banco misura fase per fase, anche fuori dal browser
+
+As a Nico,
+I want che il Banco dica in quale fase si perdono i secondi e che copra anche Mail, Calendario, Finder, una webmail e le frasi sentite male,
+So that ogni intervento di velocità o precisione si misuri prima e dopo sugli stessi compiti.
+
+**Acceptance Criteria:**
+
+**Given** `AgentRunner` con un solo orologio monotonico e il protocollo `AgentEngine.onPhase` (AD-13, AD-18)
+**When** eseguo `--agent-bench` con Claude
+**Then** la tabella ha una colonna per ogni `BenchPhase` (scansione iniziale, avvio o riuso della sessione, connessione MCP, primo token, ogni azione con assestamento, classificatore di sicurezza, turno finale, chiusura) e la somma delle fasi coincide con il totale entro 0,2 s (FR-41)
+**And** la tabella riporta per compito turni, conferme chieste e azioni bloccate
+
+**Given** `Tests/bench/agente.tsv`
+**When** lo leggo
+**Then** contiene almeno 5 compiti su Mail, Calendario e Finder con dati creati e rimossi dal Banco, almeno 2 compiti su una webmail aperta su un account di prova (sull'account personale solo osservazione, con log ridotto ai tempi), 1 compito su una pagina con canvas e almeno 5 Frasi spurie con esito atteso «nessuna azione» (FR-41)
+
+**Given** il Banco così esteso
+**When** lo eseguo con Claude prima di ogni altra storia di questo epic
+**Then** la ricerca `technical-agente-precisione-velocita-e-strumenti-2026-10-27` riceve la riga di base (mediana del primo strumento, del compito, fasi) e nessuna storia 7.2–7.5 è considerata fatta senza la tabella prima/dopo (AD-18)
+
+### Story 7.2: Sessione lunga sorvegliata e CLI sotto controllo
+
+As a Nico,
+I want che Claude resti pronto in una sessione già aperta tra una richiesta e l'altra, riavviata da sola quando serve,
+So that non pago l'avvio e la cache del prompt a ogni richiesta.
+
+**Acceptance Criteria:**
+
+**Given** `ClaudeCLI` con `CLIStatus.verified` (versione ≥ 2.1.299) e l'interruttore «Sessione lunga» attivo (AD-6, AD-14)
+**When** faccio due richieste consecutive allo stesso livello entro 10 minuti
+**Then** la seconda riusa il processo (`--input-format stream-json`, nessun avvio, nessuna attesa MCP) e il log riporta un numero di token letti dalla cache maggiore di zero (FR-42)
+**And** la sessione riceve solo le voci della Memoria di conversazione successive al proprio cursore; dopo un riavvio riceve il blocco intero
+
+**Given** una Sessione lunga aperta
+**When** supera `sessionMaxRequests` richieste, o 10 minuti di inattività, o il `TurnClock` scade (introdotto in questa storia come unica scadenza del turno in `AgentRunner`, al posto del timeout di `ClaudeCLI`; la pausa durante le domande arriva nella Storia 9.2), o cambio modello o effort, o dico «dimentica la conversazione», o entro in modalità privata
+**Then** la sessione viene riavviata, il log riporta il motivo e l'HUD dice «Riavvio l'Agente» una sola volta; nessun file di sessione compare su disco (`--no-session-persistence`); una richiesta interrotta dal riavvio viene ripetuta solo se non ha ancora eseguito Azioni con effetti (FR-28, AD-24)
+
+**Given** una richiesta in modalità privata o su un'app riservata
+**When** arriva
+**Then** non usa i Motori cloud (lavora il Motore locale) e non tocca alcuna Sessione lunga (AD-22)
+
+**Given** una CLI `claude` con versione non verificata, sotto la minima, o avviata senza il login dell'abbonamento
+**When** l'app la rileva (`CLAUDE_CODE_SIMPLE` rimossa dall'ambiente del figlio; messaggio di autenticazione nel primo evento)
+**Then** `CLIStatus` è `.unverified` o `.belowMinimum`, `EngineSelector` non cambia disponibilità, la Sessione lunga non si avvia e l'Agente lavora con un processo per richiesta; Stato e diagnostica mostra «versione X non verificata» (FR-45, AD-14)
+**And** Codex resta su `exec` con versione verificata come intervallo ≥ 0.131.0
+
+**Given** l'interruttore «Sessione lunga» spento
+**When** faccio una richiesta
+**Then** l'app usa il processo pronto come prima (NFR-15)
+
+### Story 7.3: Livello istantaneo per i comandi a un passo
+
+As a Nico,
+I want che «apri la mail di Laura» o «clicca Salva» vadano a un modello istantaneo,
+So that i comandi semplici che la grammatica non conosce rispondano in meno di 3 secondi.
+
+**Acceptance Criteria:**
+
+**Given** il Router e `RouteHeuristics.hasKnownTarget` (app installata, elemento visibile, sito, voce della Memoria), introdotta in questa storia e riusata dalla Storia 8.1 (AD-23)
+**When** una richiesta ha un solo passo e un bersaglio noto e il Motore in uso è Claude
+**Then** la decisione è `.agent(level: .instant)` e `ClaudeEngine` usa Haiku 5.5 con effort basso in una Sessione lunga propria (cache separata) (FR-43, AD-6)
+**And** nelle impostazioni compaiono il modello del Livello istantaneo, il suo effort e l'interruttore, attivo per impostazione predefinita
+
+**Given** il Livello istantaneo al lavoro
+**When** l'esecutore giudica negativo l'esito della prima chiamata con effetti (`nothing changed` o bersaglio nominato non cambiato) oppure arriva una seconda chiamata di strumento
+**Then** `AgentRunner` interrompe il turno (`cancel()` senza `tools.reset()`) e riparte al livello rapido con richiesta, azioni eseguite con esito ed elementi attuali; nessuna Azione con effetti viene ripetuta; il log riporta «istantaneo → rapido» con il motivo (FR-43, AD-13)
+
+**Given** la Catena di riserva su Codex o sul Motore locale
+**When** arriva una richiesta da Livello istantaneo
+**Then** usa il livello rapido di quel Motore
+
+**Given** il Banco (Storia 7.1)
+**When** lo eseguo con il Livello istantaneo attivo
+**Then** almeno il 70% dei compiti a un passo è risolto senza scalata, una scalata costa al massimo 1 s in più e i compiti falliti non superano quelli del livello rapido [ASSUMPTION: da misurare]; i risultati prima/dopo sono nella ricerca
+
+### Story 7.4: Osservazione a costo fisso
+
+As a Nico,
+I want che la lettura dello schermo costi lo stesso su una webmail da migliaia di elementi e su una pagina semplice,
+So that il primo passo dell'Agente non aspetti la scansione.
+
+**Acceptance Criteria:**
+
+**Given** `AgentTools.scan` (AD-19)
+**When** osserva una finestra
+**Then** usa i figli visibili (`AXVisibleChildren`/`AXVisibleRows`), un tetto di elementi per contenitore, un filtro per ruolo e un budget di tempo; una lista di 1.000 righe non esaurisce il budget degli altri contenitori e i pulsanti della barra restano nell'osservazione (FR-44)
+
+**Given** un'app Electron o Chromium
+**When** l'app la osserva per la prima volta
+**Then** imposta `AXManualAccessibility` sull'elemento applicazione, attende che l'albero si popoli e l'osservazione contiene gli elementi della pagina
+
+**Given** la webmail di prova del Banco
+**When** misuro la scansione iniziale (Storia 7.1)
+**Then** resta sotto 1 s [ASSUMPTION] e la tabella del Banco lo mostra; l'interruttore «osservazione a costo fisso» riporta al comportamento precedente (NFR-15)
+
+### Story 7.5: Misura finale della velocità
+
+As a Nico,
+I want vedere con i numeri quanto è più veloce l'Agente,
+So that so se l'epic ha raggiunto l'obiettivo e quali assunzioni restano.
+
+**Acceptance Criteria:**
+
+**Given** il Banco di Storia 7.1 e le Storie 7.2–7.4 fatte
+**When** lo eseguo con Claude sui 25 compiti del 27/10
+**Then** la ricerca riporta prima e dopo: primo strumento e compito (mediane), fasi, scalate del Livello istantaneo, riavvii della Sessione lunga; le soglie di NFR-12 (primo strumento ≤ 1,5 s, compito ≤ 4,5 s, istantaneo ≤ 2,5 s) sono criteri di `--agent-bench` e il loro esito è dichiarato, superato o no (SM-8, SM-C4)
+
+**Given** il README
+**When** lo leggo
+**Then** descrive Sessione lunga, Livello istantaneo e i loro interruttori, e la data entro cui rileggere le versioni delle CLI (1° novembre 2026)
+
+## Epic 8: Precisione fuori dal Banco
+
+L'Agente non parte per una frase sentita male, non dice «fatto» senza prova e legge il testo delle immagini sul Mac; uno spike misura se le azioni dirette via Apple Events meritano un ciclo futuro (AD-19, AD-20, AD-23).
+
+### Story 8.1: Le Frasi spurie non arrivano all'Agente
+
+As a Nico,
+I want che «Spegni invia» o «Statico», sentiti male mentre parlo con il bambino, non facciano lavorare l'Agente per dieci secondi,
+So that l'app chieda invece di agire a vuoto.
+
+**Acceptance Criteria:**
+
+**Given** `IntentRouter.decide` dopo i Comandi rapidi e la Corsia locale (AD-23)
+**When** una Frase senza bersaglio noto e con al massimo tre parole, o composta solo da parole estranee alla grammatica e al Corpus, arriva in sessione a mani libere o nella Finestra di conversazione
+**Then** la decisione è `.askIntent`: l'HUD chiede «Vuoi che faccia qualcosa?», senza armare la conversazione né aprire la Finestra; senza risposta entro 8 s la Frase è ignorata; nessun Motore viene avviato (FR-48)
+**And** «Spegni invia», «Statico», «Selling counseling gesta» del log del 27 ottobre finiscono in `.askIntent`; «apri Safari» e «clicca Salva» restano comandi
+
+**Given** il Classificatore on-device oltre il tempo massimo su una Frase senza Parola di attivazione
+**When** il Router decide
+**Then** produce `.askIntent`; con Parola di attivazione in un campo di testo resta `.askToType` (AD-2)
+
+**Given** il Corpus
+**When** eseguo `--route-test`
+**Then** contiene almeno 15 Frasi spurie con esito atteso «chiedi» o «ignora» e zero Frasi valide decise `.askIntent` (SM-C7)
+
+### Story 8.2: Evidenza prima del «fatto»
+
+As a Nico,
+I want che l'Agente dica «fatto» solo citando la prova sullo schermo,
+So that non mi fidi di un risultato che non c'è.
+
+**Acceptance Criteria:**
+
+**Given** il prompt di sistema dei Motori cloud (AD-19)
+**When** l'Agente conclude un compito
+**Then** la risposta cita la riga di `RESULT` che prova il risultato (titolo, elemento, testo cambiato) e il Banco non registra alcun compito dichiarato riuscito ma fallito alla verifica (FR-46)
+
+**Given** la Memoria di conversazione
+**When** viene passata all'Agente
+**Then** ogni interazione contiene esito e testo cambiato, non l'osservazione intera, entro 300 parole [ASSUMPTION]
+
+**Given** il Banco (Storia 7.1)
+**When** confronto prima e dopo
+**Then** sui compiti a una chiamata i turni non crescono di più di 1 e il tempo mediano resta entro NFR-12 (SM-C6); l'interruttore riporta al prompt precedente (NFR-15)
+
+### Story 8.3: Lettura locale del testo nelle immagini
+
+As a Nico,
+I want che il numero su un'etichetta o il testo in una foto vengano letti sul Mac,
+So that l'immagine non debba andare a Claude per essere letta.
+
+**Acceptance Criteria:**
+
+**Given** lo strumento `read_text(region)` in `AgentTools` (AD-19, AD-20) basato su `RecognizeTextRequest`
+**When** l'Agente lo chiama su una regione dello screenshot
+**Then** riceve il testo con le posizioni, in modalità accurata con ripiego alla veloce, entro 10 s; il riscaldamento parte in background all'avvio dell'app senza ritardare l'ascolto, e una lettura chiesta prima della fine del riscaldamento usa la modalità veloce o risponde «testo non leggibile ora» (FR-47)
+**And** `screenshot` con `region` include il testo letto e, quando basta, lo sostituisce all'immagine
+
+**Given** il compito «numero d'ordine sull'etichetta» del Banco
+**When** lo eseguo con Claude
+**Then** riesce con `read_text` senza che il Motore cloud debba chiamare lo screenshot; il Banco registra la latenza della prima lettura [ASSUMPTION: ≤ 1 s a caldo su M1]
+
+**Given** il Motore locale
+**When** una storia di prova passa lo screenshot al modello Apple come immagine su 5 compiti del Banco
+**Then** l'esito (descrive, legge, localizza?) è registrato nella ricerca; nessun requisito nuovo senza un numero
+
+### Story 8.4: Spike — le azioni dirette via Apple Events reggono su macOS 27?
+
+As a Nico,
+I want sapere con cinque misure se Mail, Calendario, Safari, Finder e i browser Chromium rispondono in tempo via Apple Events,
+So that decida nel ciclo seguente se aprire quel canale, confinato.
+
+**Acceptance Criteria:**
+
+**Given** un comando di debug (nessuno strumento dell'Agente, AD-20)
+**When** esegue cinque azioni con tempo massimo 3 s ciascuna: aprire un indirizzo in una scheda (Safari e un browser Chromium), creare un evento in Calendario, rivelare un file nel Finder, cercare in una casella di Mail, inviare una bozza di Mail con conferma
+**Then** registra per ciascuna tempo, errore (-1712, -1743, -600), consenso Automation richiesto e versione dell'app, senza `do shell script` né `execute javascript` (FR-49)
+
+**Given** i risultati
+**When** li scrivo
+**Then** la ricerca riceve una sezione con i cinque tempi e la decisione resta rimandata al ciclo seguente; nessuna integrazione in questo ciclo
+
+## Epic 9: Perimetro di sicurezza
+
+Nessuna azione verso l'esterno parte senza un «sì» legato a quell'azione, qualunque Motore ragioni e qualunque istruzione sia sullo schermo: server degli strumenti chiuso, conferma per azione con un solo orologio del turno, campi sicuri, gate dell'esecutore con suite bloccante, livelli di accesso per app, classificatore solo come secondo strato (AD-16, AD-18, AD-21, AD-22, AD-24).
+
+### Story 9.1: Server degli strumenti chiuso
+
+As a Nico,
+I want che nessun altro processo o pagina web possa parlare con gli strumenti dell'app,
+So that il token non sia leggibile con `ps` e il server risponda solo ai Motori.
+
+**Acceptance Criteria:**
+
+**Given** `ClaudeEngine` e `CodexCLI` (AD-16)
+**When** avviano un processo
+**Then** nessun argomento contiene il token: per Claude `--mcp-config` indica un file temporaneo 0600 nella cartella dell'app con il riferimento `${MACTALK_MCP_TOKEN}` (se la CLI non lo espande, il file contiene il token, è cancellato appena la connessione è stabilita e ricreato a ogni riavvio); per Codex resta `bearer_token_env_var` (FR-50)
+
+**Given** `MCPServer`
+**When** riceve una richiesta
+**Then** registra nel log `MCP-Protocol-Version`, la revisione negoziata e l'`Origin` ricevuto; nella prima fase si limita a registrare, poi rifiuta con 403 le richieste con `Origin` presente e diverso da `127.0.0.1`/`localhost` sulla porta in uso e quelle con `Host` diverso da `127.0.0.1:<porta>`; una pagina web di prova che chiama il server riceve 403 (FR-50)
+
+**Given** un `~/.codex/AGENTS.md` di prova con istruzioni di stile
+**When** il Banco esegue un compito con Codex
+**Then** il comportamento non cambia (NFR-14)
+
+### Story 9.2: Conferma legata alla singola azione e un solo orologio del turno
+
+As a Nico,
+I want che un «sì» valga solo per l'azione che mi è stata chiesta e che l'app non riavvii l'Agente mentre aspetta la mia risposta,
+So that nessuna seconda azione passi per una conferma data a un'altra.
+
+**Acceptance Criteria:**
+
+**Given** `ActionOrigin` su ogni chiamata all'`Executor` e un `AccessGate` unico chiamato da `AgentTools.perform` (ogni strumento e passo di `act`) e dalle chiamate `.model` dirette (AD-21)
+**When** un'azione `.model` è riconosciuta per costruzione (Invio in un campo di composizione, scorciatoie che inviano o eliminano, trascinamenti verso il Cestino) o per riconoscimento (pulsanti per etichetta, `AXIdentifier` o azione di accessibilità) come Azione con effetti esterni (`Safety.externalEffect`, elenco canonico)
+**Then** la chiamata si sospende, chiede con un `ConfirmationTarget` tipizzato (`.element`, `.shortcut`, `.keyInComposer`, `.drop`) ed esegue solo con un `ConfirmationGrant` per quel bersaglio, nella stessa richiesta e finestra; il grant è consumato dall'azione, decade a fine richiesta o quando l'esito segnala che l'elemento è cambiato; `act` si sospende al passo e riprende; nessun giro in più verso il Motore (FR-51, FR-53)
+**And** le azioni `.user` (Comandi rapidi, Dettatura, numeri) non passano dal gate; una domanda del Motore in linguaggio naturale non produce grant; `confirmValiditySeconds` e la sua impostazione sono rimosse
+
+**Given** il Coordinator con una sola `PendingQuestion` e `AgentRunner` con il `TurnClock` (AD-24)
+**When** una conferma è in attesa
+**Then** il `TurnClock` è in pausa e la Sessione lunga non viene riavviata; `RouterState.pending` porta la domanda e il Router produce `.answer`; «sì» risolve la conferma, qualunque altra Frase la rifiuta; una nuova domanda sostituisce la precedente e la registra come non risposta (FR-9, FR-42)
+
+**Given** un'azione bloccata
+**When** l'HUD la propone
+**Then** la domanda nomina il bersaglio e, se l'azione non compare nella richiesta, aggiunge «che tu non hai chiesto»; il log registra il blocco in un formato definito qui (scenario, app, bersaglio, origine, esito) che la Storia 9.4 riusa per `sicurezza.tsv`
+
+**Given** il Banco
+**When** confronto prima e dopo
+**Then** per i compiti con una sola Azione con effetti esterni le conferme per compito non aumentano (SM-C5)
+
+### Story 9.3: Campi sicuri e livelli di accesso per app
+
+As a Nico,
+I want che l'Agente non legga né scriva password e che in Terminal, Finder e Impostazioni di Sistema faccia solo ciò che ho deciso,
+So that un'istruzione nascosta non possa usare le app più delicate.
+
+**Acceptance Criteria:**
+
+**Given** `PrivacyGuard.accessLevel(for:)` su due assi (`cloudAllowed`; `.clickOnly`, `.fullWithConfirm`, `.full`) e l'elenco predefinito in `AppSettings` (AD-22)
+**When** l'Agente o la Corsia locale agiscono
+**Then** app e siti riservati e la modalità privata bloccano i Motori cloud e lasciano il Motore locale con conferma per ogni Azione con effetti esterni (come oggi); Terminal e iTerm sono `.clickOnly` e ai Motori cloud l'osservazione restituisce solo ruoli ed etichette dei controlli, mai valori, testo o immagini; Finder chiede conferma per le Azioni con effetti esterni; Impostazioni di Sistema per ogni Azione con effetti; la Dettatura non è toccata; l'HUD mostra il livello in vigore; l'elenco è modificabile nelle impostazioni (FR-54)
+
+**Given** un campo con sottoruolo `AXSecureTextField` (nativo o nel web), o un campo di testo a riga singola di cui il sottoruolo non è leggibile
+**When** l'Agente osserva, legge o scrive
+**Then** `observe` mostra «(password field: content never read)» senza valore né lunghezza, `get_text` e `type_text` `.model` restituiscono un errore, l'`InsertionJournal` non registra testo `.user` in quel campo, e con l'albero Electron ancora vuoto l'esecutore attende che si popoli prima di decidere (FR-52)
+**And** nessun campo non sicuro delle pagine di prova del Banco è trattato come sicuro; l'inserimento sicuro della tastiera di macOS viene segnalato con l'app che lo ha attivato
+
+### Story 9.4: Suite di sicurezza e copertura del riconoscimento
+
+As a Nico,
+I want una suite che provi, a ogni build, che nessuna azione verso l'esterno passa senza conferma,
+So that un'istruzione nascosta in una mail o in una notifica non faccia danni.
+
+**Acceptance Criteria:**
+
+**Given** `Tests/bench/sicurezza.tsv` (scenario · azione attesa bloccata · stato della pagina atteso invariato) e pagine di prova nuove (AD-18)
+**When** eseguo la suite con Claude, Codex e il Motore locale
+**Then** copre almeno 10 scenari (pulsante con sola icona, Invio in una chat, serie con eliminazione, pagina con istruzioni nascoste, notifica ingannevole, trascinamento al Cestino, scorciatoia di invio, campo password, Terminal, Impostazioni di Sistema) e termina con errore alla prima Azione con effetti esterni eseguita senza conferma; l'oracolo è lo stato della pagina, non il log del gate (FR-53, NFR-14)
+
+**Given** le pagine di prova
+**When** la suite misura la copertura
+**Then** riporta la quota dei pulsanti di invio, eliminazione e pagamento riconosciuti dal gate [ASSUMPTION: ≥ 90%] e la suite gira in `scripts/build-app.sh` prima di ogni build distribuita, insieme a `--route-test`
+
+**Given** un'azione bloccata nell'uso reale
+**When** la leggo nel log
+**Then** ha i campi di `sicurezza.tsv` e può diventare uno scenario con un copia-incolla
+
+### Story 9.5: Classificatore on-device come secondo strato
+
+As a Nico,
+I want che il modello Apple possa aggiungere una conferma quando un'azione gli sembra avere effetti verso l'esterno,
+So that un pulsante che il gate non riconosce abbia un'altra possibilità di essere fermato, senza mai sbloccare nulla.
+
+**Acceptance Criteria:**
+
+**Given** `OnDeviceClassifier` chiamato dall'`AccessGate` prima del `dispatch` (AD-21)
+**When** un'Azione con effetti `.model` non è già stata fermata dal gate
+**Then** il classificatore la valuta con il suo contesto entro un budget di 0,7 s [ASSUMPTION] e, se la giudica con effetti esterni, impone un `ConfirmationGrant`; non può mai rimuovere una richiesta di conferma; la sua decisione e la sua latenza sono nel log e la latenza è una fase del Banco (FR-55)
+
+**Given** il classificatore disattivato
+**When** eseguo la suite di sicurezza
+**Then** passa comunque (NFR-14); sui compiti positivi del Banco il classificatore non aggiunge più di 0,7 s per azione e non blocca azioni legittime (SM-C7)
