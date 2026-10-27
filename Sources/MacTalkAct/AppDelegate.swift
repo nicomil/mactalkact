@@ -395,6 +395,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         c.clearConversation = { [weak self] in self?.coordinator.conversation.log.clear() }
         c.showHelp = { [weak self] in self?.showHelp() }
+        c.engineStates = { [weak self] in self?.coordinator.agent.engines.mapValues(\.availability) ?? [:] }
+        c.recheckEngines = { [weak self] in self?.coordinator.agent.refreshAvailability() }
+        c.engineErrors = { [weak self] in self?.coordinator.agent.lastErrors ?? [:] }
+        c.testLocalEngine = { [weak self] in await self?.coordinator.testLocalEngine() ?? "—" }
         return c
     }
 

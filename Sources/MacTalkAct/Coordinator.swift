@@ -157,6 +157,27 @@ final class Coordinator {
         return settings.backend == .apiKey ? settings.apiKey != nil : agent.isConfigured
     }
 
+    /// «Prova» in the settings: a harmless request to the local engine, with its timing (FR-31).
+    func testLocalEngine() async -> String {
+        guard !busy, !agent.running else { return "Sto già lavorando: riprova tra poco." }
+        do {
+            try await agent.start()
+            agent.refreshAvailability()
+            try? await Task.sleep(for: .milliseconds(1600)) // the server check
+            let saved = agent.overrideChoice
+            agent.overrideChoice = (.local, false)
+            defer { agent.overrideChoice = saved }
+            let started = Date()
+            let answer = try await agent.run("Guarda la finestra in primo piano senza toccare nulla e dimmi in poche parole che app è.",
+                                             context: ScreenContext.capture(includeLabels: false), deep: false)
+            let first = agent.tools.firstCallAt.map { String(format: "%.1f s", $0.timeIntervalSince(started)) } ?? "nessuno"
+            return String(format: "%@ · primo strumento: %@ · totale %.1f s · «%@»", agent.lastModel, first,
+                          Date().timeIntervalSince(started), answer)
+        } catch {
+            return "Non riuscito: \(error.localizedDescription)"
+        }
+    }
+
     /// One engine changed state: «Codex è tornato» when the chosen one is back (FR-27).
     private func engineAvailabilityChanged(_ id: EngineID, _ a: AgentAvailability) {
         onModeChange?()

@@ -5,6 +5,13 @@ import SwiftUI
 @MainActor
 struct SettingsContext {
     var agentStatus: () -> String = { "—" }
+    /// State of every engine (FR-29).
+    var engineStates: () -> [EngineID: AgentAvailability] = { [:] }
+    var recheckEngines: () -> Void = {}
+    /// Last error of every engine, if any.
+    var engineErrors: () -> [EngineID: String] = { [:] }
+    /// «Prova» of the local engine: outcome and time to the first tool (FR-31).
+    var testLocalEngine: () async -> String = { "—" }
     var routerDescription: () -> String = { "—" }
     var conversationCount: () -> Int = { 0 }
     var clearConversation: () -> Void = {}
@@ -73,7 +80,7 @@ private struct SectionContent: View {
         case .listening: ListeningSection(settings: settings)
         case .conversation: ConversationSection(settings: settings, context: context)
         case .understanding: UnderstandingSection(settings: settings)
-        case .agent: AgentSection(settings: settings)
+        case .agent: AgentSection(settings: settings, context: context)
         case .voice: VoiceSection(settings: settings)
         case .numbers: NumbersSection(settings: settings)
         case .memory: MemorySection(context: context)
@@ -201,6 +208,10 @@ private struct ResetButton: View {
 }
 
 private typealias D = AppSettings.Defaults
+
+private extension String {
+    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
+}
 
 // MARK: - Sections
 
@@ -339,20 +350,58 @@ private struct UnderstandingSection: View {
 
 private struct AgentSection: View {
     @ObservedObject var settings: AppSettings
+    let context: SettingsContext
     @State private var keyField = ""
     @State private var keyStatus = ""
     @State private var claudeFound: String?
+    @State private var codexFound: String?
+    @State private var serverModels: [String] = []
+    @State private var serverStatus = ""
+    @State private var testResult = ""
+    @State private var testing = false
 
-    private let models: [(String, String)] = [
+    private let claudeModels: [(String, String)] = [
         ("claude-opus-5-5", "Claude Opus 5.5 (più capace)"),
         ("claude-sonnet-5-5", "Claude Sonnet 5.5 (equilibrato)"),
         ("claude-haiku-5-5", "Claude Haiku 5.5 (più veloce)"),
     ]
+    private let codexModels: [(String, String)] = [
+        ("gpt-6.1-sol", "GPT-6.1 Sol (equilibrato)"),
+        ("gpt-6-astra", "GPT-6 Astra (più capace)"),
+        ("gpt-6.1-terra", "GPT-6.1 Terra"),
+        ("gpt-6-luna", "GPT-6 Luna (più veloce)"),
+    ]
     private let efforts: [(String, String)] = [("low", "Basso"), ("medium", "Medio"), ("high", "Alto")]
 
+    private func state(_ id: EngineID) -> String {
+        let a = context.engineStates()[id] ?? .missing
+        return a == .available ? "pronto" : EngineSelector.state(a)
+    }
+
     var body: some View {
-        Card(title: "Accesso a Claude") {
-            ToggleRow(title: "Usa Claude per ciò che non è un comando rapido o una dettatura", isOn: $settings.useAI)
+        Card(title: "Motore dell'agente",
+             footer: "L'agente esegue le richieste che non sono comandi rapidi né dettatura. Se il motore scelto non è disponibile (quota finita, non installato, senza accesso) l'app usa l'altro motore cloud e poi il modello locale, e lo dice. Con «Locale» i dati non lasciano il Mac: nessun passaggio al cloud.") {
+            ToggleRow(title: "Usa l'agente per ciò che non è un comando rapido o una dettatura", isOn: $settings.useAI)
+            Picker("Motore scelto", selection: $settings.agentEngine) {
+                ForEach(EngineID.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            TimelineView(.periodic(from: .now, by: 2)) { _ in
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(EngineID.allCases) { id in
+                        Text("\(id.title): \(state(id))").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            ToggleRow(title: "Passa agli altri motori quando serve",
+                      help: "Catena di riserva: motore scelto → altro motore cloud → modello locale.", isOn: $settings.engineFallback)
+            HStack {
+                Spacer()
+                Button("Ricontrolla i motori") { context.recheckEngines() }
+            }
+        }
+
+        Card(title: "Claude") {
             Picker("Accesso", selection: $settings.backend) {
                 Text("Abbonamento Claude (comando «claude»)").tag(AIBackend.subscription)
                 Text("Chiave API Anthropic").tag(AIBackend.apiKey)
@@ -377,21 +426,86 @@ private struct AgentSection: View {
                 Text(keyStatus.isEmpty ? (settings.apiKey == nil ? "Nessuna chiave: funzionano solo comandi rapidi e dettatura." : "Chiave presente.") : keyStatus)
                     .font(.caption).foregroundStyle(.secondary)
             }
-        }
-        .onAppear { claudeFound = settings.claudeExecutable }
-        .onChange(of: settings.claudePath) { _, _ in claudeFound = settings.claudeExecutable }
-
-        Card(title: "Modelli",
-             footer: "Le richieste semplici usano il modello rapido; quelle lunghe (più passi, mail, ricerche) il modello per i compiti lunghi. Di' «pensaci bene» per forzarlo. Cambiare modello o effort riavvia il processo di Claude tenuto pronto.") {
-            Picker("Compiti lunghi", selection: $settings.model) { ForEach(models, id: \.0) { Text($0.1).tag($0.0) } }
+            Picker("Compiti lunghi", selection: $settings.model) { ForEach(claudeModels, id: \.0) { Text($0.1).tag($0.0) } }
             Picker("Effort dei compiti lunghi", selection: $settings.deepEffort) { ForEach(efforts, id: \.0) { Text($0.1).tag($0.0) } }
                 .pickerStyle(.segmented)
-            ToggleRow(title: "Usa un modello più rapido per le richieste semplici", isOn: $settings.useFastModel)
             if settings.useFastModel {
-                Picker("Richieste semplici", selection: $settings.fastModel) { ForEach(models, id: \.0) { Text($0.1).tag($0.0) } }
+                Picker("Richieste semplici", selection: $settings.fastModel) { ForEach(claudeModels, id: \.0) { Text($0.1).tag($0.0) } }
                 Picker("Effort delle richieste semplici", selection: $settings.fastEffort) { ForEach(efforts, id: \.0) { Text($0.1).tag($0.0) } }
                     .pickerStyle(.segmented)
             }
+        }
+        .onAppear { claudeFound = settings.claudeExecutable; codexFound = settings.codexExecutable }
+        .onChange(of: settings.claudePath) { _, _ in claudeFound = settings.claudeExecutable }
+
+        Card(title: "Codex",
+             footer: "Usa il comando «codex» con l'accesso di ChatGPT. Codex vede solo gli strumenti di MacTalkAct: niente terminale, file, browser o configurazione personale.") {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Percorso del comando «codex»")
+                TextField("vuoto = cerca da solo", text: $settings.codexPath)
+                Text(codexFound.map { "Trovato: \($0) · \(state(.codex))" }
+                     ?? "Comando «codex» non trovato: installa l'app ChatGPT (contiene Codex) o indica il percorso.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .onChange(of: settings.codexPath) { _, _ in codexFound = settings.codexExecutable }
+            Picker("Compiti lunghi", selection: $settings.codexModel) { ForEach(codexModels, id: \.0) { Text($0.1).tag($0.0) } }
+            Picker("Sforzo dei compiti lunghi", selection: $settings.codexDeepEffort) { ForEach(efforts, id: \.0) { Text($0.1).tag($0.0) } }
+                .pickerStyle(.segmented)
+            if settings.useFastModel {
+                Picker("Richieste semplici", selection: $settings.codexFastModel) { ForEach(codexModels, id: \.0) { Text($0.1).tag($0.0) } }
+                Picker("Sforzo delle richieste semplici", selection: $settings.codexFastEffort) { ForEach(efforts, id: \.0) { Text($0.1).tag($0.0) } }
+                    .pickerStyle(.segmented)
+            }
+        }
+
+        Card(title: "Locale (sul Mac)",
+             footer: "Il modello Apple è sempre presente con Apple Intelligence. Un server sul Mac (Ollama, LM Studio, mlx_lm.server) può ospitare un modello più capace: se non risponde l'app usa il modello Apple.") {
+            Picker("Modello", selection: $settings.localProvider) {
+                ForEach(LocalProvider.allCases) { Text($0.title).tag($0) }
+            }
+            Text("Modello Apple: \(LocalEngine.appleModelAvailable ? "disponibile" : "non disponibile (attiva Apple Intelligence)")")
+                .font(.caption).foregroundStyle(.secondary)
+            if settings.localProvider == .server {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Indirizzo del server (compatibile OpenAI)")
+                    TextField("http://127.0.0.1:11434/v1", text: $settings.localServerURL)
+                    if !OpenAICompatibleModel.isLocal(baseURL: settings.localServerURL) {
+                        ToggleRow(title: "Consenti un server fuori da questo Mac",
+                                  help: "Attenzione: la richiesta e il contenuto dello schermo lasceranno il Mac.",
+                                  isOn: $settings.localServerAllowRemote)
+                    }
+                }
+                HStack {
+                    Picker("Modello del server", selection: $settings.localServerModel) {
+                        Text("—").tag("")
+                        ForEach(serverModels.contains(settings.localServerModel) || settings.localServerModel.isEmpty
+                                ? serverModels : [settings.localServerModel] + serverModels, id: \.self) { Text($0).tag($0) }
+                    }
+                    Button("Aggiorna elenco") { Task { await loadModels() } }
+                }
+                if !serverStatus.isEmpty { Text(serverStatus).font(.caption).foregroundStyle(.secondary) }
+                NumberRow(title: "Tieni il modello in memoria per", help: "Poi il server lo scarica e libera memoria.",
+                          value: $settings.localKeepAliveMinutes, range: 1...60, step: 1, unit: "min", decimals: 0,
+                          defaultValue: D.localKeepAliveMinutes)
+            }
+            IntRow(title: "Passi massimi del modello locale", value: $settings.localMaxSteps, range: 3...20,
+                   defaultValue: D.localMaxSteps)
+            HStack {
+                Button(testing ? "Prova in corso…" : "Prova") {
+                    testing = true
+                    Task {
+                        testResult = await context.testLocalEngine()
+                        testing = false
+                    }
+                }
+                .disabled(testing)
+                Text(testResult).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .task(id: settings.localProvider) { if settings.localProvider == .server { await loadModels() } }
+
+        Card(title: "Richieste semplici") {
+            ToggleRow(title: "Usa un modello più rapido per le richieste semplici", isOn: $settings.useFastModel)
         }
         Card(title: "Limiti di un compito") {
             IntRow(title: "Passi massimi (azioni dell'agente)", value: $settings.agentMaxSteps, range: 10...150, step: 5,
@@ -400,15 +514,25 @@ private struct AgentSection: View {
             NumberRow(title: "Tempo massimo", value: $settings.agentTimeout, range: 60...600, step: 30, decimals: 0,
                       defaultValue: D.agentTimeout)
             NumberRow(title: "Dopo un «sì», azioni rischiose consentite per",
-                      help: "Inviare, eliminare, comprare: senza conferma recente l'app le blocca.",
+                      help: "Inviare, eliminare, comprare: senza conferma recente l'app le blocca, con qualunque motore.",
                       value: $settings.confirmValiditySeconds, range: 10...120, step: 5, decimals: 0,
                       defaultValue: D.confirmValiditySeconds)
         }
         Card(title: "Dettatura") {
-            ToggleRow(title: "Ripulisci la dettatura con Claude (più lento)",
+            ToggleRow(title: "Ripulisci la dettatura (più lento)",
                       help: "Toglie intercalari e corregge la punteggiatura prima di scrivere.", isOn: $settings.cleanDictation)
         }
         ResetButton(section: .agent, settings: settings)
+    }
+
+    private func loadModels() async {
+        do {
+            serverModels = try await OpenAICompatibleModel.models(baseURL: settings.localServerURL)
+            serverStatus = serverModels.isEmpty ? "Server raggiungibile, nessun modello installato." : "Server raggiungibile: \(serverModels.count) modelli."
+        } catch {
+            serverModels = []
+            serverStatus = "Server non raggiungibile: avvia Ollama o LM Studio, o controlla l'indirizzo."
+        }
     }
 }
 
@@ -568,7 +692,18 @@ private struct StatusSection: View {
                           ok: OnDeviceClassifier.isAvailable)
                 StatusRow(title: "Router", value: context.routerDescription(), ok: true)
                 StatusRow(title: "Comando «claude»", value: claudePath ?? "Non trovato", ok: claudePath != nil)
-                StatusRow(title: "Agente", value: context.agentStatus(), ok: context.agentStatus().hasPrefix("Disponibile"))
+                StatusRow(title: "Agente in uso", value: context.agentStatus(), ok: context.engineStates().values.contains(.available))
+                ForEach(EngineID.allCases) { id in
+                    let a = context.engineStates()[id] ?? .missing
+                    let err = context.engineErrors()[id].map { " · ultimo errore: \($0)" } ?? ""
+                    StatusRow(title: "Motore \(id.title)",
+                              value: (a == .available ? "Disponibile" : EngineSelector.state(a).capitalizedFirst) + err,
+                              ok: a == .available)
+                }
+                HStack {
+                    Spacer()
+                    Button("Ricontrolla i motori") { context.recheckEngines() }
+                }
                 StatusRow(title: "Versione", value: version, ok: true)
             }
         }

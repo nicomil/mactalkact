@@ -151,6 +151,24 @@ L'avvio di `claude` richiede circa 2 secondi. Per non farli pesare, l'app tiene 
 
 L'agente ha due livelli, ognuno con il suo processo pronto: le richieste **semplici** usano **Claude Sonnet 5.5** con effort basso, quelle **lunghe** (più passi, mail, ricerche, «tutte le…») usano **Claude Opus 5.5** con effort medio. Dire «pensaci bene» forza il secondo. Entrambi i modelli si scelgono nelle impostazioni. Le prime tre corsie non usano mai Claude e non consumano l'abbonamento.
 
+## Motori: Claude, Codex o il Mac
+
+L'agente può ragionare con tre **motori**, che usano gli stessi strumenti, lo stesso prompt e le stesse conferme:
+
+| Motore | Come funziona | Cosa serve |
+|---|---|---|
+| **Claude** (predefinito) | `claude -p` con l'abbonamento Claude, come descritto sopra | Claude Code con l'accesso fatto |
+| **Codex** | `codex exec` con l'accesso di ChatGPT; richiesta semplice con GPT-6 Luna, compiti lunghi con GPT-6.1 Sol | L'app ChatGPT (contiene Codex) o Codex CLI, con l'accesso fatto |
+| **Locale** | Il modello Apple sul Mac (o un modello servito da Ollama/LM Studio), con meno strumenti e al massimo 8 passi | Apple Intelligence attiva |
+
+Il motore si sceglie dal menu della barra (**Motore dell'agente**) o da Impostazioni › **Motori**.
+
+**Catena di riserva.** Se il motore scelto non è disponibile (quota finita, comando non installato, accesso da rifare) l'app usa da sola l'altro motore cloud e, se manca anche quello, il modello locale. Ogni passaggio viene detto una volta nell'HUD: «Codex in pausa fino alle 17:40 · uso Claude», «Claude e Codex non disponibili · passo al modello locale». Quando il motore scelto torna, l'app torna a usarlo e lo dice («Codex è tornato»). Con **Locale** scelto non c'è passaggio al cloud: i dati restano sul Mac. La catena si può spegnere («Passa agli altri motori quando serve»).
+
+**Mai due volte la stessa azione.** Se un motore si ferma per la quota *prima* di aver fatto qualcosa (ha solo guardato lo schermo), la stessa richiesta passa subito al motore successivo. Se invece aveva già cliccato o scritto, l'app si ferma e dice quanti passi ha fatto: ripetere potrebbe, ad esempio, inviare due volte la stessa mail.
+
+**Codex come Claude, solo con i nostri strumenti.** L'app avvia `codex exec` senza la configurazione personale (`--ignore-user-config`), senza terminale, computer use, browser, plugin né ricerca web, in sola lettura e senza salvare sessioni; il token del server degli strumenti passa solo nell'ambiente del processo. I dettagli e le misure sono in `_bmad-output/planning-artifacts/research/valutazione-motori-agente-2026-10-27.md`.
+
 ## Struttura del codice
 
 | File | Ruolo |
@@ -163,7 +181,11 @@ L'agente ha due livelli, ognuno con il suo processo pronto: le richieste **sempl
 | `LocalLane.swift` | Corsia locale: proposta del modello Apple e validatore con regole fisse |
 | `Conversation.swift` | Finestra di conversazione, memoria a breve termine, registro di ciò che l'app scrive |
 | `Coordinator.swift` | Modalità di ascolto, dettatura lunga, esecuzione delle decisioni del Router, domande dell'agente, feedback |
-| `AgentRunner.swift` | Prompt e avvio dell'agente `claude -p` (rapido o profondo), disponibilità e pausa per il limite |
+| `AgentRunner.swift` | Prompt e messaggio dell'agente, scelta del motore, catena di riserva, ripetizione solo prima delle azioni |
+| `AgentEngine.swift` | Protocollo dei motori, `EngineSelector`, lettura dei messaggi di limite di Claude e Codex |
+| `ClaudeEngine.swift`, `CodexEngine.swift`, `CodexCLI.swift` | I due motori cloud: avvio delle CLI, livelli rapido e profondo, pause per la quota |
+| `LocalEngine.swift` | Motore locale: sessione FoundationModels con gli strumenti dell'app, prompt corto, passi limitati |
+| `OpenAICompatibleModel.swift` | Modello servito sul Mac (Ollama, LM Studio, MLX) tramite l'API compatibile OpenAI |
 | `AgentTools.swift` | Gli strumenti dell'agente: osservare, cliccare, scrivere, confermare… |
 | `MCPServer.swift` | Server MCP HTTP locale (solo 127.0.0.1, con token) |
 | `ScreenCapture.swift` | Screenshot della finestra in primo piano (ScreenCaptureKit) |
@@ -197,6 +219,9 @@ say -v Alice -o /tmp/t.aiff "Scorri giù"
 .build/debug/MacTalkAct --wake-test 60             # ascolto continuo completo, senza eseguire nulla
 tail -f ~/Library/Logs/MacTalkAct.log              # cosa sente e decide l'app, in tempo reale
 .build/debug/MacTalkAct --agent-test "apri la Calcolatrice"   # un compito completo dell'agente (agisce davvero!)
+.build/debug/MacTalkAct --agent-test "…" --engine codex       # lo stesso con un motore preciso (claude, codex, local), senza riserva
+.build/debug/MacTalkAct --fallback-test            # catena di riserva con motori finti: nessuna azione ripetuta dopo un limite
+.build/debug/MacTalkAct --mcp-serve                # solo il server degli strumenti, per provare a mano altri client MCP
 .build/debug/MacTalkAct --observe-stats com.microsoft.edgemac # quanto vede l'agente di un'app (senza contenuti)
 .build/debug/MacTalkAct --activate-test Calculator # porta un'app in primo piano e torna indietro
 .build/debug/MacTalkAct --phase3-test              # memoria, macro (temporanea), profili, numeri su Edge
@@ -220,7 +245,7 @@ Facoltative, da Impostazioni › «Rispondi a voce». L'app pronuncia a basso vo
 
 ## Limiti della subscription
 
-L'agente usa la stessa subscription di Claude Code. Se si raggiunge il limite d'uso, l'app entra in **modalità ridotta** fino all'ora di ripresa letta dal messaggio (o per 30 minuti): le richieste per l'agente ricevono subito una risposta chiara invece di un'attesa, il menu mostra «Agente in pausa fino alle …» e l'icona cambia. Comandi rapidi, corsia locale, dettatura e «mostra numeri» continuano a funzionare. All'ora di ripresa l'app riprepara Claude e avvisa che l'agente è tornato.
+Claude e Codex hanno ciascuno il proprio limite d'uso. Quando un motore lo raggiunge, l'app legge l'ora di ripresa dal messaggio («resets 7pm», «try again at 5:40 PM», «try again in 2 hours», anche con un giorno diverso per il limite settimanale; 30 minuti se l'ora non c'è) e lo mette in pausa fino ad allora, passando agli altri motori come descritto sopra. Solo se nessun motore è disponibile (o la catena di riserva è spenta) l'app entra in **modalità ridotta**: le richieste per l'agente ricevono subito una risposta chiara, il menu mostra lo stato di ogni motore e l'icona cambia. Comandi rapidi, corsia locale, dettatura e «mostra numeri» continuano a funzionare.
 
 ## Idee per il futuro
 

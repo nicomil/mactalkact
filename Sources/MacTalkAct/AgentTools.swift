@@ -24,6 +24,8 @@ final class AgentTools {
     /// Calls that changed something on the Mac in this task (AD-15): after the first one,
     /// a request is never repeated on another engine.
     private(set) var effectfulCalls = 0
+    /// When the first tool was called in this task (time to first tool, NFR-9).
+    private(set) var firstCallAt: Date?
     /// Text changes made during the current task, for the conversation memory (FR-8).
     private(set) var changes: [String] = []
     /// The app the task works in: keystrokes and clicks stop if another app takes the front
@@ -49,6 +51,7 @@ final class AgentTools {
         confirmedUntil = .distantPast
         callCount = 0
         effectfulCalls = 0
+        firstCallAt = nil
         changes = []
         cancelled = false
         targetPID = AX.realFrontmostApplication()?.processIdentifier
@@ -156,6 +159,7 @@ final class AgentTools {
     func call(_ name: String, _ args: [String: Any]) async -> Result {
         if cancelled { return .error("The user cancelled the task. Stop now.") }
         callCount += 1
+        if firstCallAt == nil { firstCallAt = Date() }
         if callCount > maxCalls { return .error("Step limit reached. Stop and tell the user what is left to do.") }
         Log.debug("Agente → \(name) \(Self.compact(args))")
         if Self.actingTools.contains(name), let problem = frontmostChanged() {

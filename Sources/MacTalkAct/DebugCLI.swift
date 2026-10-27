@@ -573,6 +573,7 @@ extension DebugCLI {
         var context = SettingsContext()
         context.agentStatus = { "Disponibile (Sonnet 5.5 / Opus 5.5)" }
         context.routerDescription = { "modello Apple + corsia locale" }
+        context.engineStates = { [.claude: .available, .codex: .paused(until: Date().addingTimeInterval(5400)), .local: .available] }
         let window = SettingsWindowFactory.make(settings: settings, context: context)
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
         window.orderFrontRegardless()

@@ -80,6 +80,8 @@ final class AgentRunner {
     /// The engine that answered the last request, and its model, for logs and the menu.
     private(set) var lastEngine: EngineID?
     private(set) var lastModel = ""
+    /// The last error of every engine, with its time (Stato e diagnostica, FR-29).
+    private(set) var lastErrors: [EngineID: String] = [:]
     /// Engines to skip until they change state again because they failed to start (network, login).
     private var aggregate: AgentAvailability = .available
 
@@ -269,6 +271,9 @@ final class AgentRunner {
                 lastModel = model
                 Log.info(String(format: "Agente (%@/%@): errore dopo %.1fs, %d azioni con effetti: %@", engine.id.rawValue, model,
                                 Date().timeIntervalSince(started), tools.effectfulCalls, error.localizedDescription))
+                let f = DateFormatter()
+                f.dateFormat = "HH:mm"
+                lastErrors[engine.id] = "\(f.string(from: Date())) \(error.localizedDescription.prefix(80))"
                 tried.insert(engine.id)
                 updateAggregate()
                 guard error.allowsFallback, fallbackOn, !tools.cancelled else { throw error }
