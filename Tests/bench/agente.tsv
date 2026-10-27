@@ -25,3 +25,22 @@ menu-accessori	menu.html	breve	apri la pagina Accessori dal menu Prodotti	+pagin
 cursore-volume	cursore.html	breve	porta il volume a 30	+volume=30
 iscrizione-tutto	iscrizione.html	medio	compila l'iscrizione: nome Luca, cognome Verdi, email luca@esempio.it, telefono 333 1234567, città Bari, note arrivo alle 9	+nome=Luca;+cognome=Verdi;+email=luca@esempio.it;+tel=3331234567;+città=Bari;+note=arrivo alle 9
 etichetta-ordine	etichetta.html	medio	scrivi il numero d'ordine che si vede sull'etichetta del pacco	+ordine=4821-B
+# Storia 7.1 — app vere (dati creati e rimossi dal Banco; alle conferme il Banco risponde «no»).
+# app:<Nome>[:banco] (banco = Finder aperto sulla cartella «Banco MacTalkAct» della Scrivania); verifiche file:, evento:, url:.
+finder-apri	app:Finder	breve	apri la cartella Banco MacTalkAct sulla scrivania	+Banco MacTalkAct
+finder-rinomina	app:Finder:banco	breve	rinomina il file bozza.txt in finale.txt	+file:finale.txt;-file:bozza.txt
+finder-cartella	app:Finder:banco	breve	crea una nuova cartella chiamata Archivio	+file:Archivio
+calendario-evento	app:Calendar	medio	crea un evento domani alle 15 chiamato Banco riunione	+evento:Banco riunione
+mail-bozza	app:Mail	medio	scrivi una nuova mail a prova@example.invalid con oggetto Banco prova e testo ciao, ma non inviarla	+Banco prova
+# Webmail di prova (Gmail con login già fatto in Safari): MACTALK_BENCH_WEBMAIL=https://mail.google.com/mail/u/0/
+# Senza la variabile i compiti risultano «saltato»; con MACTALK_BENCH_WEBMAIL_PERSONAL=1 girano solo quelli «osserva».
+webmail-cerca	webmail:	breve	cerca nella posta le mail con la parola banco	+url:search
+webmail-inviata	webmail:	osserva	apri la cartella della posta inviata	+url:#sent
+# Canvas: le forme non sono nell'Accessibilità.
+lavagna-cerchio	lavagna.html	breve	clicca il cerchio rosso	+cliccato=cerchio rosso
+# Frasi spurie (FR-41, FR-48): passano dal Router; esito atteso «nessuna azione».
+spuria-ehm	frase:posta.html	breve	ehm sì va be'		
+spuria-tv	frase:posta.html	breve	e poi alla fine hanno vinto loro due a uno	
+spuria-mezza	frase:posta.html	breve	no aspetta che	
+spuria-sale	frase:posta.html	breve	passami il sale	
+spuria-telefono	frase:posta.html	breve	sì sì ti richiamo dopo ciao	

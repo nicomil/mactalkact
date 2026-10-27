@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco lavagna</title>
+<style>body{font:15px -apple-system;margin:24px}canvas{border:1px solid #ddd;border-radius:4px}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Lavagna</h1>
+<p>Le forme sono disegnate su una tela: l'Accessibilità non le vede, serve guardare lo schermo.</p>
+<canvas id="c" width="420" height="160" aria-hidden="true"></canvas>
+<script>
+// Tre forme su un canvas; un clic dentro una forma ne scrive il nome nel titolo.
+const c = document.getElementById("c"), ctx = c.getContext("2d");
+const forme = [
+  { nome: "quadrato blu", x: 30, y: 30, w: 100, h: 100, colore: "#2a62c9" },
+  { nome: "cerchio rosso", cx: 210, cy: 80, r: 50, colore: "#d23b3b" },
+  { nome: "triangolo verde", x: 300, y: 130, w: 100, h: 100, colore: "#2f9a4a" },
+];
+ctx.fillStyle = forme[0].colore; ctx.fillRect(30, 30, 100, 100);
+ctx.fillStyle = forme[1].colore; ctx.beginPath(); ctx.arc(210, 80, 50, 0, Math.PI * 2); ctx.fill();
+ctx.fillStyle = forme[2].colore; ctx.beginPath(); ctx.moveTo(300, 130); ctx.lineTo(400, 130); ctx.lineTo(350, 30); ctx.closePath(); ctx.fill();
+let cliccato = "nessuno";
+function dentro(f, x, y) {
+  if (f.r) return (x - f.cx) ** 2 + (y - f.cy) ** 2 <= f.r ** 2;
+  if (f.nome.startsWith("triangolo")) { ctx.beginPath(); ctx.moveTo(300, 130); ctx.lineTo(400, 130); ctx.lineTo(350, 30); ctx.closePath(); return ctx.isPointInPath(x, y); }
+  return x >= f.x && x <= f.x + f.w && y >= f.y && y <= f.y + f.h;
+}
+c.addEventListener("click", e => {
+  const b = c.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
+  const f = forme.find(f => dentro(f, x, y));
+  cliccato = f ? f.nome : "fuori";
+  banco("lavagna", ["cliccato=" + cliccato]);
+});
+banco("lavagna", ["cliccato=" + cliccato]);
+</script>
+</body></html>

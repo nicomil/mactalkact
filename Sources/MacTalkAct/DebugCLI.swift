@@ -24,6 +24,54 @@ enum DebugCLI {
         check("«alla fine» resta testo", Grammar.dictationEnding("Siamo arrivati alla fine.") == (false, "Siamo arrivati alla fine."))
         check("«fine settimana» resta testo", !Grammar.dictationEnding("Ci vediamo nel fine settimana").ends)
 
+        print("Fasi del Banco (Storia 7.1):")
+        do {
+            let t = PhaseTimer()
+            func wait() { Thread.sleep(forTimeInterval: 0.03) }
+            wait(); t.mark(.session)
+            wait(); t.event(.sessionStarted)
+            wait(); t.event(.serverConnected)
+            wait(); t.event(.firstToken)
+            wait(); t.mark(.actions); wait(); t.mark(.reasoning)
+            wait(); t.mark(.actions); wait(); t.mark(.reasoning)
+            wait(); t.event(.turnFinished(turns: 3))
+            wait()
+            let (phases, total) = t.finish()
+            check("somma delle fasi = totale", abs(phases.values.reduce(0, +) - total) < 0.001)
+            check("tutte le fasi presenti", [.scan, .session, .mcp, .firstToken, .actions, .reasoning, .finalTurn, .close].allSatisfy { (phases[$0] ?? 0) > 0 })
+            check("ragionamento dopo l'ultima azione = turno finale", (phases[.finalTurn] ?? 0) > 0.02 && (phases[.reasoning] ?? 0) > (phases[.finalTurn] ?? 0))
+            check("turni dal Motore", t.turns == 3)
+            check("finish due volte non cambia", t.finish().phases == phases)
+            let e = PhaseTimer()
+            wait(); e.mark(.session); e.event(.sessionStarted); wait()
+            let (ep, et) = e.finish() // error before the first token: no final turn, the sum still holds
+            check("errore a metà: somma = totale", abs(ep.values.reduce(0, +) - et) < 0.001 && ep[.finalTurn] == nil)
+        }
+        print("Compiti del Banco:")
+        do {
+            let tasks = parseBench("""
+            a\tposta.html\tbreve\tapri\t+aperta: X;-chiusa
+            b\tapp:Finder:banco\tbreve\trinomina\t+file:finale.txt;-file:bozza.txt
+            c\tapp:Calendar\tmedio\tevento\t+evento:Banco riunione
+            d\twebmail:#inbox\tosserva\tcerca\t+url:search
+            e\tfrase:posta.html\tbreve\tehm\t
+            """)
+            check("cinque compiti letti", tasks.count == 5)
+            if tasks.count == 5 {
+                check("pagina come prima", tasks[0].kind == .page("posta.html") && tasks[0].checks == [BenchCheck(mustContain: true, target: .title, text: "aperta: X"), BenchCheck(mustContain: false, target: .title, text: "chiusa")])
+                check("Finder sulla cartella", tasks[1].kind == .app(name: "Finder", folder: true) && tasks[1].checks.map(\.target) == [.file, .file] && !tasks[1].checks[1].mustContain)
+                check("evento", tasks[2].kind == .app(name: "Calendar", folder: false) && tasks[2].checks.first?.target == .event)
+                check("webmail", tasks[3].kind == .webmail("#inbox") && tasks[3].kind.isReal && tasks[3].checks.first?.target == .url)
+                check("frase spuria senza verifiche", tasks[4].kind == .phrase(page: "posta.html") && tasks[4].checks.isEmpty && !tasks[4].kind.isReal)
+            }
+            let all = loadBench("Tests/bench/agente.tsv")
+            let native = all.filter { if case .app = $0.kind { return true } else { return false } }
+            check("≥ 5 compiti su Mail, Calendario e Finder", native.count >= 5)
+            check("≥ 2 compiti webmail", all.filter { if case .webmail = $0.kind { return true } else { return false } }.count >= 2)
+            check("≥ 5 Frasi spurie", all.filter { if case .phrase = $0.kind { return true } else { return false } }.count >= 5)
+            check("pagina con canvas", all.contains { $0.page == "lavagna.html" })
+        }
+
         print("Grammatica:")
         check("giù", Grammar.parse("Giù.") == .scroll(direction: "down", amount: 1))
         check("scorri giù per favore", Grammar.parse("Scorri giù, per favore.") == .scroll(direction: "down", amount: 1))
@@ -791,20 +839,21 @@ extension DebugCLI {
 extension DebugCLI {
     struct BenchTask {
         let id, page, level, request: String
-        let checks: [(mustContain: Bool, text: String)]
+        let checks: [BenchCheck]
+        var kind: BenchKind { BenchKind(page) }
     }
 
     static func loadBench(_ path: String) -> [BenchTask] {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
-        return text.split(separator: "\n").compactMap { line in
+        return parseBench(text)
+    }
+
+    static func parseBench(_ text: String) -> [BenchTask] {
+        text.split(separator: "\n").compactMap { line in
             guard !line.hasPrefix("#") else { return nil }
             let f = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
             guard f.count >= 5 else { return nil }
-            let checks = f[4].split(separator: ";").map { c -> (Bool, String) in
-                let s = c.trimmingCharacters(in: .whitespaces)
-                return (!s.hasPrefix("-"), String(s.dropFirst()))
-            }
-            return BenchTask(id: f[0], page: f[1], level: f[2], request: f[3], checks: checks)
+            return BenchTask(id: f[0], page: f[1], level: f[2], request: f[3], checks: BenchCheck.parse(f[4]))
         }
     }
 
@@ -965,8 +1014,8 @@ extension DebugCLI {
     }
 
     /// `--agent-bench [file] --engine claude|codex|local [--only id,id] [--server URL --model NAME]`:
-    /// runs every task on a local page in Safari with one engine and checks the page state.
-    /// It acts on the screen: run it only when the Mac is idle.
+    /// runs every task with one engine and checks the state it leaves (page, files, events, URL).
+    /// Each request is split into phases (FR-41). It acts on the screen: run it only when the Mac is idle.
     static func agentBench(path: String, engine: EngineID, only: Set<String>, server: (url: String, model: String)?,
                            mode: LocalEngine.Mode? = nil) async {
         let tasks = loadBench(path).filter { only.isEmpty || only.contains($0.id) }
@@ -980,9 +1029,12 @@ extension DebugCLI {
             local.override = LocalEngine.Override(provider: server == nil ? .apple : .server, url: server?.url ?? "",
                                                   model: server?.model ?? "", mode: mode)
         }
+        // «sì» on the Bench pages; «no» on real apps and accounts, where a «sì» would really send.
+        let sayYes = Box(true)
         agent.tools.askUser = { q, confirmation in
-            print("      ? \(q) → \(confirmation ? "sì (banco)" : "nessuna risposta")")
-            return confirmation ? "sì" : nil
+            let yes = confirmation && sayYes.value
+            print("      ? \(q) → \(confirmation ? (yes ? "sì (banco)" : "no (app vera)") : "nessuna risposta")")
+            return confirmation ? (yes ? "sì" : "no") : nil
         }
         do { try await agent.start() } catch { print("Server strumenti: \(error)"); return }
         await closeBenchPages(ex)
@@ -990,11 +1042,23 @@ extension DebugCLI {
         try? await Task.sleep(for: .seconds(2))
         print("Banco di prova · motore \(engine.rawValue)\(engine == .local ? " (\((mode ?? LocalEngine.defaultMode).rawValue))" : "") · \(tasks.count) compiti · \(agent.availability(of: engine))")
 
-        struct Row { let task: BenchTask; let ok: Bool; let steps: Int; let first: Double?; let total: Double; let model: String; let note: String }
+        let validator = LocalActionValidator { spoken in
+            ex.findApp(spoken).map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
+        }
+        let onDevice = OnDeviceClassifier.isAvailable
+        let classifier: IntentClassifier = onDevice ? OnDeviceClassifier(timeout: .milliseconds(Int(AppSettings.shared.classifierTimeout * 1000))) : RuleClassifier()
+        let router = IntentRouter(classifier: classifier, proposer: LocalActionProposer.isAvailable ? LocalActionProposer() : nil, validator: validator)
+        router.macroLookup = { _ in nil }
+
+        struct Row {
+            let task: BenchTask; let ok: Bool; let skipped: String?; let steps: Int; let first: Double?; let total: Double
+            let model: String; let note: String; let phases: [BenchPhase: Double]; let turns: Int?; let confirmations: Int; let blocked: Int
+            var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) - total) <= 0.2 }
+        }
         var rows: [Row] = []
         let base = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("pages")
-        for task in tasks {
-            let url = base.appendingPathComponent(task.page)
+
+        func openInSafari(_ url: URL) async {
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
             _ = try? await NSWorkspace.shared.open([url], withApplicationAt: safari, configuration: config)
@@ -1003,29 +1067,87 @@ extension DebugCLI {
                 await ex.bringToFront(app)
             }
             try? await Task.sleep(for: .seconds(0.5))
+        }
+
+        for task in tasks {
+            let kind = task.kind
+            func skip(_ why: String) {
+                print("— \(task.id): saltato (\(why))")
+                rows.append(Row(task: task, ok: false, skipped: why, steps: 0, first: nil, total: 0, model: "", note: "",
+                                phases: [:], turns: nil, confirmations: 0, blocked: 0))
+            }
+            if case .webmail = kind, BenchFixtures.webmailPersonal, task.level != "osserva" {
+                skip("account personale: solo compiti di osservazione"); continue
+            }
+            if let why = await BenchFixtures.setUp(kind, checks: task.checks) { skip(why); continue }
+            sayYes.value = !kind.isReal
+            switch kind {
+            case .page(let page), .phrase(let page):
+                await openInSafari(base.appendingPathComponent(page))
+            case .webmail(let suffix):
+                if let root = BenchFixtures.webmailURL, let url = URL(string: root + suffix) { await openInSafari(url) }
+            case .app:
+                break
+            }
             let ctx = ScreenContext.capture(includeLabels: false)
-            guard ctx.bundleID == "com.apple.Safari", ctx.windowTitle.hasPrefix("Banco") else {
+            if case .page = kind, !(ctx.bundleID == "com.apple.Safari" && ctx.windowTitle.hasPrefix("Banco")) {
                 print("✗ \(task.id): pagina non in primo piano (\(ctx.appName) · \(ctx.windowTitle))")
-                rows.append(Row(task: task, ok: false, steps: 0, first: nil, total: 0, model: "", note: "pagina non aperta"))
+                rows.append(Row(task: task, ok: false, skipped: nil, steps: 0, first: nil, total: 0, model: "", note: "pagina non aperta",
+                                phases: [:], turns: nil, confirmations: 0, blocked: 0))
+                await BenchFixtures.tearDown(kind, checks: task.checks)
                 continue
             }
             let started = Date()
             var note = ""
-            do {
-                note = try await agent.run(task.request, context: ctx, deep: task.level == "medio")
-            } catch {
-                note = "errore: \(error.localizedDescription)"
+            var ranAgent = true
+            var phraseOK = true
+            if case .phrase = kind {
+                // A misheard sentence goes through the Router like in the app: only an agent decision reaches the agent.
+                let decision = await router.decide(task.request, editable: { false }, state: RouterState())
+                switch decision {
+                case .agent(let text, let deep, _):
+                    do { note = try await agent.run(text, context: ctx, deep: deep) } catch { note = "errore: \(error.localizedDescription)" }
+                case .ignore, .askToType:
+                    ranAgent = false
+                    note = "router: \(String(describing: decision).prefix(60))"
+                default:
+                    ranAgent = false
+                    phraseOK = false
+                    note = "router agisce: \(String(describing: decision).prefix(60))"
+                }
+            } else {
+                do {
+                    note = try await agent.run(task.request, context: ctx, deep: task.level == "medio")
+                } catch {
+                    note = "errore: \(error.localizedDescription)"
+                }
             }
             let total = Date().timeIntervalSince(started)
             try? await Task.sleep(for: .seconds(1.2))
             let title = ScreenContext.capture(includeLabels: false).windowTitle
-            let ok = task.checks.allSatisfy { $0.mustContain == title.contains($0.text) }
+            let ok: Bool
+            if case .phrase = kind {
+                ok = phraseOK && (!ranAgent || agent.tools.effectfulCalls == 0)
+            } else {
+                ok = BenchFixtures.passes(task.checks, title: title, url: BenchFixtures.frontURL())
+            }
             // Time to the first action: the local engine observes on its own before the model speaks.
-            let first = (agent.tools.firstEffectAt ?? agent.tools.firstCallAt).map { $0.timeIntervalSince(started) }
-            rows.append(Row(task: task, ok: ok, steps: agent.tools.callCount, first: first, total: total, model: agent.lastModel, note: note))
-            print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, agent.tools.callCount,
+            let first = ranAgent ? (agent.tools.firstEffectAt ?? agent.tools.firstCallAt).map { $0.timeIntervalSince(started) } : nil
+            // On the personal account only the times go to the table, never what the agent read.
+            if case .webmail = kind, BenchFixtures.webmailPersonal { note = "" }
+            let row = Row(task: task, ok: ok, skipped: nil, steps: ranAgent ? agent.tools.callCount : 0, first: first, total: total,
+                          model: ranAgent ? agent.lastModel : "", note: note, phases: ranAgent ? agent.lastPhases : [:],
+                          turns: ranAgent ? agent.lastTurns : nil, confirmations: ranAgent ? agent.tools.confirmationsAsked : 0,
+                          blocked: ranAgent ? agent.tools.blockedCalls : 0)
+            rows.append(row)
+            print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, row.steps,
                          first.map { String(format: "%4.1f s", $0) } ?? "  — ", total, String(note.prefix(70))))
-            if !ok { print("      titolo: \(title.prefix(160))") }
+            if !row.phases.isEmpty {
+                let parts = BenchPhase.allCases.compactMap { p in row.phases[p].map { String(format: "%@ %.1f", p.rawValue, $0) } }
+                print("      fasi: \(parts.joined(separator: " · "))\(row.sumOK ? "" : " ⚠︎ somma ≠ totale") · turni \(row.turns.map(String.init) ?? "—") · conferme \(row.confirmations) · bloccate \(row.blocked)")
+            }
+            if !ok, case .phrase = kind {} else if !ok { print("      titolo: \(title.prefix(160))") }
+            await BenchFixtures.tearDown(kind, checks: task.checks)
             await closeBenchPages(ex)
         }
         agent.shutdown()
@@ -1033,25 +1155,36 @@ extension DebugCLI {
 
         func median(_ v: [Double]) -> Double { let s = v.sorted(); return s.isEmpty ? 0 : s[s.count / 2] }
         func p90(_ v: [Double]) -> Double { let s = v.sorted(); return s.isEmpty ? 0 : s[min(s.count - 1, Int(Double(s.count) * 0.9))] }
-        let firsts = rows.compactMap(\.first)
-        let totals = rows.map(\.total)
-        print("\nRisultato (\(engine.rawValue)\(rows.first.map { "/" + $0.model } ?? "")):")
-        for level in ["breve", "medio"] {
-            let r = rows.filter { $0.task.level == level }
+        let ran = rows.filter { $0.skipped == nil }
+        let firsts = ran.compactMap(\.first)
+        let totals = ran.map(\.total)
+        print("\nRisultato (\(engine.rawValue)\(ran.first(where: { !$0.model.isEmpty }).map { "/" + $0.model } ?? "")):")
+        for level in ["breve", "medio", "osserva"] {
+            let r = ran.filter { $0.task.level == level }
             guard !r.isEmpty else { continue }
             print(String(format: "  %@: %d/%d riusciti", level, r.filter(\.ok).count, r.count))
         }
-        print(String(format: "  totale: %d/%d (%.0f%%) · passi medi %.1f · primo strumento mediana %.1f s, 90° %.1f s · tempo mediana %.1f s, 90° %.1f s",
-                     rows.filter(\.ok).count, rows.count, Double(rows.filter(\.ok).count) / Double(rows.count) * 100,
-                     Double(rows.map(\.steps).reduce(0, +)) / Double(rows.count), median(firsts), p90(firsts), median(totals), p90(totals)))
+        let skipped = rows.count - ran.count
+        print(String(format: "  totale: %d/%d (%.0f%%)%@ · passi medi %.1f · primo strumento mediana %.1f s, 90° %.1f s · tempo mediana %.1f s, 90° %.1f s",
+                     ran.filter(\.ok).count, ran.count, ran.isEmpty ? 0 : Double(ran.filter(\.ok).count) / Double(ran.count) * 100,
+                     skipped > 0 ? " · \(skipped) saltati" : "",
+                     ran.isEmpty ? 0 : Double(ran.map(\.steps).reduce(0, +)) / Double(ran.count), median(firsts), p90(firsts), median(totals), p90(totals)))
+        let withPhases = ran.filter { !$0.phases.isEmpty }
+        let phaseMedians = BenchPhase.allCases.map { p in (p, median(withPhases.map { $0.phases[p] ?? 0 })) }
+        print("  fasi (mediane): " + phaseMedians.map { String(format: "%@ %.2f s", $0.0.rawValue, $0.1) }.joined(separator: " · "))
+        print("  somma delle fasi = totale entro 0,2 s: \(ran.allSatisfy(\.sumOK) ? "sì, su ogni compito" : "NO su \(ran.filter { !$0.sumOK }.map(\.task.id).joined(separator: ", "))")")
 
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd-HHmm"
         let out = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
-        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\tmodello\trisposta\n"
+        let phaseHeader = BenchPhase.allCases.map { "\($0.rawValue)_s" }.joined(separator: "\t")
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\tsomma_ok\tturni\tconferme\tbloccate\tmodello\trisposta\n"
         for r in rows {
-            tsv += "\(r.task.id)\t\(r.task.level)\t\(r.ok ? "ok" : "no")\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(r.model)\t\(r.note.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " "))\n"
+            let esito = r.skipped != nil ? "saltato" : (r.ok ? "ok" : "no")
+            let phases = BenchPhase.allCases.map { p in r.phases[p].map { String(format: "%.2f", $0) } ?? "" }.joined(separator: "\t")
+            let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(r.sumOK ? "sì" : "no")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")
