@@ -131,6 +131,10 @@ final class AppSettings: ObservableObject {
         /// Long session of Claude (FR-42): one process kept open between requests.
         static let longSession = true
         static let sessionMaxRequests = 8
+        /// Instant level (FR-43): one-step commands with a known target.
+        static let instantLevel = true
+        static let instantModel = "claude-haiku-5-5"
+        static let instantEffort = "low"
         static let confirmValiditySeconds = 45.0
         static let cleanDictation = false
         // Engines (Epic 4-5)
@@ -220,6 +224,9 @@ final class AppSettings: ObservableObject {
     @Published var agentTimeout: Double { didSet { defaults.set(agentTimeout, forKey: "agentTimeout") } }
     @Published var longSession: Bool { didSet { defaults.set(longSession, forKey: "longSession") } }
     @Published var sessionMaxRequests: Int { didSet { defaults.set(sessionMaxRequests, forKey: "sessionMaxRequests") } }
+    @Published var instantLevel: Bool { didSet { defaults.set(instantLevel, forKey: "instantLevel") } }
+    @Published var instantModel: String { didSet { defaults.set(instantModel, forKey: "instantModel") } }
+    @Published var instantEffort: String { didSet { defaults.set(instantEffort, forKey: "instantEffort") } }
     @Published var confirmValiditySeconds: Double { didSet { defaults.set(confirmValiditySeconds, forKey: "confirmValiditySeconds") } }
     @Published var cleanDictation: Bool { didSet { defaults.set(cleanDictation, forKey: "cleanDictation") } }
 
@@ -346,6 +353,9 @@ final class AppSettings: ObservableObject {
         agentTimeout = double("agentTimeout", Defaults.agentTimeout)
         longSession = bool("longSession", Defaults.longSession)
         sessionMaxRequests = d.object(forKey: "sessionMaxRequests") as? Int ?? Defaults.sessionMaxRequests
+        instantLevel = bool("instantLevel", Defaults.instantLevel)
+        instantModel = d.string(forKey: "instantModel") ?? Defaults.instantModel
+        instantEffort = d.string(forKey: "instantEffort") ?? Defaults.instantEffort
         confirmValiditySeconds = double("confirmValiditySeconds", Defaults.confirmValiditySeconds)
         cleanDictation = bool("cleanDictation", Defaults.cleanDictation)
 
@@ -414,6 +424,7 @@ final class AppSettings: ObservableObject {
             agentMaxSteps = Defaults.agentMaxSteps; agentMaxTurns = Defaults.agentMaxTurns
             agentTimeout = Defaults.agentTimeout; confirmValiditySeconds = Defaults.confirmValiditySeconds
             longSession = Defaults.longSession; sessionMaxRequests = Defaults.sessionMaxRequests
+            instantLevel = Defaults.instantLevel; instantModel = Defaults.instantModel; instantEffort = Defaults.instantEffort
             cleanDictation = Defaults.cleanDictation
             agentEngine = Defaults.agentEngine; engineFallback = Defaults.engineFallback
             codexPath = Defaults.codexPath; codexModel = Defaults.codexModel; codexFastModel = Defaults.codexFastModel

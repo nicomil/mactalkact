@@ -11,6 +11,7 @@ final class ClaudeEngine: AgentEngine {
     private let toolAccess: () -> AgentToolAccess?
     private let cliDeep = ClaudeCLI()
     private let cliFast = ClaudeCLI()
+    private let cliInstant = ClaudeCLI()
     private let pause = EnginePause()
 
     private(set) var availability: AgentAvailability = .available
@@ -50,24 +51,39 @@ final class ClaudeEngine: AgentEngine {
     }
 
     func model(for level: AgentLevel) -> String {
-        level == .deep || !settings.useFastModel ? settings.model : settings.fastModel
+        switch effective(level) {
+        case .instant: return settings.instantModel
+        case .fast: return settings.fastModel
+        case .deep: return settings.model
+        }
     }
 
-    private func useDeep(_ level: AgentLevel) -> Bool { level == .deep || !settings.useFastModel }
+    /// The level actually used: the Instant level only when switched on, the fast one only when used.
+    private func effective(_ level: AgentLevel) -> AgentLevel {
+        if level == .instant, settings.instantLevel { return .instant }
+        return level == .deep || !settings.useFastModel ? .deep : .fast
+    }
 
     /// The spawn may happen on a background queue: capture the path setting now.
     private func refreshExecutable() {
         let custom = settings.claudePath
         cliDeep.executablePath = { ClaudeCLI.locate(custom: custom) }
         cliFast.executablePath = { ClaudeCLI.locate(custom: custom) }
+        cliInstant.executablePath = { ClaudeCLI.locate(custom: custom) }
     }
 
-    private func config(deep: Bool) -> ClaudeCLI.Config? {
+    private func config(_ level: AgentLevel) -> ClaudeCLI.Config? {
         guard let access = toolAccess() else { return nil }
+        let effort: String
+        switch level {
+        case .instant: effort = settings.instantEffort
+        case .fast: effort = settings.fastEffort
+        case .deep: effort = settings.deepEffort
+        }
         return ClaudeCLI.Config(
-            model: deep ? settings.model : settings.fastModel,
+            model: model(for: level),
             systemPrompt: AgentRunner.systemPrompt,
-            effort: deep ? settings.deepEffort : settings.fastEffort,
+            effort: effort,
             extraArgs: [
                 "--mcp-config", access.mcpConfigJSON,
                 "--permission-mode", "dontAsk",
@@ -79,7 +95,13 @@ final class ClaudeEngine: AgentEngine {
         )
     }
 
-    private func cli(deep: Bool) -> ClaudeCLI { deep ? cliDeep : cliFast }
+    private func cli(_ level: AgentLevel) -> ClaudeCLI {
+        switch level {
+        case .instant: return cliInstant
+        case .fast: return cliFast
+        case .deep: return cliDeep
+        }
+    }
 
     /// Keeps `claude` processes ready, already connected to the tools.
     func prewarm() {
@@ -89,8 +111,8 @@ final class ClaudeEngine: AgentEngine {
         // The Long session starts with the first request, never in advance (AD-6).
         if usesSession { return }
         var pairs: [(ClaudeCLI, ClaudeCLI.Config)] = []
-        if let c = config(deep: true) { pairs.append((cliDeep, c)) }
-        if settings.useFastModel, let c = config(deep: false) { pairs.append((cliFast, c)) }
+        if let c = config(.deep) { pairs.append((cliDeep, c)) }
+        if settings.useFastModel, let c = config(.fast) { pairs.append((cliFast, c)) }
         for (cli, c) in pairs {
             DispatchQueue.global(qos: .utility).async { cli.prewarm(c) }
         }
@@ -129,6 +151,7 @@ final class ClaudeEngine: AgentEngine {
     func endSessions(reason: String) {
         cliDeep.endSession(reason: reason)
         cliFast.endSession(reason: reason)
+        cliInstant.endSession(reason: reason)
     }
 
     /// The Long session is retried once only when a live session died before any action (FR-28):
@@ -138,15 +161,15 @@ final class ClaudeEngine: AgentEngine {
     }
 
     func run(_ request: AgentRequest) async throws -> String {
-        let deep = useDeep(request.level)
-        guard let config = config(deep: deep) else { throw AgentEngineError.failed("server strumenti non avviato") }
+        let level = effective(request.level)
+        guard let config = config(level) else { throw AgentEngineError.failed("server strumenti non avviato") }
         refreshExecutable()
         if longSessionWatch == nil {
             longSessionWatch = settings.$longSession.dropFirst().sink { [weak self] on in
                 if !on { self?.endSessions(reason: "Sessione lunga spenta") }
             }
         }
-        let cli = cli(deep: deep)
+        let cli = cli(level)
         var inSession = usesSession
         while true {
             do {
@@ -233,9 +256,17 @@ final class ClaudeEngine: AgentEngine {
             || l.contains("econnrefused") || l.contains("timed out") || l.contains("offline")
     }
 
+    /// Ends the turn but keeps the Long session (scalata from the Instant level).
+    func interrupt() {
+        cliInstant.interruptCurrent()
+        cliFast.interruptCurrent()
+        cliDeep.interruptCurrent()
+    }
+
     func cancel() {
         cliDeep.cancelCurrent()
         cliFast.cancelCurrent()
+        cliInstant.cancelCurrent()
     }
 
     func shutdown() {
@@ -243,5 +274,6 @@ final class ClaudeEngine: AgentEngine {
         endSessions(reason: "app chiusa")
         cliDeep.shutdown()
         cliFast.shutdown()
+        cliInstant.shutdown()
     }
 }

@@ -78,6 +78,25 @@ enum DebugCLI {
             log.clear()
             check("dimentica: generazione nuova", log.generation == g0 + 1 && log.entries.isEmpty)
         }
+        print("Livello istantaneo (Storia 7.3):")
+        do {
+            check("«clicca Salva»: un passo", RouteHeuristics.isOneStep("clicca Salva"))
+            check("«apri la mail di Laura»: un passo", RouteHeuristics.isOneStep("apri la mail di Laura"))
+            check("«rispondi a Marco»: più passi", !RouteHeuristics.isOneStep("rispondi a Marco"))
+            check("«apri la mail e rispondi a Marco»: più passi", !RouteHeuristics.isOneStep("apri la mail e rispondi a Marco"))
+            check("«clicca Salva, poi Invia»: più passi", !RouteHeuristics.isOneStep("clicca Salva, poi Invia"))
+            check("frase lunga: più passi", !RouteHeuristics.isOneStep("clicca il pulsante grande in alto a destra vicino al logo"))
+            let labels = ["Salva", "Invia", "Preventivo cucina"]
+            check("bersaglio visibile", RouteHeuristics.hasKnownTarget("clicca Salva", knownApp: { _ in false }, labels: labels, memory: []))
+            check("bersaglio di più parole", RouteHeuristics.hasKnownTarget("apri preventivo", knownApp: { _ in false }, labels: labels, memory: []))
+            check("app installata", RouteHeuristics.hasKnownTarget("chiudi spotify", knownApp: { $0 == "spotify" }, labels: [], memory: []))
+            check("dalla conversazione", RouteHeuristics.hasKnownTarget("riapri quella di Laura", knownApp: { _ in false }, labels: [], memory: ["apri la mail di Laura"]))
+            check("bersaglio ignoto", !RouteHeuristics.hasKnownTarget("clicca Pippo", knownApp: { _ in false }, labels: labels, memory: []))
+            check("solo parole vuote: ignoto", !RouteHeuristics.hasKnownTarget("clicca il pulsante", knownApp: { _ in false }, labels: ["Pulsante"], memory: []))
+            check("esito con errore → scalata", AgentTools.instantFailure(.error("No element 9")) != nil)
+            check("nothing changed → scalata", AgentTools.instantFailure(.text("Clicked.\nRESULT: nothing changed")) == "nessun effetto")
+            check("esito con cambiamento → resta", AgentTools.instantFailure(.text("Clicked.\nRESULT: title changed")) == nil)
+        }
         print("Eventi dei Motori per le fasi:")
         do {
             check("Claude: init con server → MCP connesso", ClaudeCLI.phase(of: ["type": "system", "subtype": "init", "mcp_servers": [["name": "mactalk", "status": "connected"]]]) == .serverConnected)
@@ -624,11 +643,18 @@ extension DebugCLI {
             case "conferma": state.pendingConfirmation = true
             case "numeri": state.numbersVisible = true
             case "pausa": state.agentAvailability = .paused(until: Date().addingTimeInterval(3600))
+            case "schermo":
+                // Push-to-talk with the Instant level on and a few elements on screen (Story 7.3).
+                state.listening = .pushToTalk; state.pushToTalk = true
+                state.instantLevel = true
+                let labels = ["Salva", "Invia", "Preventivo cucina", "Nuova nota", "Archivia"]
+                state.knownTarget = { t in RouteHeuristics.hasKnownTarget(t, knownApp: { w in apps.contains { Grammar.normalize($0) == w } },
+                                                                         labels: labels, memory: []) }
             default: break
             }
             if !onDevice {
                 // Without the model the router is prudent: asking is fine wherever it would type or call the agent.
-                if !expected.isDisjoint(with: ["scrivi", "agente", "locale"]) { expected.insert("chiedi") }
+                if !expected.isDisjoint(with: ["scrivi", "agente", "locale", "istantaneo"]) { expected.insert("chiedi") }
                 if expected.contains("locale") { expected.insert("agente") }
             }
             let started = Date()
@@ -817,6 +843,10 @@ final class FakeEngine: AgentEngine {
     private let fails: Bool
     /// Reports phase events and calls one read-only tool, like a real engine (Bench test).
     var phased = false
+    /// At the Instant level, calls two tools (the second one escalates); at other levels answers at once.
+    var twoCallsWhenInstant = false
+    private(set) var levels: [AgentLevel] = []
+    private(set) var interrupts = 0
     private(set) var runs = 0
 
     init(_ id: EngineID, tools: AgentTools, effectsBeforeFailure: Int = 0, fails: Bool) {
@@ -830,10 +860,20 @@ final class FakeEngine: AgentEngine {
     func refreshAvailability() {}
     func prewarm() {}
     func cancel() {}
+    func interrupt() { interrupts += 1 }
     func shutdown() {}
 
     func run(_ request: AgentRequest) async throws -> String {
         runs += 1
+        levels.append(request.level)
+        if twoCallsWhenInstant {
+            guard request.level == .instant else {
+                return request.message.contains("<already_done>") ? "fatto rapido con il già fatto" : "fatto rapido"
+            }
+            _ = await tools.call("menu", ["path": ""])
+            _ = await tools.call("menu", ["path": ""])
+            return "ok"
+        }
         if phased {
             func pause() async { try? await Task.sleep(for: .milliseconds(40)) }
             await pause(); onPhase?(.sessionStarted)
@@ -962,6 +1002,32 @@ extension DebugCLI {
                   && !ClaudeEngine.retriesDeadSession(reused: false, effectfulCalls: 0, cancelled: false)
                   && !ClaudeEngine.retriesDeadSession(reused: true, effectfulCalls: 0, cancelled: true))
             cli.shutdown()
+        }
+
+        print("Livello istantaneo e scalata (Storia 7.3):")
+        do {
+            let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+            try? await agent.start()
+            let claude = FakeEngine(.claude, tools: agent.tools, fails: false)
+            claude.twoCallsWhenInstant = true
+            agent.register(claude)
+            agent.overrideChoice = (.claude, false)
+            let answer = try? await agent.run("clicca Salva", context: ScreenContext(), deep: false, instant: true)
+            check("seconda chiamata → scalata al rapido", claude.levels == [.instant, .fast] && agent.lastEscalation?.hasPrefix("seconda chiamata") == true)
+            check("turno interrotto, non annullato", claude.interrupts == 1 && !agent.tools.cancelled)
+            check("il rapido riceve il già fatto", answer == "fatto rapido con il già fatto")
+            check("nessuna ripetizione: una sola chiamata eseguita", agent.tools.callCount == 1)
+            agent.shutdown()
+
+            let agent2 = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+            try? await agent2.start()
+            let codex = FakeEngine(.codex, tools: agent2.tools, fails: false)
+            codex.twoCallsWhenInstant = true
+            agent2.register(codex)
+            agent2.overrideChoice = (.codex, false)
+            _ = try? await agent2.run("clicca Salva", context: ScreenContext(), deep: false, instant: true)
+            check("Codex: niente istantaneo, livello rapido", codex.levels == [.fast] && agent2.lastEscalation == nil)
+            agent2.shutdown()
         }
 
         print("Conferme e azioni bloccate (Storia 7.1):")
@@ -1256,6 +1322,9 @@ extension DebugCLI {
             let model: String; let note: String; let phases: [BenchPhase: Double]; let turns: Int?; let confirmations: Int; let blocked: Int
             /// Time of the Router's decision (Frasi spurie only): before the agent, outside its phases.
             var router: Double = 0
+            /// Level of the first attempt and the reason of a scalata (Story 7.3).
+            var level = ""
+            var escalation = ""
             var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) + router - total) <= 0.2 }
         }
         var rows: [Row] = []
@@ -1325,8 +1394,8 @@ extension DebugCLI {
                 let decision = await router.decide(task.request, editable: { false }, state: state)
                 routerTime = Date().timeIntervalSince(started)
                 switch decision {
-                case .agent(let text, let deep, _):
-                    do { note = try await agent.run(text, context: ctx, deep: deep) } catch { note = "errore: \(error.localizedDescription)" }
+                case .agent(let text, let level, _):
+                    do { note = try await agent.run(text, context: ctx, deep: level == .deep, instant: level == .instant) } catch { note = "errore: \(error.localizedDescription)" }
                 case .ignore, .askToType:
                     ranAgent = false
                     note = "router: \(String(describing: decision).prefix(60))"
@@ -1336,8 +1405,13 @@ extension DebugCLI {
                     note = "router agisce: \(String(describing: decision).prefix(60))"
                 }
             } else {
+                // Like the Router: one step on a known target goes to the Instant level (Story 7.3).
+                let deep = task.level == "medio"
+                let labels = ScreenContext.capture(includeLabels: true).visibleLabels
+                let instant = AppSettings.shared.instantLevel && engine == .claude && RouteHeuristics.isOneStep(task.request)
+                    && RouteHeuristics.hasKnownTarget(task.request, knownApp: { ex.findApp($0) != nil }, labels: labels, memory: [])
                 do {
-                    note = try await agent.run(task.request, context: ctx, deep: task.level == "medio")
+                    note = try await agent.run(task.request, context: ctx, deep: deep, instant: instant)
                 } catch {
                     note = "errore: \(error.localizedDescription)"
                 }
@@ -1360,11 +1434,16 @@ extension DebugCLI {
                           turns: ranAgent ? agent.lastTurns : nil, confirmations: ranAgent ? agent.tools.confirmationsAsked : 0,
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
             row.router = routerTime
+            if ranAgent {
+                row.level = agent.lastEscalation != nil ? "istantaneo" : (agent.lastLevel?.rawValue ?? "")
+                row.escalation = agent.lastEscalation ?? ""
+            }
             rows.append(row)
             print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, row.steps,
                          first.map { String(format: "%4.1f s", $0) } ?? "  — ", total, String(note.prefix(70))))
             if !row.phases.isEmpty {
                 let parts = BenchPhase.allCases.compactMap { p in row.phases[p].map { String(format: "%@ %.1f", p.rawValue, $0) } }
+                if !row.level.isEmpty { print("      livello: \(row.level)\(row.escalation.isEmpty ? "" : " → rapido (\(row.escalation))")") }
                 print("      fasi: \(routerTime > 0 ? String(format: "router %.1f · ", routerTime) : "")\(parts.joined(separator: " · "))\(row.sumOK ? "" : " ⚠︎ somma ≠ totale") · turni \(row.turns.map(String.init) ?? "—") · conferme \(row.confirmations) · bloccate \(row.blocked)")
             }
             if !ok, !quiet.value, task.kind.isPhrase == false { print("      titolo: \(title.prefix(160))") }
@@ -1393,6 +1472,13 @@ extension DebugCLI {
         let withPhases = ran.filter { !$0.phases.isEmpty }
         let phaseMedians = BenchPhase.allCases.map { p in (p, median(withPhases.map { $0.phases[p] ?? 0 })) }
         print("  fasi (mediane): " + phaseMedians.map { String(format: "%@ %.2f s", $0.0.rawValue, $0.1) }.joined(separator: " · "))
+        let instantRows = ran.filter { $0.level == "instant" || $0.level == "istantaneo" }
+        if !instantRows.isEmpty {
+            let clean = instantRows.filter { $0.escalation.isEmpty }
+            print(String(format: "  livello istantaneo: %d compiti, %d senza scalata (%.0f%%), riusciti %d · tempo mediana %.1f s",
+                         instantRows.count, clean.count, Double(clean.count) / Double(instantRows.count) * 100,
+                         instantRows.filter(\.ok).count, median(instantRows.map(\.total))))
+        }
         print("  somma delle fasi = totale entro 0,2 s: \(ran.allSatisfy(\.sumOK) ? "sì, su ogni compito" : "NO su \(ran.filter { !$0.sumOK }.map(\.task.id).joined(separator: ", "))")")
 
         let f = DateFormatter()
@@ -1400,12 +1486,12 @@ extension DebugCLI {
         let out = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
         let phaseHeader = BenchPhase.allCases.map { "\($0.rawValue)_s" }.joined(separator: "\t")
-        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tturni\tconferme\tbloccate\tmodello\trisposta\n"
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tlivello_usato\tscalata\tturni\tconferme\tbloccate\tmodello\trisposta\n"
         for r in rows {
             let esito = r.skipped != nil ? "saltato" : (r.ok ? "ok" : "no")
             let phases = BenchPhase.allCases.map { p in r.phases[p].map { String(format: "%.2f", $0) } ?? "" }.joined(separator: "\t")
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")

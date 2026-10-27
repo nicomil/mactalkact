@@ -182,6 +182,18 @@ final class Coordinator {
         s.agentAvailability = settings.backend == .subscription ? agent.availability : .available
         s.localLane = settings.useLocalLane
         s.localLaneMaxWords = settings.localLaneMaxWords
+        // Instant level (FR-43): only when Claude would answer, and only for a target the app knows.
+        s.instantLevel = settings.instantLevel && settings.backend == .subscription
+            && agent.currentChoice()?.engine == .claude && PrivacyGuard.cloudBlockReason() == nil
+        if s.instantLevel {
+            let executor = self.executor
+            let memory = conversation.log.entries.flatMap { [$0.request, $0.outcome] }
+            s.knownTarget = { text in
+                // The screen is read only here, when the sentence could be one step.
+                let labels = ScreenContext.capture(includeLabels: true).visibleLabels
+                return RouteHeuristics.hasKnownTarget(text, knownApp: { executor.findApp($0) != nil }, labels: labels, memory: memory)
+            }
+        }
         return s
     }
 
@@ -579,8 +591,8 @@ final class Coordinator {
             setPrivateMode(on)
         case .local(let action, let text):
             await runLocal(action, text: text, app: screen().appName)
-        case .agent(let text, let deep, _):
-            await runSmart(text, deep: deep, context: screen())
+        case .agent(let text, let level, _):
+            await runSmart(text, deep: level == .deep, instant: level == .instant, context: screen())
         case .reduced(_, let reason):
             Sound.error()
             hud.show(.info, reason.prefix(1).uppercased() + reason.dropFirst(),
@@ -829,7 +841,7 @@ final class Coordinator {
     // MARK: Lane 3: Claude
 
     /// A request for Claude: the agent (subscription) or the single-shot planner (API key).
-    private func runSmart(_ text: String, deep: Bool, context ctx: ScreenContext) async {
+    private func runSmart(_ text: String, deep: Bool, instant: Bool = false, context ctx: ScreenContext) async {
         guard agentReady else {
             fail("Non ho capito «\(text)»",
                  detail: settings.useAI ? "Nessun motore dell'agente configurato: controlla le impostazioni" : "")
@@ -838,7 +850,7 @@ final class Coordinator {
 
         // Private or reserved window: the agent with the local engine, never the API planner.
         if settings.backend == .subscription || PrivacyGuard.cloudBlockReason() != nil {
-            await runAgent(text, context: ctx, deep: deep)
+            await runAgent(text, context: ctx, deep: deep, instant: instant)
             return
         }
 
@@ -856,7 +868,7 @@ final class Coordinator {
     }
 
     /// The agent observes and acts until the request is done.
-    private func runAgent(_ text: String, context: ScreenContext, deep: Bool) async {
+    private func runAgent(_ text: String, context: ScreenContext, deep: Bool, instant: Bool = false) async {
         if agent.currentChoice() == nil {
             hud.show(.info, "Agente non disponibile",
                      detail: "\(EngineSelector.unavailableMessage(chosen: settings.agentEngine, engines: agent.engines.mapValues(\.availability))) · dettatura e comandi funzionano",
@@ -886,7 +898,7 @@ final class Coordinator {
         do {
             try await agent.start()
             let answer = try await agent.run(text, context: context, recent: conversation.log.promptBlock, deep: deep,
-                                             memory: conversation.log)
+                                             memory: conversation.log, instant: instant)
             conversation.log.add(request: text, outcome: answer.isEmpty ? "fatto" : answer, app: context.appName,
                                  changes: agent.tools.changes)
             if cancelRequested {

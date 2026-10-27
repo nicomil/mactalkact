@@ -97,6 +97,9 @@ final class AgentRunner {
     private(set) var lastPhases: [BenchPhase: Double] = [:]
     private(set) var lastTotal: Double = 0
     private(set) var lastTurns: Int?
+    /// Level used by the last attempt and the reason of a scalata, for the Bench (FR-43).
+    private(set) var lastLevel: AgentLevel?
+    private(set) var lastEscalation: String?
     /// Called when any engine changes state; the aggregate is `availability`.
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
     /// Called when one engine changes state (menu, "Codex è tornato").
@@ -270,8 +273,10 @@ final class AgentRunner {
     /// Only one request at a time (AD-6).
     /// `memory`: the conversation memory, so a Long session receives only what it has not seen (FR-42).
     func run(_ request: String, context: ScreenContext, recent: String = "", deep: Bool = true,
-             memory: ConversationLog? = nil) async throws -> String {
+             memory: ConversationLog? = nil, instant: Bool = false) async throws -> String {
         // A request refused below must not leave the previous request's phases for the Bench.
+        lastEscalation = nil
+        lastLevel = nil
         lastPhases = [:]
         lastTotal = 0
         lastTurns = nil
@@ -285,6 +290,8 @@ final class AgentRunner {
         defer {
             running = false
             tools.onCall = nil
+            tools.instantGuard = false
+            tools.onEscalate = nil
             for engine in engines.values { engine.onPhase = nil }
             let (phases, total) = timer.finish()
             lastPhases = phases
@@ -317,6 +324,8 @@ final class AgentRunner {
             req.messageSince = { [unowned self] _ in self.message(request, context: context, recent: recent, elements: elements) }
         }
         var tried: Set<EngineID> = []
+        // Instant level (FR-43): Claude only, once; after a scalata the same request goes on at `.fast`.
+        var instantPending = instant && settings.instantLevel
 
         while true {
             guard let choice = EngineSelector.select(chosen: chosenEngine, engines: engineStates,
@@ -327,13 +336,39 @@ final class AgentRunner {
             announce(choice)
             timer.mark(.session)
             engine.onPhase = { timer.event($0) }
-            let model = engine.model(for: level)
+            let attemptLevel: AgentLevel = instantPending && engine.id == .claude ? .instant : level
+            var attempt = req
+            attempt.level = attemptLevel
+            lastLevel = attemptLevel
+            tools.instantGuard = attemptLevel == .instant
+            tools.onEscalate = { [weak engine] _ in engine?.interrupt() }
+            let model = engine.model(for: attemptLevel)
             let started = Date()
             // Cloud engines get the outcome of each action (AD-19); the local engine observes on its own.
             tools.reportOutcome = engine.id != .local
             tools.cloudEngine = engine.id.isCloud
+            /// A scalata: the same engine goes on at `.fast` with what was done and the current elements.
+            func escalate(_ reason: String) {
+                Log.info("Agente: istantaneo → rapido, \(reason) (\(String(format: "%.1f", Date().timeIntervalSince(started))) s)")
+                lastEscalation = reason
+                instantPending = false
+                tools.instantGuard = false
+                tools.onEscalate = nil
+                engine.onPhase = nil
+                let done = tools.callLog.isEmpty ? "" : "\n<already_done>\nThe app already did this for the request (do not repeat an action that worked):\n"
+                    + tools.callLog.joined(separator: "\n") + "\n</already_done>"
+                let now = tools.initialObservation()
+                req.message = message(request, context: context, recent: recent, elements: now) + done
+                req.messageSince = { [unowned self] _ in self.message(request, context: context, recent: recent, elements: now) + done }
+                req.memory = MemorySnapshot(generation: -1, lastSeq: 0) // never the Instant session's memory
+            }
             do {
-                let answer = try await engine.run(req)
+                let answer = try await engine.run(attempt)
+                if attemptLevel == .instant, let reason = tools.escalation {
+                    // The model stopped after the tool said so: the request goes on at the fast level.
+                    escalate(reason)
+                    continue
+                }
                 lastEngine = engine.id
                 lastModel = model
                 // The answer describes the user's screen: in full only in the detailed log.
@@ -343,6 +378,10 @@ final class AgentRunner {
                 return answer
             } catch let error as AgentEngineError {
                 engine.onPhase = nil // a late event of this engine must not move the next attempt's phases
+                if attemptLevel == .instant, let reason = tools.escalation, !tools.cancelled {
+                    escalate(reason) // the turn was interrupted on purpose
+                    continue
+                }
                 lastEngine = engine.id
                 lastModel = model
                 Log.info(String(format: "Agente (%@/%@): %@ dopo %.1fs, %d azioni con effetti: %@", engine.id.rawValue, model,

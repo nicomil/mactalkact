@@ -167,3 +167,11 @@ Cosa mangiamo stasera?	si	seguito	ignora
 Cosa fai con la pappa?	no	seguito	ignora
 A cosa servono?	no	seguito	agente
 Perché?	no	seguito	agente
+# Storia 7.3 — Livello istantaneo (stato «schermo»: push-to-talk, istantaneo attivo, sullo schermo Salva, Invia, Preventivo cucina, Nuova nota, Archivia)
+clicca Salva	no	schermo	rapido	la grammatica lo sa già fare: resta il comando rapido
+apri il preventivo cucina	no	schermo	istantaneo	un passo su un elemento visibile di più parole
+clicca Pippo	no	schermo	rapido	grammatica (clic per etichetta), prima di ogni livello dell'agente
+apri la mail e rispondi a Marco	no	schermo	agente	più passi: niente istantaneo
+pensaci bene e clicca Salva	no	schermo	agente	«pensaci bene» chiede il livello profondo
+fammi vedere la nuova nota	no	schermo	locale|istantaneo	un passo su un elemento visibile, frase che la grammatica non conosce
+metti in archivio questa	no	schermo	agente	nessun bersaglio noto: livello rapido

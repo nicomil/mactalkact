@@ -21,6 +21,10 @@ struct RouterState {
     var agentAvailability: AgentAvailability = .available
     var localLane = true
     var localLaneMaxWords = 6
+    /// The Instant level is on and Claude is the chosen engine (FR-43).
+    var instantLevel = false
+    /// Whether the request names something known (`RouteHeuristics.hasKnownTarget` with the app's data).
+    var knownTarget: (String) -> Bool = { _ in false }
 }
 
 /// Is the agent usable right now? Owned by AgentRunner (AD-7).
@@ -62,7 +66,7 @@ enum RouteDecision {
     /// «modalità privata» (true) / «esci dalla modalità privata» (false).
     case privateMode(Bool)
     case local(LocalAction, text: String)
-    case agent(String, deep: Bool, reason: String)
+    case agent(String, level: AgentLevel, reason: String)
     case reduced(String, reason: String)
 
     /// Short label for logs and tests.
@@ -82,7 +86,7 @@ enum RouteDecision {
         case .forgetConversation: return "dimentica-conversazione"
         case .privateMode(let on): return on ? "privata-on" : "privata-off"
         case .local: return "locale"
-        case .agent: return "agente"
+        case .agent(_, let level, _): return level == .instant ? "istantaneo" : "agente"
         case .reduced: return "ridotta"
         }
     }
@@ -245,7 +249,10 @@ final class IntentRouter {
         switch state.agentAvailability {
         case .available:
             let deep = RouteHeuristics.isComplex(text)
-            return .agent(text, deep: deep, reason: "\(why) · \(deep ? "profondo" : "rapido")")
+            if state.instantLevel, !RouteHeuristics.wantsDeepThinking(text), RouteHeuristics.isOneStep(text), state.knownTarget(text) {
+                return .agent(text, level: .instant, reason: "\(why) · istantaneo (un passo, bersaglio noto)")
+            }
+            return .agent(text, level: deep ? .deep : .fast, reason: "\(why) · \(deep ? "profondo" : "rapido")")
         case .paused(let until):
             let f = DateFormatter()
             f.dateFormat = "HH:mm"

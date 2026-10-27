@@ -165,6 +165,20 @@ final class ClaudeCLI: @unchecked Sendable {
         lock.withLock { current }?.terminate()
     }
 
+    /// Ends the turn in progress but keeps a Long session alive (scalata, FR-43): the CLI answers
+    /// with a `result` of `error_during_execution`. Without a session the process is closed.
+    func interruptCurrent() {
+        let (proc, isSession) = lock.withLock { (current, current != nil && current === session?.process) }
+        guard let proc else { return }
+        guard isSession else { proc.terminate(); return }
+        lock.withLock { interrupted = true }
+        let line: [String: Any] = ["type": "control_request", "request_id": "interrupt-\(UUID().uuidString.prefix(8))",
+                                   "request": ["subtype": "interrupt"]]
+        guard var data = try? JSONSerialization.data(withJSONObject: line) else { proc.terminate(); return }
+        data.append(0x0A)
+        if (try? proc.stdin.write(contentsOf: data)) == nil { proc.terminate() }
+    }
+
     func shutdown() {
         lock.lock()
         spare?.terminate()
@@ -198,6 +212,8 @@ final class ClaudeCLI: @unchecked Sendable {
     private var session: Session?
     /// Whether the last `runInSession` reused a live session (a fresh one failing is not retried).
     private(set) var lastAttemptReused = false
+    /// The turn in progress was interrupted on purpose: its error result does not end the session.
+    private var interrupted = false
 
     /// The entry of this request is added right after it returns: the session has seen it.
     static func cursor(after memory: MemorySnapshot) -> Int { memory.lastSeq + 1 }
@@ -262,7 +278,7 @@ final class ClaudeCLI: @unchecked Sendable {
             text = message(nil)
             onPhase?(.sessionStarted)
         }
-        lock.withLock { lastAttemptReused = live != nil }
+        lock.withLock { lastAttemptReused = live != nil; interrupted = false }
         lock.withLock { current = s.process }
         defer { lock.withLock { current = nil } }
 
@@ -309,6 +325,11 @@ final class ClaudeCLI: @unchecked Sendable {
             lock.withLock { s.requests += 1; s.lastUsed = Date(); s.cursor = Self.cursor(after: memory) }
             scheduleIdleEnd(s)
             throw ClaudeCLIError.noOutput(m)
+        } catch ClaudeCLIError.failed(let m) where lock.withLock({ interrupted }) && s.process.process.isRunning {
+            // Interrupted on purpose (scalata): the session stays for the next Instant request.
+            lock.withLock { s.requests += 1; s.lastUsed = Date(); s.cursor = Self.cursor(after: memory); interrupted = false }
+            scheduleIdleEnd(s)
+            throw ClaudeCLIError.failed(m)
         } catch {
             // An error result (limit, login) leaves the process usable, but a fresh one is safer.
             endSession(reason: "errore: \(error.localizedDescription.prefix(60))")

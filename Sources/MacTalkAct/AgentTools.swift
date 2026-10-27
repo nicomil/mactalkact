@@ -49,6 +49,12 @@ final class AgentTools {
     private var unconfirmedRisky = false
     /// Start (`true`) and end (`false`) of every tool call, settling included: the phases of the Bench.
     var onCall: ((Bool) -> Void)?
+    /// Instant level (FR-43): one tool call; an action without effect, or a second call, escalates.
+    var instantGuard = false
+    var onEscalate: ((String) -> Void)?
+    private(set) var escalation: String?
+    /// The calls of this request with the first line of their result, for the level that takes over.
+    private(set) var callLog: [String] = []
     /// Text changes made during the current task, for the conversation memory (FR-8).
     private(set) var changes: [String] = []
     /// The app the task works in: keystrokes and clicks stop if another app takes the front
@@ -78,7 +84,10 @@ final class AgentTools {
         lastShot = nil
         confirmedUntil = .distantPast
         callCount = 0
+        escalation = nil
+        instantGuard = false
         if !keepElements {
+            callLog = []
             // The same request retried on another engine keeps what the first one asked (AD-15).
             confirmationsAsked = 0
             deniedConfirmations = 0
@@ -248,6 +257,10 @@ final class AgentTools {
 
     func call(_ name: String, _ args: [String: Any]) async -> Result {
         if cancelled { return .error("The user cancelled the task. Stop now.") }
+        if instantGuard, escalation != nil || callCount >= 1 {
+            escalate(escalation ?? "seconda chiamata (\(name))")
+            return .error("Stop now: another assistant continues this task. Do not call tools; reply with one word.")
+        }
         onCall?(true)
         defer { onCall?(false) }
         callCount += 1
@@ -260,6 +273,8 @@ final class AgentTools {
         }
         var result = await perform(name, args)
         if result.isError, result.text.hasSuffix(Self.confirmFirst) { unconfirmedRisky = true }
+        callLog.append("- \(name) \(Self.compact(args)) → \(result.isError ? "ERROR " : "")\(result.text.split(separator: "\n").first.map(String.init)?.prefix(160) ?? "")")
+        if instantGuard, Self.effectfulTools.contains(name), let why = Self.instantFailure(result) { escalate(why) }
         if reportOutcome, Self.outcomeTools.contains(name), !result.readOnly, !cancelled,
            !result.text.hasPrefix("MacTalkAct does not have"), !result.text.hasPrefix("The frontmost app changed") {
             await settle()
@@ -564,6 +579,19 @@ final class AgentTools {
     }
 
     private var confirmed: Bool { Date() < confirmedUntil }
+
+    /// The rule that judges the one call of the Instant level (FR-43). Pure, tested by `--selftest`.
+    static func instantFailure(_ result: Result) -> String? {
+        if result.isError { return "errore: \(result.text.split(separator: "\n").first.map(String.init)?.prefix(60) ?? "")" }
+        if result.text.contains("nothing changed") { return "nessun effetto" }
+        return nil
+    }
+
+    private func escalate(_ reason: String) {
+        guard escalation == nil else { return }
+        escalation = reason
+        onEscalate?(reason)
+    }
 
     /// The end of every «needs a confirmation» error: the Bench counts blocked actions by it.
     static let confirmFirst = "call confirm first."

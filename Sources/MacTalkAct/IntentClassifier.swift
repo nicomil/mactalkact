@@ -225,6 +225,44 @@ enum RouteHeuristics {
         return complexMarkers.contains { n.contains($0) }
     }
 
+    /// One action, said briefly: no «e»/comma joining two actions, no complex markers (FR-43).
+    static func isOneStep(_ text: String) -> Bool {
+        let n = Grammar.normalize(text)
+        let words = n.split(separator: " ")
+        // «mail» or «messaggio» make a request complex for the model choice, not more than one step:
+        // «apri la mail di Laura» is one click.
+        guard !words.isEmpty, words.count <= 8, !multiStepMarkers.contains(where: { n.contains($0) }) else { return false }
+        if text.contains(",") || words.contains("e") || words.contains("poi") || words.contains("anche") { return false }
+        return true
+    }
+
+    /// The request names something the app knows (AD-23, FR-43): an installed app, a site,
+    /// an element visible on screen, or something from the conversation memory.
+    @MainActor static func hasKnownTarget(_ text: String, knownApp: (String) -> Bool, labels: [String], memory: [String]) -> Bool {
+        let n = Grammar.normalize(text)
+        let words = n.split(separator: " ").map(String.init).filter { $0.count >= 3 && !targetStopwords.contains($0) }
+        guard !words.isEmpty else { return false }
+        // App or site: any word, or the words after the verb («apri la mail di Laura» → «mail di laura»).
+        if words.contains(where: knownApp) || words.contains(where: { LocalActionValidator.site(for: $0) != nil }) { return true }
+        func matches(_ s: String) -> Bool {
+            let l = Grammar.normalize(s)
+            guard l.count >= 3 else { return false }
+            return words.contains { w in l == w || l.split(separator: " ").contains(Substring(w)) }
+        }
+        return labels.contains(where: matches) || memory.contains(where: matches)
+    }
+
+    private static let multiStepMarkers = [
+        "tutte", "tutti", "ogni", "ciascun", "dopo di che", "scrivi a", "rispondi", "cerca", "trova", "riassumi",
+        "traduci", "confronta", "compila", "prenota", "pensaci bene", "con calma",
+    ]
+
+    private static let targetStopwords: Set<String> = [
+        "apri", "clicca", "premi", "chiudi", "vai", "metti", "togli", "scrivi", "mostra", "fammi", "della", "dello",
+        "delle", "degli", "nella", "nello", "sulla", "sullo", "con", "per", "che", "una", "uno", "gli", "dal", "dalla",
+        "pulsante", "bottone", "tasto", "voce", "scheda", "finestra", "pagina", "questa", "questo", "quella", "quello",
+    ]
+
     /// "pensaci bene" forces the deep model.
     static func wantsDeepThinking(_ text: String) -> Bool {
         let n = Grammar.normalize(text)

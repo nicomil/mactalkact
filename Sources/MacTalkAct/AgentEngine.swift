@@ -49,6 +49,9 @@ enum EngineID: String, CaseIterable, Identifiable, Codable {
 
 /// Two levels for every engine (AD-6): fast for 1-3 step requests, deep for long tasks.
 enum AgentLevel: String {
+    /// One-step commands with a known target, Claude only (FR-43): Haiku, one tool call, then
+    /// the executor judges the outcome and escalates to `.fast` if needed.
+    case instant
     case fast, deep
 }
 
@@ -64,12 +67,12 @@ struct AgentToolAccess {
 
 /// One request, already composed by AgentRunner (screen, memory, <recent>, request).
 struct AgentRequest {
-    let message: String
+    var message: String
     /// The same request in a compact Italian form, for the local engine's small context.
     let localMessage: String
     /// Only the user's words.
     let userRequest: String
-    let level: AgentLevel
+    var level: AgentLevel
     /// The one deadline of the turn (AD-24): engines have no timeout of their own.
     var clock = TurnClock(seconds: 240) // AgentRunner sets it from `agentTimeout`
     /// The conversation memory when the request was composed, for a Long session (FR-42).
@@ -205,7 +208,13 @@ protocol AgentEngine: AnyObject {
     /// Runs one request to completion and returns the final sentence for the user.
     func run(_ request: AgentRequest) async throws -> String
     func cancel()
+    /// Ends the turn in progress without losing the engine's state (scalata, AD-13). By default, `cancel()`.
+    func interrupt()
     func shutdown()
+}
+
+extension AgentEngine {
+    func interrupt() { cancel() }
 }
 
 // MARK: - Selection (AD-14)
