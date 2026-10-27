@@ -130,7 +130,7 @@ final class LocalEngine: AgentEngine {
 
     /// Tools the local model gets (AD-17): no screenshot (no vision), no memory or macros.
     static let toolNames = ["observe", "click", "click_many", "type_text", "replace_text", "press_keys",
-                            "open_app", "open_url", "scroll", "wait", "confirm", "ask_user"]
+                            "open_app", "open_url", "scroll", "wait", "ask_user"]
 
     /// Short Italian descriptions: small models read every word at every step.
     static let descriptions: [String: String] = [
@@ -213,7 +213,7 @@ final class LocalEngine: AgentEngine {
         let tools = mode == .tools ? makeTools(access, budget: budget) : []
         let session = LanguageModelSession(model: model, tools: tools, instructions: Self.instructions)
         let prompt = request.localMessage
-        let timeout = request.clock.remaining // the one turn clock (AD-24)
+        let clock = request.clock // the one turn clock (AD-24), paused while a question waits
         let stepAgent = LocalStepAgent(model: model, tools: access.tools, maxSteps: settings.localMaxSteps)
         let userRequest = request.userRequest
         let task = Task<String, Error> { @MainActor in
@@ -228,7 +228,8 @@ final class LocalEngine: AgentEngine {
                     return try await session.respond(to: prompt).content
                 }
                 group.addTask {
-                    try await Task.sleep(for: .seconds(timeout))
+                    await clock.untilExpired()
+                    try Task.checkCancellation()
                     throw AgentEngineError.timeout
                 }
                 defer { group.cancelAll() }

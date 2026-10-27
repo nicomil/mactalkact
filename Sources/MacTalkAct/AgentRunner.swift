@@ -413,13 +413,13 @@ final class AgentRunner {
             }
             do {
                 let answer = try await engine.run(attempt)
-                if attemptLevel == .instant, tools.escalation == nil, !tools.cancelled,
+                if attemptLevel == .instant, tools.escalation == nil, !tools.cancelled, !tools.deniedThisRequest,
                    let reason = AgentTools.instantGaveUp(answer: answer, effectfulCalls: tools.effectfulCalls) {
                     // Haiku gave up inside its one call: the fast level tries, with what was done (FR-43).
                     escalate(reason)
                     continue
                 }
-                if attemptLevel == .instant, let reason = tools.escalation, !tools.cancelled {
+                if attemptLevel == .instant, let reason = tools.escalation, !tools.cancelled, !tools.deniedThisRequest {
                     // The model stopped after the tool said so: the request goes on at the fast level.
                     escalate(reason)
                     continue
@@ -433,7 +433,7 @@ final class AgentRunner {
                 return answer
             } catch let error as AgentEngineError {
                 engine.onPhase = nil // a late event of this engine must not move the next attempt's phases
-                if attemptLevel == .instant, !tools.cancelled {
+                if attemptLevel == .instant, !tools.cancelled, !tools.deniedThisRequest {
                     if let reason = tools.escalation {
                         escalate(reason) // the turn was interrupted on purpose
                         continue

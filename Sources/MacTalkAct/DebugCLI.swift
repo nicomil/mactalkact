@@ -179,6 +179,17 @@ enum DebugCLI {
         check("solo con il consenso già dato si agisce", AppleEventsSpike.mayRun(noErr) && !AppleEventsSpike.mayRun(OSStatus(errAEEventWouldRequireUserConsent))
               && !AppleEventsSpike.mayRun(OSStatus(errAEEventNotPermitted)) && !AppleEventsSpike.mayRun(OSStatus(procNotFound)) && !AppleEventsSpike.mayRun(nil))
         check("etichette del consenso", AppleEventsSpike.consentLabel(noErr) == "concesso" && AppleEventsSpike.consentLabel(OSStatus(errAEEventWouldRequireUserConsent)).contains("-1744"))
+        print("Bersagli della conferma (Storia 9.2):")
+        check("Invio in una sequenza", AgentTools.containsSendKey("tab return") && !AgentTools.containsSendKey("cmd+return"))
+        check("chat: app e pagine web", AgentTools.needsComposerGate(bundleID: "com.apple.MobileSMS", windowTitle: "")
+              && AgentTools.needsComposerGate(bundleID: "com.apple.Safari", windowTitle: "whatsapp")
+              && !AgentTools.needsComposerGate(bundleID: "com.apple.Safari", windowTitle: "posta in arrivo"))
+        check("richiesta negata: non conta come chiesta", !AgentTools.requestMentions("non eliminare niente", "Elimina"))
+        check("bersaglio corto: cmd+q nominato", AgentTools.requestMentions("chiudi con cmd+q", "cmd+q"))
+        check("«post» non è dentro «posta»", !AgentTools.requestMentions("apri la posta", "Post"))
+        check("stessa radice: eliminare / Elimina", AgentTools.requestMentions("eliminare la newsletter", "Elimina"))
+        check("log senza dettaglio: niente testo dello schermo", AgentTools.ConfirmationTarget.shortcut(keys: "cmd+q", window: "Segreto").kind == "scorciatoia cmd+q"
+              && AgentTools.ConfirmationTarget.menu(path: ["File", "Elimina"]).kind == "menu (2 livelli)")
         print("Orologio del turno (Storia 9.2):")
         do {
             let clock = TurnClock(seconds: 10)
@@ -1243,6 +1254,57 @@ extension DebugCLI {
             check("file di configurazione cancellato alla chiusura", !configPath.isEmpty && !FileManager.default.fileExists(atPath: configPath))
         }
 
+        print("Orologio del turno in pausa durante la domanda (Storia 9.2):")
+        do {
+            // Through AgentRunner: the question pauses the request's clock and names the target.
+            let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+            try? await agent.start()
+            final class RiskyEngine: AgentEngine {
+                let id = EngineID.claude
+                var availability: AgentAvailability = .available
+                var onAvailabilityChange: ((AgentAvailability) -> Void)?
+                var onPhase: PhaseSink?
+                let tools: AgentTools
+                var pausedDuringQuestion = false
+                init(tools: AgentTools) { self.tools = tools }
+                func model(for level: AgentLevel) -> String { "finto" }
+                func refreshAvailability() {}
+                func prewarm() {}
+                func cancel() {}
+                func shutdown() {}
+                func run(_ request: AgentRequest) async throws -> String {
+                    let clock = request.clock
+                    let ask = tools.askUser
+                    tools.askUser = { q, c in self.pausedDuringQuestion = clock.isPaused; return await ask?(q, c) }
+                    _ = await tools.call("press_keys", ["keys": "cmd+q"])
+                    return "fatto"
+                }
+            }
+            let engine = RiskyEngine(tools: agent.tools)
+            agent.register(engine)
+            agent.overrideChoice = (.claude, false)
+            var asked: [String] = []
+            agent.tools.askUser = { q, _ in asked.append(q); return "no" }
+            _ = try? await agent.run("chiudi Safari con cmd+q", context: ScreenContext(), deep: false)
+            check("durante la domanda l'orologio del turno è fermo", engine.pausedDuringQuestion)
+            check("richiesta che la nomina: nessun «che tu non hai chiesto»", asked.count == 1 && !asked[0].contains("non hai chiesto"))
+            agent.shutdown()
+            // untilExpired does not return while paused, and does right after the resume.
+            let clock = TurnClock(seconds: 1)
+            clock.pause()
+            let waiter = Task { await clock.untilExpired(); return Date() }
+            try? await Task.sleep(for: .seconds(1.5))
+            let resumedAt = Date()
+            clock.resume()
+            let expiredAt = await waiter.value
+            check("scadenza: non mentre è in pausa, poco dopo la ripresa", expiredAt >= resumedAt && expiredAt.timeIntervalSince(resumedAt) < 1.6)
+            let nested = TurnClock(seconds: 10)
+            nested.pause(); nested.pause(); nested.resume()
+            check("due domande insieme: il tempo resta fermo finché finisce l'ultima", nested.isPaused)
+            nested.resume()
+            check("dopo l'ultima riparte", !nested.isPaused)
+        }
+
         print("Classificatore oltre il tempo (Storia 8.1):")
         do {
             final class SlowClassifier: IntentClassifier {
@@ -1286,8 +1348,10 @@ extension DebugCLI {
             check("diniego: 1 chiesta, 1 bloccata", tools.confirmationsAsked == 1 && tools.blockedCalls == 1)
             let confirm = await tools.call("confirm", ["action": "elimina la mail"])
             check("confirm del Motore: nessun permesso, nessuna domanda", confirm.text.hasPrefix("Not needed") && questions.count == 1)
+            _ = await tools.call("press_keys", ["keys": "cmd+q"])
+            check("ogni azione chiede per sé: due azioni, due domande", questions.count == 2)
             tools.reset(keepElements: true)
-            check("ripetizione su un altro Motore: contatori tenuti", tools.confirmationsAsked == 1 && tools.blockedCalls == 1)
+            check("ripetizione su un altro Motore: contatori tenuti", tools.confirmationsAsked == 2 && tools.blockedCalls == 2)
             tools.reset()
             check("richiesta nuova: contatori a zero", tools.confirmationsAsked == 0 && tools.blockedCalls == 0)
             check("richiesta che nomina l'azione", AgentTools.requestMentions("elimina la mail della newsletter", "Elimina") && !AgentTools.requestMentions("apri la posta", "Elimina"))
@@ -1533,6 +1597,31 @@ extension DebugCLI {
             let bad = await tools.call("act", ["steps": [["tool": "click", "id": 99999], ["tool": "type_text", "text": "x"]]])
             check("act si ferma al primo errore", bad.isError && bad.text.contains("not executed"), bad.text.replacingOccurrences(of: "\n", with: " | "))
         } else { check("campi trovati", false, f) }
+
+        print("Diniego su Elimina, azione e Cestino (Storia 9.2):")
+        tools.askUser = { _, c in c ? "no" : nil }
+        tools.currentRequest = "apri la newsletter"
+        await open("posta.html")
+        let inbox = text(await tools.call("observe", [:]))
+        if let mail = id(inbox, "Newsletter ottobre") {
+            _ = await tools.call("click", ["id": mail, "method": "mouse"])
+            try? await Task.sleep(for: .seconds(0.5))
+            let opened = text(await tools.call("observe", [:]))
+            if let del = id(opened, "button «Elimina»") {
+                let r1 = await tools.call("click", ["id": del])
+                let r2 = await tools.call("perform_action", ["id": del, "action": "Press"])
+                try? await Task.sleep(for: .seconds(0.5))
+                check("Elimina con «no»: clic e azione non fatti", r1.text.contains("NOT done") && r2.text.contains("NOT done") && !title().contains("eliminate"), title())
+            } else { check("pulsante Elimina trovato", false, opened.prefix(200).description) }
+        } else { check("mail della newsletter trovata", false) }
+        await open("kanban.html")
+        let board = text(await tools.call("observe", [:]))
+        if let card = id(board, "«Preventivo»"), let bin = id(board, "heading «Cestino»") {
+            let r = await tools.call("drag", ["from_id": card, "to_id": bin])
+            try? await Task.sleep(for: .seconds(0.5))
+            check("trascinamento nel Cestino con «no»: non fatto", r.text.contains("NOT done") && !title().contains("Cestino=Preventivo"), title())
+        } else { check("scheda e Cestino trovati", false) }
+        tools.askUser = { _, c in c ? "sì" : nil }
 
         print("Conferma per il pulsante Invia (Storia 9.2):")
         await open("modulo.html")

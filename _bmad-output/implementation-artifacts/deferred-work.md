@@ -25,3 +25,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-9-1-server-degli-strumenti-chiuso.md`
   summary: Prova NFR-14 con un `AGENTS.md` di stile ostile per Codex, in un `CODEX_HOME` separato con il login (senza toccare quello di Nico).
   evidence: `~/.codex/AGENTS.md` di Nico esiste (vuoto); la prova con il file reale non dimostra nulla sulle istruzioni di stile.
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-2-conferma-per-singola-azione.md`
+  summary: `codex` finto per provare il timeout di Codex; controllo del campo a fuoco nel gate dell'Invio; sinonimi in `requestMentions`; `ActionOrigin` sulle chiamate dell'Executor e `PendingQuestion` nel Router (scostamenti dalla storia).
+  evidence: review della Storia 9.2 e Implementation Notes della spec.

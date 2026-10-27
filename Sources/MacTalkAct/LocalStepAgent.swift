@@ -618,15 +618,10 @@ struct LocalStepAgent {
     private func execute(_ c: LocalStep, label: String) async -> String {
         let request = currentRequest
         func call(_ name: String, _ args: [String: Any]) async -> String {
-            var r = await tools.call(name, args)
-            var t = text(r)
-            if r.isError, t.contains("confirm") {
-                let what = label.isEmpty ? "«\(request)»: confermi?" : "«\(request)»: confermi «\(label)»?"
-                let answer = text(await tools.call("confirm", ["action": what]))
-                guard answer.contains("approved") else { return "l'utente non ha confermato" }
-                r = await tools.call(name, args)
-                t = text(r)
-            }
+            // A risky action asks the user inside the tool (FR-51): a «no» comes back as an error.
+            let r = await tools.call(name, args)
+            let t = text(r)
+            if r.isError, t.contains("did not confirm") { return "l'utente non ha confermato" }
             return (r.isError ? "ERRORE: " : "ok: ") + t
         }
         switch c.azione {

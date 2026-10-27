@@ -95,6 +95,21 @@ enum AX {
         Log.debug(String(format: "Accessibilità: albero di %@ pronto in %.2f s", bundleID ?? "", Date().timeIntervalSince(started)))
     }
 
+    /// The label of the element under a screen point, or of its first labelled ancestor (a click by x/y).
+    static func labelAt(_ point: CGPoint) -> String? {
+        var el: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &el) == .success,
+              var current = el else { return nil }
+        for _ in 0..<4 {
+            let label = [string(current, kAXTitleAttribute), string(current, kAXDescriptionAttribute)]
+                .compactMap { $0 }.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            if let label { return label }
+            guard let parent = value(current, kAXParentAttribute) else { return nil }
+            current = parent as! AXUIElement
+        }
+        return nil
+    }
+
     /// A web area with children within the first nodes of the window (Electron/Chromium ready).
     static func webAreaReady(_ window: AXUIElement) -> Bool {
         var queue = [window]

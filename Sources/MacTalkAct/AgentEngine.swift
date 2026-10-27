@@ -97,17 +97,26 @@ final class TurnClock: @unchecked Sendable {
     private let started = ContinuousClock.now
     private var paused: Duration = .zero
     private var pausedSince: ContinuousClock.Instant?
+    /// Questions waiting at the same time: the clock runs again only when the last one ends.
+    private var depth = 0
 
     init(seconds: Double) {
         let s = seconds.isFinite ? min(max(1, seconds), 86_400) : 240
         limit = .milliseconds(Int(s * 1000))
     }
 
-    func pause() { lock.withLock { if pausedSince == nil { pausedSince = .now } } }
+    func pause() {
+        lock.withLock {
+            depth += 1
+            if pausedSince == nil { pausedSince = .now }
+        }
+    }
 
     func resume() {
         lock.withLock {
-            if let since = pausedSince { paused += ContinuousClock.now - since }
+            depth = max(0, depth - 1)
+            guard depth == 0, let since = pausedSince else { return }
+            paused += ContinuousClock.now - since
             pausedSince = nil
         }
     }

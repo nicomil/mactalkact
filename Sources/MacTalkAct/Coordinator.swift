@@ -23,6 +23,7 @@ final class Coordinator {
     let speaker = Speaker()
     /// A question the agent asked the user, waiting for the spoken answer.
     private var agentQuestion: CheckedContinuation<String?, Never>?
+    private var questionSerial = 0
 
     private(set) var ready = false
     private var pttHeld = false
@@ -297,11 +298,16 @@ final class Coordinator {
         if settings.speakReplies { await speaker.say(question) }
         conversation.arm(seconds: wait)
         return await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
+            if agentQuestion != nil { Log.info("Domanda dell'agente sostituita da una nuova: resta senza risposta") }
             agentQuestion?.resume(returning: nil)
             agentQuestion = c
+            questionSerial += 1
+            let serial = questionSerial
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(wait))
-                self?.answerAgent(nil)
+                // Only its own question: a timer left by an earlier one never answers the next.
+                guard let self, self.questionSerial == serial else { return }
+                self.answerAgent(nil)
             }
         }
     }

@@ -362,6 +362,7 @@ final class AppSettings: ObservableObject {
         instantEffort = d.string(forKey: "instantEffort") ?? Defaults.instantEffort
         fixedCostObservation = bool("fixedCostObservation", Defaults.fixedCostObservation)
         evidenceBeforeDone = bool("evidenceBeforeDone", Defaults.evidenceBeforeDone)
+        d.removeObject(forKey: "confirmValiditySeconds") // removed with Story 9.2: no time window any more
         cleanDictation = bool("cleanDictation", Defaults.cleanDictation)
 
         agentEngine = EngineID(rawValue: string("agentEngine", "")) ?? Defaults.agentEngine

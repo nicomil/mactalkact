@@ -2,7 +2,7 @@
 title: 'Storia 9.2 — Conferma legata alla singola azione e un solo orologio del turno'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-review'
+status: 'done'
 baseline_commit: '3bc7016b4796f560cbae4aa42eb1f39d72514822'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -56,3 +56,26 @@ context: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+Prima review (3 revisori). Nessun rilievo di intento o di spec; patch salvo tre rinvii.
+
+| Rilievo | Verdetto | Evidenza / esito |
+|---|---|---|
+| Clic e trascinamenti per coordinate x/y saltano il gate | high | L'etichetta era «x,y». Patch: `AX.labelAt` legge l'elemento sotto il punto (e i suoi antenati); il gate lo giudica |
+| Un «sì» usato su un'altra app se l'utente cambia finestra durante la domanda | high | Patch: l'app in primo piano deve essere la stessa prima e dopo la domanda |
+| Invio in una sequenza («tab return»), a fine testo in `type_text`, nelle chat web | medium | Patch: `containsSendKey`, gate su `type_text` con a capo, `needsComposerGate` per app e pagine di chat |
+| Domande sovrapposte: la prima che finisce fa ripartire l'orologio | medium | Patch: profondità di pausa nel `TurnClock` |
+| Timer di una domanda vecchia che risponde «nessuna risposta» a quella nuova | medium | Patch: ogni timer risolve solo la sua domanda; la domanda sostituita va nel log |
+| Dopo un «no» il Livello istantaneo scala e il rapido chiede di nuovo | medium | Patch: `deniedThisRequest` ferma ogni scalata |
+| Motore locale con un tempo fisso che non conosce la pausa | medium | Patch: `untilExpired()` anche lì |
+| Schema di `confirm` ancora «REQUIRED»; giro morto in `LocalStepAgent`; `confirm` tra gli strumenti del modello locale | medium | Patch: descrizione aggiornata, giro tolto, strumento tolto dal locale; `confirmFirst` eliminato |
+| Log senza dettaglio con titolo della finestra, percorso del menu ed etichetta del bersaglio | medium | Patch: senza dettaglio si registra solo il tipo di bersaglio |
+| `requestMentions`: bersagli corti, «post» dentro «posta», negazione, radici | low | Patch: parole intere, bersagli corti come parola, negazione = non chiesta, radice di almeno 5 lettere; testato |
+| Menu con l'id sentinella −1; virgolette doppie nella domanda | low | Patch: `case menu(path:)`; il verbo porta la sorgente, l'etichetta resta semplice |
+| `onQuestion(false)` senza `defer` | low | Patch |
+| `confirmValiditySeconds` rimasto nelle preferenze | low | Patch: rimosso al caricamento |
+| Test: un «sì» per una sola azione, `untilExpired` in pausa, ripresa, collegamento dell'`AgentRunner`, gate su azione, Cestino ed Elimina con «no» | gap | Patch: tutti in `--selftest`, `--fallback-test`, `--hands-test` (Cestino aggiunto a `kanban.html`) |
+| Timeout di Codex senza test | gap | Rinviato: serve un `codex` finto come `finto-claude` |
+| Gate dell'Invio senza controllo del campo a fuoco | low | Rinviato: oggi chiede per ogni Invio in una chat, anche nella ricerca: prudente |
+| Sinonimi e altre lingue in `requestMentions` | low | Rinviato: aggiunge solo «che tu non hai chiesto» in più, la direzione prudente |
+| Parametro `timeout` ancora presente accanto a `clock` | low | Respinto: serve ai chiamanti senza turno (prove e pianificatore); con `clock` non conta |

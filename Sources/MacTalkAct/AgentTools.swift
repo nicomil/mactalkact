@@ -82,6 +82,7 @@ final class AgentTools {
         callCount = 0
         escalation = nil
         instantGuard = false
+        deniedThisRequest = false
         if !keepElements {
             callLog = []
             readTextSeconds = []
@@ -225,7 +226,7 @@ final class AgentTools {
              "Ask the user a short question (spoken answer) when the request is ambiguous. Returns their answer.",
              ["question": ["type": "string", "description": "Short Italian question."]], required: ["question"]),
         tool("confirm",
-             "Ask the user to confirm an action that sends, deletes, buys, publishes or closes something. REQUIRED before such actions: the app blocks them otherwise. Returns 'approved' or 'denied'.",
+             "Not needed any more: when you perform an action that sends, deletes, buys, publishes or closes something, the app itself asks the user at that moment and tells you the answer. Kept only for compatibility.",
              ["action": ["type": "string", "description": "Short Italian description, e.g. «Invio la mail a Marco?»"]], required: ["action"]),
     ]
 
@@ -288,7 +289,8 @@ final class AgentTools {
         let lines = result.text.split(separator: "\n").map(String.init)
         let resultLine = lines.first { $0.hasPrefix("RESULT") }.map { " · " + $0.prefix(120) } ?? ""
         callLog.append("- \(name) \(Self.compact(args)) → \(result.isError ? "ERROR " : "")\(lines.first?.prefix(160) ?? "")\(resultLine)")
-        if instantGuard, Self.effectfulTools.contains(name) || name == "act", let why = Self.instantFailure(result) { escalate(why) }
+        // After a «no» of the user nothing escalates: the fast level must not ask again (FR-51).
+        if instantGuard, !deniedThisRequest, Self.effectfulTools.contains(name) || name == "act", let why = Self.instantFailure(result) { escalate(why) }
         if cloudEngine, AppSettings.shared.hideSensitiveFromCloud {
             result.content = result.content.map { item in
                 guard let t = item["text"] as? String else { return item }
@@ -390,6 +392,11 @@ final class AgentTools {
 
         case "type_text":
             guard let text = a["text"] as? String else { return .error("Missing text") }
+            // A line break typed in a chat sends the message, like Enter (FR-51).
+            if text.contains("\n") || text.contains("\r"), let app = Self.composerApp(),
+               !(await gate(.keyInComposer(app: app), label: "Invio in \(app)", verb: "prema", scenario: "invio in un campo di composizione")) {
+                return Self.denied("Invio in \(app)")
+            }
             var target: (element: AXUIElement, label: String, role: String)?
             if let id = Self.int(a["id"]) {
                 let item = try resolve(id)
@@ -448,7 +455,7 @@ final class AgentTools {
             if Safety.isRiskyKeys(keys), !(await gate(.shortcut(keys: keys, window: Self.frontWindowTitle()), label: keys, verb: "prema")) {
                 return Self.denied(keys)
             }
-            if Self.isSendKey(keys), let app = Self.composerApp(),
+            if Self.containsSendKey(keys), let app = Self.composerApp(),
                !(await gate(.keyInComposer(app: app), label: "Invio in \(app)", verb: "prema", scenario: "invio in un campo di composizione")) {
                 return Self.denied("Invio in \(app)")
             }
@@ -577,7 +584,7 @@ final class AgentTools {
         case "confirm":
             // A question of the engine never produces a grant (FR-51): the app asks the user itself,
             // right when the action runs, for that action only.
-            return .text("Not needed: just perform the action. If it sends, deletes or pays, the app asks the user at that moment and tells you the answer.")
+            return .text("Not needed: just perform the action. If it sends, deletes or pays, the app asks the user at that moment and tells you the answer.").asReadOnly
 
         default:
             return .error("Unknown tool \(name)")
@@ -592,6 +599,7 @@ final class AgentTools {
         case shortcut(keys: String, window: String)
         case keyInComposer(app: String)
         case drop(onto: Int?, label: String)
+        case menu(path: [String])
 
         var description: String {
             switch self {
@@ -599,12 +607,26 @@ final class AgentTools {
             case .shortcut(let keys, let window): return "scorciatoia \(keys) · \(window)"
             case .keyInComposer(let app): return "Invio nella composizione · \(app)"
             case .drop(let id, let label): return "trascinamento su \(id.map(String.init) ?? "x/y") «\(label)»"
+            case .menu(let path): return "menu \(path.joined(separator: " > "))"
+            }
+        }
+
+        /// For the log without detail: the kind of target, no text read on screen (AD-9).
+        var kind: String {
+            switch self {
+            case .element(let id, let action): return "elemento \(id) · \(action)"
+            case .shortcut(let keys, _): return "scorciatoia \(keys)"
+            case .keyInComposer: return "Invio nella composizione"
+            case .drop(let id, _): return "trascinamento su \(id.map(String.init) ?? "x/y")"
+            case .menu(let path): return "menu (\(path.count) livelli)"
             }
         }
     }
 
     /// The request of this task, to tell the user when an action was not asked for.
     var currentRequest = ""
+    /// The user said «no» (or did not answer) to an action in this request: no level retries it.
+    private(set) var deniedThisRequest = false
     /// Start (`true`) and end of a question to the user: the turn's clock waits (AD-24).
     var onQuestion: ((Bool) -> Void)?
 
@@ -615,11 +637,20 @@ final class AgentTools {
         confirmationsAsked += 1
         let notAsked = !Self.requestMentions(currentRequest, label)
         let question = "Vuoi che \(verb) «\(label)»\(notAsked ? ", che tu non hai chiesto" : "")?"
-        onQuestion?(true)
-        let answer = await askUser?(question, true)
-        onQuestion?(false)
-        let ok = answer.map(Grammar.isYes) ?? false
-        if !ok { deniedConfirmations += 1 }
+        let front = AX.realFrontmostApplication()?.processIdentifier
+        let answer: String?
+        do {
+            onQuestion?(true)
+            defer { onQuestion?(false) }
+            answer = await askUser?(question, true)
+        }
+        var ok = answer.map(Grammar.isYes) ?? false
+        // The «sì» is for the window the question was about: if the user changed app meanwhile, no.
+        if ok, AX.realFrontmostApplication()?.processIdentifier != front {
+            ok = false
+            Log.info("Sicurezza: «sì» non usato, l'app in primo piano è cambiata durante la domanda")
+        }
+        if !ok { deniedConfirmations += 1; deniedThisRequest = true }
         Self.logBlock(scenario: scenario, target: target, label: label, outcome: ok ? "confermata" : (answer == nil ? "senza risposta" : "negata"))
         return ok
     }
@@ -635,15 +666,27 @@ final class AgentTools {
 
     private static func logBlock(scenario: String, target: ConfirmationTarget, label: String, outcome: String) {
         let app = AX.frontmostApplication()?.localizedName ?? "?"
-        Log.info(logLine(scenario: scenario, app: app, target: target, label: Log.isDetailed ? label : "\(label.count) caratteri", outcome: outcome))
+        Log.info(Log.isDetailed ? logLine(scenario: scenario, app: app, target: target, label: label, outcome: outcome)
+                 : "Sicurezza: blocco · scenario=\(scenario) · app=\(app) · bersaglio=\(target.kind) («\(label.count) caratteri») · origine=model · esito=\(outcome)")
     }
 
     /// Whether the request names the target (otherwise the question says «che tu non hai chiesto»).
     static func requestMentions(_ request: String, _ label: String) -> Bool {
-        let r = " " + Grammar.normalize(request) + " "
-        // A word of the target (at least 4 letters, or its stem: «elimina» for «eliminare»).
-        return Grammar.normalize(label).split(separator: " ").filter { $0.count >= 4 }
-            .contains { w in r.contains(" \(w)") || r.contains(" \(w.prefix(max(4, w.count - 2)))") }
+        let rq = request.lowercased()
+        // A negated request («non eliminare niente») never counts as asking for it.
+        if rq.hasPrefix("non ") || rq.contains(" non ") { return false }
+        // Short targets (cmd+q, OK, Buy): the target as a whole word of the request.
+        let tokens = rq.split(whereSeparator: { $0 == " " || $0 == "," }).map(String.init)
+        if label.count <= 6 { return tokens.contains(label.lowercased()) }
+        let words = Grammar.normalize(request).split(separator: " ").map(String.init)
+        // Whole words, or the same root (eliminare / elimina): at least 5 shared letters, never
+        // «post» inside «posta».
+        func sameRoot(_ a: String, _ b: String) -> Bool {
+            let shared = zip(a, b).prefix { $0 == $1 }.count
+            return shared >= 5 && Double(shared) >= Double(min(a.count, b.count)) * 0.7
+        }
+        return Grammar.normalize(label).split(separator: " ").map(String.init).filter { $0.count >= 4 }
+            .contains { w in words.contains { $0 == w || sameRoot($0, w) } }
     }
 
     /// Return or Enter alone.
@@ -651,12 +694,25 @@ final class AgentTools {
         ["return", "enter", "invio"].contains(keys.lowercased().trimmingCharacters(in: .whitespaces))
     }
 
+    /// A sequence with a plain Return or Enter in it («tab return»), not cmd+return (that one is a shortcut).
+    static func containsSendKey(_ keys: String) -> Bool {
+        keys.split(separator: " ").contains { isSendKey(String($0)) }
+    }
+
     /// Apps where Enter in the text field sends the message (chats): their name, or nil.
     private static let chatApps: Set<String> = ["com.apple.MobileSMS", "net.whatsapp.WhatsApp", "com.tinyspeck.slackmacgap",
                                                 "ru.keepcoder.Telegram", "com.hnc.Discord", "com.microsoft.teams2", "org.whispersystems.signal-desktop"]
     static func composerApp() -> String? {
-        guard let app = AX.frontmostApplication(), let id = app.bundleIdentifier, chatApps.contains(id) else { return nil }
-        return app.localizedName ?? id
+        guard let app = AX.frontmostApplication(), let id = app.bundleIdentifier else { return nil }
+        let title = Grammar.normalize(ScreenContext.capture(includeLabels: false).windowTitle)
+        return needsComposerGate(bundleID: id, windowTitle: title) ? (app.localizedName ?? id) : nil
+    }
+
+    /// Chat apps, and chats open in a browser, where Enter sends (pure, tested by `--selftest`).
+    static func needsComposerGate(bundleID: String, windowTitle: String) -> Bool {
+        if chatApps.contains(bundleID) { return true }
+        let webChats = ["whatsapp", "telegram", "messenger", "slack", "discord", "teams", "signal"]
+        return webChats.contains { windowTitle.contains($0) }
     }
 
     private static func frontWindowTitle() -> String { ScreenContext.capture(includeLabels: false).windowTitle }
@@ -687,8 +743,6 @@ final class AgentTools {
         onEscalate?(reason)
     }
 
-    /// The end of every «needs a confirmation» error: the Bench counts blocked actions by it.
-    static let confirmFirst = "call confirm first."
 
 
     // MARK: Elements
@@ -728,7 +782,9 @@ final class AgentTools {
         }
         if let x = Self.double(a[xKey]), let y = Self.double(a[yKey]) {
             guard let shot = lastShot else { throw ToolError(message: "x/y need a screenshot first.") }
-            return (shot.screenPoint(imageX: x, imageY: y), "\(Int(x)),\(Int(y))")
+            let p = shot.screenPoint(imageX: x, imageY: y)
+            // What is under the point names the target, so the gate can judge a drop on the Bin.
+            return (p, AX.labelAt(p) ?? "\(Int(x)),\(Int(y))")
         }
         throw ToolError(message: "Pass \(idKey) or \(xKey)/\(yKey).")
     }
@@ -1273,6 +1329,11 @@ final class AgentTools {
             guard let shot = lastShot else { return .error("x/y need a screenshot first.") }
             point = shot.screenPoint(imageX: x, imageY: y)
             label = "\(Int(x)),\(Int(y))"
+            // A click by coordinates is judged on what is under the point (FR-51): «Invia» stays «Invia».
+            if let p = point, let hit = AX.labelAt(p), Safety.isRiskyLabel(hit),
+               !(await gate(.element(id: 0, action: "click x/y"), label: hit, verb: "clicchi")) {
+                return Self.denied(hit)
+            }
             onProgress?("Clicco nel punto indicato")
         } else {
             return .error("Pass id or x/y.")
@@ -1398,7 +1459,7 @@ final class AgentTools {
             return .error("[\(id)] «\(item.label)» has no action «\(wanted)». Its actions: \(actions.map(Self.actionName).joined(separator: ", ")).")
         }
         if Safety.isRiskyLabel(Self.actionName(raw)) || Safety.isRiskyLabel(item.label),
-           !(await gate(.element(id: id, action: Self.actionName(raw)), label: "\(Self.actionName(raw)) su «\(item.label)»", verb: "esegua")) {
+           !(await gate(.element(id: id, action: Self.actionName(raw)), label: item.label, verb: "esegua «\(Self.actionName(raw))» su")) {
             return Self.denied(item.label)
         }
         onProgress?("\(Self.actionName(raw)) «\(item.label)»")
@@ -1412,7 +1473,7 @@ final class AgentTools {
         let (from, fromLabel) = try target(a, id: "from_id", x: "from_x", y: "from_y")
         let (to, toLabel) = try target(a, id: "to_id", x: "to_x", y: "to_y")
         if Safety.isRiskyLabel(toLabel),
-           !(await gate(.drop(onto: Self.int(a["to_id"]), label: toLabel), label: "«\(fromLabel)» su «\(toLabel)»", verb: "trascini",
+           !(await gate(.drop(onto: Self.int(a["to_id"]), label: toLabel), label: toLabel, verb: "trascini «\(fromLabel)» su",
                         scenario: "trascinamento verso un bersaglio rischioso")) {
             return Self.denied(toLabel)
         }
@@ -1446,7 +1507,7 @@ final class AgentTools {
                 return r
             }
             if Safety.isRiskyLabel(item.title),
-               !(await gate(.element(id: -1, action: "menu " + walked.joined(separator: " > ")), label: item.title, verb: "scelga dal menu")) {
+               !(await gate(.menu(path: walked), label: item.title, verb: "scelga dal menu")) {
                 return Self.denied(item.title)
             }
             onProgress?("Menu \(walked.joined(separator: " › "))")
