@@ -368,6 +368,41 @@ Una sezione «Motori» mostra il Motore scelto, l'interruttore della Catena di r
   *Misurato il 27/10:* Codex rapido 3,4–4,3 s ✓; modello Apple: prima azione 5,6 s ma compito intero 6,5 s (l'app osserva e pianifica prima di agire; il «primo strumento» non è più il passo giusto da misurare); `qwen3.5:9b` su M1 ~19 s ✗, limite dell'hardware.
 - **NFR-10 Il locale resta locale.** Con il Motore locale nessun dato lascia il Mac: il server esteso è accettato senza avvisi solo su `localhost`; un indirizzo diverso richiede una conferma esplicita nelle impostazioni.
 
+### 4.8 Mani da computer use
+
+L'Agente usa il Mac come il computer use di Claude e di Codex (ricerca del 27/10, `computer-use-claude-codex-2026-10-27.md`): ogni azione dice da sola cosa è cambiato, gli elementi mantengono il proprio id, più azioni partono in una sola chiamata e le mani coprono anche trascinare, passare sopra, impostare valori, selezionare testo, usare i menu dell'app e ingrandire una parte dello schermo.
+
+#### FR-35: Esito di ogni azione
+
+Ogni strumento che agisce attende che l'interfaccia si assesti (al massimo 3 s, di più se la pagina sta caricando) e restituisce le differenze rispetto a prima: titolo della finestra, app in primo piano, elemento attivo, elementi comparsi, scomparsi o cambiati.
+
+**Conseguenze (verificabili):**
+- Dopo «clicca Prezzi» l'esito contiene il nuovo titolo della pagina senza che il Motore chiami `observe`.
+- Un'azione che non cambia nulla lo dice esplicitamente («nothing changed»).
+
+#### FR-36: Id stabili
+
+Un elemento mantiene lo stesso id per tutta la richiesta finché esiste; un id che non esiste più dà un errore che lo dice.
+
+#### FR-37: Mani complete
+
+Gli strumenti coprono: impostare il valore di un campo o di un cursore, eseguire un'azione secondaria esposta dall'elemento (espandi, mostra menu, incrementa), selezionare un testo dentro un campo, trascinare da un elemento o punto a un altro, passare sopra un elemento, clic con tasti modificatori e clic multipli, scegliere una voce dai menu dell'app per nome (con l'elenco delle voci e delle scorciatoie), screenshot di una regione a piena risoluzione. `observe` segnala le azioni secondarie e i campi impostabili.
+
+#### FR-38: Azioni in serie
+
+Uno strumento esegue più azioni in ordine in una sola chiamata, si ferma al primo errore indicando quali azioni non sono state eseguite e restituisce l'esito finale. Le conferme e i controlli di sicurezza valgono per ogni azione della serie.
+
+#### FR-39: Esc ferma l'Agente
+
+Mentre l'Agente lavora, il tasto Esc premuto dall'utente lo ferma subito, come «stop» a voce. Gli Esc inviati dall'Agente stesso non lo fermano.
+
+#### FR-40: Banco esteso
+
+Il Banco di prova include compiti che richiedono le nuove mani: trascinare una scheda, passare sopra un menu, impostare un cursore, compilare un modulo lungo, leggere un codice dentro un'immagine.
+
+**Feature-specific NFRs:**
+- **NFR-11 Meno giri.** Sui 20 compiti del Banco del 27/10, con Claude e Codex: chiamate per compito −30% e tempo mediano −25% [ASSUMPTION]; con il Motore locale nessun peggioramento.
+
 ## 5. Requisiti non funzionali trasversali
 
 - **NFR-1 Tempi.** Decisione del Router ≤ 0,8 s (90° percentile, modello caldo) dalla fine della Frase; azione della Corsia locale ≤ 1,5 s (90° percentile); primo strumento dell'Agente su richiesta semplice ≤ 3 s.
@@ -406,6 +441,7 @@ Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modifica
 - **SM-4 Uso di Opus:** almeno metà delle richieste all'Agente servite dal modello rapido. Valida FR-13.
 
 - **SM-5 Tempo senza Agente:** minuti in cui una richiesta per l'Agente non trova alcun Motore, da 35 minuti il 26/10 (18:25–19:00) a zero. Valida FR-27.
+- **SM-7 Mani da computer use:** sul Banco esteso almeno il 90% dei compiti riusciti con Claude e con Codex [ASSUMPTION]. Valida FR-35…FR-40.
 - **SM-6 Qualità del Motore locale:** sul Banco di prova almeno il 70% dei compiti riusciti con il modello Apple e almeno l'85% con il Modello locale esteso [ASSUMPTION]. Valida FR-30, FR-31.
 
 **Contro-metriche (da non ottimizzare)**
@@ -433,3 +469,4 @@ Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modifica
 - §4.6 NFR-9 — tempi al primo strumento di Codex e del Modello locale esteso.
 - §8 SM-6 — soglie di qualità del Motore locale (70% Apple, 85% esteso).
 - Generale — Codex resta installato tramite ChatGPT.app con login ChatGPT (verificato il 27/10: codex-cli 0.164.0-alpha.11.1).
+- §4.8 NFR-11, SM-7 — riduzione di chiamate e tempi, 90% sul Banco esteso.

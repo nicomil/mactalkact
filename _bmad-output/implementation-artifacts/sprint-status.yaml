@@ -58,4 +58,13 @@ development_status:
   5-5-niente-cloud-dove-non-serve: done
   epic-5-retrospective: optional
 
+  epic-6: in-progress
+  6-1-banco-esteso: backlog
+  6-2-esito-delle-azioni-e-id-stabili: backlog
+  6-3-mani-complete: backlog
+  6-4-azioni-in-serie: backlog
+  6-5-esc-e-disciplina-dell-agente: backlog
+  6-6-misura-finale: backlog
+  epic-6-retrospective: optional
+
 action_items: []

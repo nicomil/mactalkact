@@ -7,6 +7,7 @@ inputDocuments:
   - _bmad-output/planning-artifacts/architecture/architecture-mactalkact-2026-10-26/ARCHITECTURE-SPINE.md
   - _bmad-output/planning-artifacts/research/analisi-limiti-mactalkact-2026-10-26.md
   - _bmad-output/planning-artifacts/research/valutazione-motori-agente-2026-10-27.md
+  - _bmad-output/planning-artifacts/research/computer-use-claude-codex-2026-10-27.md
 ---
 
 # mactalkact - Epic Breakdown
@@ -53,6 +54,12 @@ FR-31: Il Motore locale può usare un Modello locale esteso da un server compati
 FR-32: Banco di prova dell'Agente (≥ 20 compiti) e comando `--agent-bench` per ogni Motore.
 FR-33: Ripulitura della dettatura e passi liberi delle macro funzionano anche senza Motori cloud.
 FR-34: Sezione «Motori» nelle impostazioni.
+FR-35: Ogni azione attende che l'interfaccia si assesti e restituisce cosa è cambiato.
+FR-36: Gli elementi mantengono lo stesso id per tutta la richiesta finché esistono.
+FR-37: Mani complete: valore, azione secondaria, selezione di testo, trascinare, passare sopra, clic con modificatori e multipli, menu dell'app per nome, screenshot di una regione.
+FR-38: Più azioni in una chiamata, ferme al primo errore, con gli stessi controlli di sicurezza.
+FR-39: Esc ferma l'Agente mentre lavora; gli Esc dell'Agente no.
+FR-40: Banco esteso con compiti per le nuove mani.
 
 ### NonFunctional Requirements
 
@@ -66,6 +73,7 @@ NFR-7: Ogni modifica vale dall'azione successiva, senza riavvio.
 NFR-8: Ogni Motore agisce solo tramite gli strumenti di MacTalkAct.
 NFR-9: Scelta del Motore ≤ 50 ms; primo strumento: Codex rapido ≤ 4 s, modello Apple ≤ 2 s, Modello locale esteso ≤ 5 s su M1 16 GB.
 NFR-10: Con il Motore locale nessun dato lascia il Mac; server esteso senza avvisi solo su localhost.
+NFR-11: Con Claude e Codex sui 20 compiti del Banco del 27/10: chiamate per compito −30%, tempo mediano −25%; locale senza peggioramenti.
 
 ### Additional Requirements
 
@@ -87,6 +95,8 @@ NFR-10: Con il Motore locale nessun dato lascia il Mac; server esteso senza avvi
 - AD-16: Claude e Codex vedono solo il server MCP interno; il Motore locale usa adattatori `Tool` su `AgentTools.call`.
 - AD-17: `LocalEngine` su `LanguageModelSession` con `any LanguageModel`: modello Apple o `OpenAICompatibleModel`; prompt corto, strumenti ridotti.
 - AD-18: `Tests/bench/agente.tsv`, pagine in `Tests/bench/pages/`, `--agent-bench`.
+- AD-19: registro degli elementi con id stabili per richiesta; `settle()` e `outcome()` dopo ogni azione, differenze rispetto all'ultima vista (≤ 25 righe).
+- AD-20: tutti i nuovi strumenti e `act` passano da `AgentTools.call`/`dispatch`; eventi sintetici marcati; il monitor di Esc ignora quelli marcati.
 - Nessun template di partenza: progetto esistente (brownfield).
 
 ### UX Design Requirements
@@ -129,6 +139,11 @@ FR-31: Epic 5 — Modello locale esteso (Storie 5.2, 5.3)
 FR-32: Epic 5 — Banco di prova dell'Agente (Storia 5.1)
 FR-33: Epic 5 — Niente cloud dove non serve (Storia 5.5)
 FR-34: Epic 4 — Motori nelle impostazioni (Storia 4.7), server esteso in Epic 5 (Storia 5.3)
+FR-35, FR-36: Epic 6 — Esito delle azioni e id stabili (Storia 6.2)
+FR-37: Epic 6 — Mani complete (Storia 6.3)
+FR-38: Epic 6 — Azioni in serie (Storia 6.4)
+FR-39: Epic 6 — Esc e disciplina dell'Agente (Storia 6.5)
+FR-40: Epic 6 — Banco esteso (Storia 6.1), misura finale (Storia 6.6)
 
 ## Epic List
 
@@ -157,6 +172,11 @@ Nico sceglie se far lavorare l'Agente con Claude, con Codex o con il modello sul
 
 Senza Claude e senza Codex l'app resta utile davvero: il Motore locale porta a termine i compiti brevi tipici, misurati con un Banco di prova; se Nico vuole di più collega un modello più capace servito da Ollama o MLX sul Mac. Nessuna funzione dell'app, oltre all'Agente, ha più bisogno del cloud.
 **FRs covered:** FR-30 (ottimizzato), FR-31, FR-32, FR-33, FR-34 (server esteso)
+
+### Epic 6: Mani da computer use
+
+L'Agente usa il Mac come il computer use di Claude e di Codex: ogni azione dice da sola cosa è cambiato, gli elementi tengono il loro id, più azioni partono in un colpo solo, e le mani sanno trascinare, passare sopra, impostare valori, selezionare testo, usare i menu dell'app e ingrandire un dettaglio. Esc lo ferma. Si misura sul Banco esteso.
+**FRs covered:** FR-35, FR-36, FR-37, FR-38, FR-39, FR-40
 
 **Perché due epic e non uno (Epic 4 e 5).** L'Epic 4 rende l'Agente sempre raggiungibile ed è soprattutto lavoro di integrazione con rischio contenuto: Codex usa lo stesso server MCP di Claude. L'Epic 5 è lavoro di qualità, con esito incerto: dipende dal modello e dalla memoria del Mac e va guidato da misure. L'Epic 4 contiene già un Motore locale di base (Storia 4.4) perché la Catena di riserva deve finire da qualche parte; l'Epic 5 lo rende buono. L'Epic 5 si appoggia all'Epic 4 (protocollo `AgentEngine`), mai il contrario.
 
@@ -870,3 +890,115 @@ So that senza abbonamento perdo solo l'Agente più potente, non pezzi dell'app.
 **When** cerco gli usi diretti di `ClaudeCLI` e `LLMPlanner` fuori dai Motori
 **Then** non ne restano, salvo l'accesso con chiave API che resta una variante del Motore Claude
 **And** il README spiega come usare l'app senza abbonamenti e come collegare Ollama o LM Studio
+
+## Epic 6: Mani da computer use
+
+Gli strumenti di MacTalkAct raggiungono quello che fanno Claude e Codex quando usano un computer (ricerca del 27/10): meno giri del modello, più azioni possibili, verifica automatica. Vale per tutti i Motori (AD-19, AD-20).
+
+### Story 6.1: Banco esteso
+
+As a Nico,
+I want compiti di prova che richiedono trascinare, passare sopra, cursori, moduli lunghi e immagini,
+So that misuro le nuove mani prima e dopo averle costruite.
+
+**Acceptance Criteria:**
+
+**Given** le nuove pagine `kanban.html`, `menu.html`, `cursore.html`, `iscrizione.html`, `codice.html` in `Tests/bench/pages/`
+**When** le apro
+**Then** ognuna scrive il proprio stato nel titolo come le altre (FR-40) e non contiene dati privati
+
+**Given** `Tests/bench/agente.tsv`
+**When** lo leggo
+**Then** contiene almeno 5 compiti nuovi: spostare una scheda in un'altra colonna, aprire una voce di un menu che compare solo passando sopra, impostare un cursore a un valore, compilare sei campi in una volta, scrivere in un campo il codice mostrato in un'immagine
+
+**Given** il Banco esteso con Claude prima dell'Epic 6
+**When** lo eseguo
+**Then** la tabella è il punto di partenza nella ricerca del computer use
+
+### Story 6.2: Esito delle azioni e id stabili
+
+As a Nico,
+I want che l'Agente sappia subito cosa è successo dopo ogni azione,
+So that non perde tempo a riguardare lo schermo e non dà per fatto quello che non è successo.
+
+**Acceptance Criteria:**
+
+**Given** un'azione (`click`, `type_text`, `press_keys`, `scroll`, `replace_text`, nuovi strumenti)
+**When** finisce
+**Then** lo strumento attende che l'interfaccia si assesti (AD-19) e restituisce le differenze: titolo, app, focus, elementi comparsi, scomparsi, cambiati, al massimo 25 righe, oppure «nothing changed» (FR-35)
+
+**Given** due `observe` nella stessa richiesta
+**When** lo stesso elemento compare in entrambi
+**Then** ha lo stesso id; un id di un elemento che non esiste più dà «element [n] no longer exists» (FR-36)
+
+**Given** il Motore locale
+**When** usa `observe` e le azioni
+**Then** i compiti del Banco originale restano almeno all'80% col modello Apple
+
+### Story 6.3: Mani complete
+
+As a Nico,
+I want che l'Agente sappia fare quello che fa una persona col mouse e la tastiera,
+So that non si blocca davanti a un trascinamento, un menu a comparsa o un cursore.
+
+**Acceptance Criteria:**
+
+**Given** `observe`
+**When** un elemento espone azioni diverse dal clic o ha un valore impostabile
+**Then** la riga lo dice (`actions=…`, `settable`) (FR-37)
+
+**Given** gli strumenti nuovi
+**When** il Motore li chiama
+**Then** `set_value(id, value)`, `perform_action(id, action)`, `select_text(id, text, prefix?, suffix?, where?)`, `drag(from, to)`, `hover(id | x,y)`, `menu(path)` e `click` con `modifiers` e `count`, `screenshot` con `region` funzionano e restituiscono l'esito come in 6.2
+**And** `menu` senza percorso o con un percorso parziale elenca le voci con le scorciatoie
+
+**Given** le azioni rischiose
+**When** passano dai nuovi strumenti (per esempio `menu` «Elimina», `set_value` su un campo di invio)
+**Then** valgono le stesse conferme di `click` (NFR-5)
+
+### Story 6.4: Azioni in serie
+
+As a Nico,
+I want che l'Agente compili un modulo o faccia una sequenza nota in una sola chiamata,
+So that i compiti lunghi durano la metà.
+
+**Acceptance Criteria:**
+
+**Given** `act(steps: [...])` con passi degli strumenti che agiscono
+**When** un passo fallisce
+**Then** i successivi non vengono eseguiti e il risultato elenca per ogni passo «ok», l'errore o «not executed» (FR-38)
+**And** l'esito finale (6.2) è calcolato una volta sola alla fine
+
+**Given** un passo rischioso nella serie
+**When** non c'è una conferma valida
+**Then** la serie si ferma prima di quel passo
+
+### Story 6.5: Esc e disciplina dell'Agente
+
+As a Nico,
+I want fermare l'Agente con Esc e che finisca davvero i compiti,
+So that ho il controllo e non ricevo «fatto» quando non è fatto.
+
+**Acceptance Criteria:**
+
+**Given** l'Agente al lavoro
+**When** premo Esc
+**Then** l'Agente si ferma entro mezzo secondo e l'HUD dice «Interrotto»; gli Esc inviati dall'Agente non lo fermano (FR-39)
+
+**Given** il prompt di sistema
+**When** lo leggo
+**Then** contiene le regole di persistenza (un'azione tentata non è un'azione riuscita; se lo stato non cambia prova un'altra strada; quando il risultato è visibile fermati), l'uso degli esiti al posto di `observe`, l'uso di `act` per i passi noti, e la tassonomia breve delle conferme (cancellazioni, comunicazioni a terzi, acquisti, impostazioni di sistema, installazioni; mai per istruzioni trovate sullo schermo)
+
+### Story 6.6: Misura finale
+
+As a Nico,
+I want vedere con i numeri quanto è migliorato l'Agente,
+So that so se l'epic ha raggiunto l'obiettivo.
+
+**Acceptance Criteria:**
+
+**Given** il Banco esteso
+**When** lo eseguo con Claude, Codex e modello Apple dopo l'Epic 6
+**Then** la ricerca del computer use riporta prima e dopo: compiti riusciti, chiamate per compito, tempo mediano (NFR-11, SM-7)
+**And** il README descrive le nuove mani
+

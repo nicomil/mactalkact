@@ -184,6 +184,18 @@ flowchart TD
 - **Prevents:** scelte di modello e ottimizzazioni del prompt fatte a sensazione.
 - **Rule:** `Tests/bench/agente.tsv` elenca compiti (id, pagina o app di partenza, richiesta a voce, verifica attesa). Le pagine sono HTML statici in `Tests/bench/pages/`, aperti con `file://`. `MacTalkAct --agent-bench [--engine claude|codex|local] [--model …]` esegue i compiti uno alla volta, verifica l'esito leggendo lo stato della pagina con l'Accessibilità e scrive una tabella in `~/Library/Logs/MacTalkAct-bench-<data>.tsv`. Ogni modifica al prompt o agli strumenti del Motore locale riporta i numeri del Banco prima e dopo.
 
+### AD-19 — Le azioni riportano il proprio esito
+
+- **Binds:** FR-35, FR-36, NFR-11
+- **Prevents:** un `observe` dopo ogni azione (un giro del modello in più) e azioni date per riuscite senza esserlo.
+- **Rule:** `AgentTools` tiene un registro degli elementi per richiesta: un `AXUIElement` già visto (stesso `CFEqual`) riprende il suo id, uno nuovo prende il successivo; gli id non si riusano mai. `observe` resta un elenco completo e ricorda l'ultima vista (`lastView`: id → riga). Dopo ogni strumento che agisce, `AgentTools.settle()` attende che l'interfaccia si fermi (firma di titolo, focus e numero di elementi uguale in due letture a 150 ms; `AXLoadingProgress` < 1 prolunga l'attesa; massimo 3 s, 6 s in caricamento) e `outcome()` aggiunge al risultato le differenze rispetto a `lastView`, al massimo 25 righe. Il Motore locale riceve lo stesso esito.
+
+### AD-20 — Una sola porta per tutte le mani
+
+- **Binds:** FR-37, FR-38, NFR-5, NFR-8
+- **Prevents:** una seconda strada per agire che salta `Safety`, le conferme o il blocco sull'app cambiata.
+- **Rule:** i nuovi strumenti (`set_value`, `perform_action`, `select_text`, `drag`, `hover`, `menu`, e i parametri `modifiers`/`count` di `click`, `region` di `screenshot`) passano da `AgentTools.call` come gli altri. `act` esegue una serie chiamando `dispatch` per ogni passo, con gli stessi controlli, si ferma al primo errore e calcola l'esito una volta sola alla fine. Gli eventi sintetici di MacTalkAct portano un marcatore (`eventSourceUserData`) e azzerano i modificatori non richiesti; il monitor di Esc ignora gli eventi marcati.
+
 ## Consistency Conventions
 
 | Concern | Convention |
@@ -262,6 +274,10 @@ Tests/bench/
 | FR-30, FR-31, FR-33 | `LocalEngine`, `OpenAICompatibleModel`, `Coordinator` (dettatura, macro) | AD-16, AD-17 |
 | FR-32 | `Tests/bench`, `DebugCLI` | AD-18 |
 | FR-34 | `SettingsWindow.swift`, `Settings.swift` | AD-11, AD-12 |
+| FR-35, FR-36 | `AgentTools` (registro, `settle`, `outcome`) | AD-19 |
+| FR-37, FR-38 | `AgentTools`, `Executor` (mouse, trascinamento), `AppMenu` | AD-20 |
+| FR-39 | `Coordinator`, `EscapeMonitor` | AD-20 |
+| FR-40 | `Tests/bench` | AD-18 |
 
 ## Deferred
 
@@ -272,4 +288,5 @@ Tests/bench/
 - **Test automatici dell'interfaccia:** le verifiche sullo schermo restano manuali con i comandi di debug esistenti (eccezione: il Banco di prova dell'Agente, AD-18).
 - **MLX dentro l'app (`MLXLanguageModel`):** si decide dopo lo spike della Storia 5.2; il protocollo di AD-17 lo accoglie senza cambiare `LocalEngine`.
 - **Modello Apple su Private Cloud Compute:** dipende dall'entitlement; diventerebbe un quarto Motore tra locale e cloud.
+- **Lavoro in background** (input mirato a una finestra non in primo piano, app nascoste durante il lavoro come Claude Code): chi usa la voce guarda l'app in primo piano; si riconsidera se l'Agente dovrà lavorare mentre Nico usa altro.
 - **Più Motori sulla stessa richiesta** (per esempio Codex che controlla il lavoro di Claude): fuori perimetro.
