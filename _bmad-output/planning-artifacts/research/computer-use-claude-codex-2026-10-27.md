@@ -92,6 +92,33 @@ Il Banco attuale resta valido; si aggiungono compiti che oggi l'Agente non può 
 - **Chiamate per compito −30%** e **tempo mediano −25%** rispetto al Banco del 27/10 sugli stessi 20 compiti.
 - Motore locale: nessun peggioramento (≥ 80% con il modello Apple sui 20 compiti originali).
 
+## 8. Risultati dopo l'Epic 6 (27/10)
+
+Banco esteso a 25 compiti (i 20 originali più trascinare una scheda, menu a comparsa, cursore, modulo di sei campi, numero d'ordine nella foto di un'etichetta). Misure con le stesse pagine e lo stesso comando `--agent-bench`.
+
+| Motore | Compiti riusciti (20 originali) | 5 nuovi | Chiamate per compito (20) | Tempo mediano (20) | Primo strumento (mediana) |
+| --- | --- | --- | --- | --- | --- |
+| Claude, prima | 18/20 | 3/5 | 3,10 | 9,2 s | 4,6 s |
+| **Claude, dopo** | **20/20** | **5/5** | **1,65 (−47%)** | **6,3 s (−32%)** | 2,5 s |
+| Codex, prima | 15/20 | — | 4,05 | 8,3 s | 4,9 s |
+| **Codex, dopo** | **19/20** | **5/5** | **2,05 (−49%)** | 9,4 s (+13%) | 6,8 s |
+| Modello Apple, prima | 16/20 | — | — | 6,5 s | 5,6 s |
+| Modello Apple, dopo | 17/20 | — | 4,2 | 5,9 s | 5,3 s |
+
+**Cosa ha contato di più.** Tre cose, misurate una alla volta con Claude:
+
+1. *Esito di ogni azione e mani nuove* (Storie 6.2–6.5): 19/20 e 5/5, chiamate da 3,10 a 2,70. I compiti nuovi passano da 3/5 a 5/5: prima Claude rispondeva «non posso trascinare» e impiegava 26 chiamate per un cursore; ora 2.
+2. *Elementi con gli id già nella richiesta* (come lo stato iniziale che Codex riceve con ogni app): quasi tutti i compiti cominciavano con un `observe`. Con gli elementi nel messaggio le chiamate scendono a 1,65 e il tempo a 6,3 s, con 25 compiti su 25.
+3. *Nessun «non ho controllato».* Le risposte citano ciò che l'esito mostra («il titolo della pagina ora indica…»).
+
+**Codex più lento nel tempo totale.** Le chiamate si dimezzano, ma il tempo al primo strumento sale: Codex legge circa 17.000 token per chiamata (misurati da `turn.completed`), quasi tutti del suo meccanismo interno; lo stesso compito (`sito-prezzi`) richiedeva 6,1 s con 3 chiamate alle 5:30 e 12,5 s con una sola alle 9:20. La differenza dipende dal carico del servizio nelle diverse ore, non dagli strumenti. NFR-11 è rispettato per Claude; per Codex solo nel numero di chiamate.
+
+**Problemi trovati lungo la strada.**
+
+- *Finestre accumulate dal Banco.* Safari chiede conferma prima di chiudere una pagina con un modulo compilato: le finestre restavano aperte una sopra l'altra e lo screenshot catturava quella sbagliata (stessa posizione e dimensione). Ora il Banco risponde alla richiesta e chiude solo le proprie pagine, e lo screenshot sceglie la finestra tramite il suo numero (`_AXUIElementGetWindow`).
+- *Il compito «codice in un'immagine» sembrava un CAPTCHA*: Claude si rifiutava, giustamente (anche la politica di Codex chiede conferma per i CAPTCHA). Sostituito con il numero d'ordine sulla foto di un'etichetta di spedizione.
+- *I cursori delle pagine web* dichiarano il valore impostabile ma ignorano il nuovo valore: `set_value` ci arriva con Incrementa/Decrementa.
+
 ## 7. Fonti
 
 - Anthropic, «Computer use tool», platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool (letto il 27/10/2026).

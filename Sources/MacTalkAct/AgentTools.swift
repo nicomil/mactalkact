@@ -52,15 +52,18 @@ final class AgentTools {
     /// Debug only (`--fallback-test`): counts an action with effects without doing anything.
     func simulateEffect() { effectfulCalls += 1 }
 
-    /// Fresh state for a new task.
-    func reset() {
-        registry.removeAll()
-        known.removeAll()
-        nextID = 1
-        generation = 0
+    /// Fresh state for a new task. `keepElements`: the same task retried on another engine before
+    /// any action (AD-15): the screen did not change, the ids already sent stay valid.
+    func reset(keepElements: Bool = false) {
+        if !keepElements {
+            registry.removeAll()
+            known.removeAll()
+            nextID = 1
+            generation = 0
+            lastView = nil
+            lastWebArea = nil
+        }
         lastShot = nil
-        lastView = nil
-        lastWebArea = nil
         confirmedUntil = .distantPast
         callCount = 0
         effectfulCalls = 0
@@ -626,6 +629,15 @@ final class AgentTools {
     private static let commonActions: Set<String> = [
         "AXPress", "AXShowMenu", "AXScrollToVisible", "AXShowDefaultUI", "AXShowAlternateUI", "AXRaise", "AXZoomWindow",
     ]
+
+    /// The elements of the window for the request itself, like the initial state Codex sends with
+    /// every app: the engine can act at once instead of calling observe first.
+    func initialObservation() -> String {
+        let view = scan(query: nil)
+        lastView = view
+        generation += 1
+        return render(view, query: nil)
+    }
 
     private func observe(query: String?) -> String {
         generation += 1

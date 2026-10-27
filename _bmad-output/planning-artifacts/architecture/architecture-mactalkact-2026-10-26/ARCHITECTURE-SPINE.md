@@ -190,6 +190,8 @@ flowchart TD
 - **Prevents:** un `observe` dopo ogni azione (un giro del modello in più) e azioni date per riuscite senza esserlo.
 - **Rule:** `AgentTools` tiene un registro degli elementi per richiesta: un `AXUIElement` già visto (stesso `CFEqual`) riprende il suo id, uno nuovo prende il successivo; gli id non si riusano mai. `observe` resta un elenco completo e ricorda l'ultima vista (`lastView`: id → riga). Dopo ogni strumento che agisce, `AgentTools.settle()` attende che l'interfaccia si fermi (firma di titolo, focus e numero di elementi uguale in due letture a 150 ms; `AXLoadingProgress` < 1 prolunga l'attesa; massimo 3 s, 6 s in caricamento) e `outcome()` aggiunge al risultato le differenze rispetto a `lastView`, al massimo 25 righe. Il Motore locale riceve lo stesso esito.
 
+- **Emendata il 27/10 dopo il Banco (Storia 6.6):** il Motore locale non riceve l'esito (`reportOutcome = false`: osserva da solo, come prima). Per i Motori cloud `AgentRunner` mette nella richiesta gli elementi della finestra con i loro id (`AgentTools.initialObservation()`, blocco `<elements>`), come lo stato iniziale che Codex riceve con ogni app: un `observe` in meno per compito. Su un Passaggio di Motore senza azioni il registro degli elementi resta valido (`reset(keepElements:)`).
+
 ### AD-20 — Una sola porta per tutte le mani
 
 - **Binds:** FR-37, FR-38, NFR-5, NFR-8

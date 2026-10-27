@@ -120,11 +120,17 @@ A voce: «ricorda che…», «dimentica…». L'agente salva da solo anche ciò 
 
 L'agente è `claude -p` (Claude Code, sulla tua subscription) collegato a un server MCP che vive dentro l'app, raggiungibile solo da `127.0.0.1` e con un token casuale. Claude non ha altri strumenti: niente terminale, file o internet, solo questi.
 
+Gli strumenti sono costruiti come il computer use di Claude e di Codex (studio in `_bmad-output/planning-artifacts/research/computer-use-claude-codex-2026-10-27.md`):
+
 | Strumento | Cosa fa |
 |---|---|
-| `observe` | Descrive la finestra in primo piano: elementi visibili con un ID, ruolo, testo e posizione. Con `query` cerca un testo in tutta la finestra, utile nelle pagine enormi come le webmail. |
-| `screenshot` | Immagine della finestra, ridotta a 1400 px, con un **numero arancione su ogni elemento cliccabile** (set-of-marks): l'agente clicca per numero invece di stimare le coordinate |
-| `click` | Per ID o per coordinate dello screenshot; pressione accessibile, clic vero, doppio o destro |
+| `observe` | Descrive la finestra in primo piano: elementi visibili con un ID, ruolo, testo, posizione, valore (`value=`), se il valore si può impostare (`settable`) e le azioni in più (`actions=`). Con `query` cerca un testo in tutta la finestra, utile nelle pagine enormi come le webmail. |
+| `screenshot` | Immagine della finestra, ridotta a 1400 px, con un **numero arancione su ogni elemento cliccabile** (set-of-marks): l'agente clicca per numero invece di stimare le coordinate. Con `region` ingrandisce una parte a piena risoluzione (testo piccolo, foto, etichette). |
+| `click` | Per ID o per coordinate dello screenshot; pressione accessibile, clic vero, doppio, triplo, destro o centrale, anche con ⌘/⇧/⌥/⌃ tenuti premuti |
+| `hover`, `drag` | Passare sopra (menu che compaiono al passaggio del mouse) e trascinare (schede, file, cursori) |
+| `set_value`, `select_text`, `perform_action` | Impostare un valore (cursori, campi nativi), selezionare un pezzo di testo o mettere il cursore prima/dopo, eseguire un'azione esposta dall'elemento (Incrementa, Espandi, azioni delle app) |
+| `menu` | Usa la barra dei menu dell'app per nome («Formato > Font > Grassetto»); con un percorso parziale elenca le voci e le scorciatoie |
+| `act` | Più azioni in una sola chiamata (un modulo intero, una sequenza nota), ferma al primo errore |
 | `type_text`, `press_keys`, `scroll` | Scrivere (qualsiasi lunghezza), scorciatoie, scorrimento |
 | `open_app`, `open_url` | Apre e porta davvero in primo piano app e siti, anche nel browser indicato |
 | `get_text`, `edit_text` | Legge e modifica il campo di testo attivo (sostituire la selezione, riscrivere la frase prima del cursore) |
@@ -134,9 +140,13 @@ L'agente è `claude -p` (Claude Code, sulla tua subscription) collegato a un ser
 | `remember`, `forget`, `save_macro`, `delete_macro` | Memoria personale e macro vocali |
 | `ask_user`, `confirm` | Domande a voce; **conferma obbligatoria** per inviare, eliminare, comprare o chiudere: l'app blocca queste azioni finché non rispondi «sì» |
 
-Gli ID degli elementi non vengono mai riutilizzati durante un compito: dopo una nuova osservazione, un ID vecchio viene rifiutato invece di finire su un elemento diverso. Dopo uno scorrimento le coordinate dello screenshot precedente non valgono più.
+**Ogni azione dice da sola cosa è cambiato.** Dopo un clic, una scrittura o un trascinamento lo strumento aspetta che l'interfaccia si fermi (anche il caricamento della pagina, fino a 6 secondi) e risponde con le differenze: nuovo titolo, elemento attivo, testo selezionato, elementi comparsi, scomparsi o cambiati. L'agente non deve riguardare lo schermo dopo ogni passo e non può dire «fatto» se non è cambiato nulla.
 
-Durante un compito l'HUD mostra cosa sta facendo («Cerco «LangChain»…», «Clicco «Apri»»), e «stop» lo interrompe. Un compito tipico richiede 5–30 secondi; i comandi rapidi restano istantanei.
+**L'agente parte già sapendo cosa c'è sullo schermo:** con Claude e Codex la richiesta contiene gli elementi della finestra con i loro ID, così il primo passo è già un'azione. Sul Banco di prova Claude riesce 25 compiti su 25 con 1–2 chiamate in media (prima 3) e 6 secondi invece di 9.
+
+**Gli ID restano gli stessi per tutto il compito** finché l'elemento esiste: lo stesso pulsante ha lo stesso numero in `observe`, negli screenshot e negli esiti; se un elemento sparisce, l'ID viene rifiutato con un messaggio chiaro. Dopo uno scorrimento le coordinate dello screenshot precedente non valgono più.
+
+Durante un compito l'HUD mostra cosa sta facendo («Cerco «LangChain»…», «Clicco «Apri»»); «stop» a voce oppure **Esc** lo interrompono (gli Esc premuti dall'agente stesso non contano). Un compito tipico richiede 5–30 secondi; i comandi rapidi restano istantanei.
 
 ### Dettagli tecnici
 
@@ -229,7 +239,9 @@ Se il server è spento l'app usa il modello Apple e lo dice. Un indirizzo fuori 
 | `LocalStepAgent.swift` | Il ciclo guidato del motore locale: elementi pertinenti, un passo vincolato alla volta |
 | `OpenAICompatibleModel.swift` | Modello servito sul Mac (Ollama, LM Studio, MLX) tramite l'API compatibile OpenAI |
 | `LocalText.swift` | Ripulitura della dettatura con il modello Apple |
-| `AgentTools.swift` | Gli strumenti dell'agente: osservare, cliccare, scrivere, confermare… |
+| `AgentTools.swift` | Gli strumenti dell'agente: osservare, cliccare, trascinare, scrivere, confermare…, con ID stabili ed esito di ogni azione |
+| `AppMenu.swift` | La barra dei menu dell'app in primo piano, percorsa per nome |
+| `EscapeMonitor.swift` | Esc ferma l'agente mentre lavora |
 | `MCPServer.swift` | Server MCP HTTP locale (solo 127.0.0.1, con token) |
 | `ScreenCapture.swift` | Screenshot della finestra in primo piano (ScreenCaptureKit) |
 | `FrontProcess.swift` | Porta davvero un'app in primo piano |
@@ -255,6 +267,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build
 .build/debug/MacTalkAct --route-test --rules       # come si comporta senza il modello Apple
 .build/debug/MacTalkAct --settings-shot /tmp/shots     # un'immagine per sezione della finestra impostazioni, disegnata fuori schermo
 .build/debug/MacTalkAct --tools-test Tests/pages/prova-strumenti.html   # click_many e replace_text su una pagina di prova (agisce davvero!)
+.build/debug/MacTalkAct --hands-test               # le mani dell'agente senza modello: hover, drag, set_value, act, menu, zoom (agisce davvero!)
+.build/debug/MacTalkAct --bench-cleanup            # chiude le pagine del Banco rimaste aperte in Safari
 say -v Alice -o /tmp/t.aiff "Scorri giù"
 .build/debug/MacTalkAct --transcribe /tmp/t.aiff   # riconoscimento vocale su un file
 .build/debug/MacTalkAct --context                  # cosa vede l'app dello schermo (dopo 3 s)

@@ -30,8 +30,9 @@ final class AgentRunner {
     How to work (like the computer use of Claude and Codex):
     - The user is looking at the frontmost window (APP in the snapshot): "this", "here", "the first one", \
     "questa schermata" refer to it. Work there. Open or switch to another app only if the user names it.
-    - The request includes a snapshot of the screen. Call observe to get element ids. An id stays valid for \
-    the whole request while its element exists.
+    - The request includes <elements>: the elements of the window with their ids, exactly as observe returns \
+    them. Act on them directly, without observing first. An id stays valid for the whole request while its \
+    element exists.
     - Every action returns RESULT: what changed on screen (window title, focus, selection, elements \
     +added −removed ~changed). Read it instead of observing again; observe only when you need elements \
     the RESULT does not show, screenshot when you need to see images, canvas or the layout.
@@ -212,7 +213,7 @@ final class AgentRunner {
     }
 
     /// Composes the message every cloud engine receives.
-    private func message(_ request: String, context: ScreenContext, recent: String) -> String {
+    private func message(_ request: String, context: ScreenContext, recent: String, elements: String) -> String {
         """
         <screen>
         APP: \(context.appName) (\(context.bundleID))
@@ -220,7 +221,7 @@ final class AgentRunner {
         FOCUSED_ELEMENT: \(context.focusedRole.isEmpty ? "none" : context.focusedRole), editable: \(context.isEditable ? "yes" : "no")
         SELECTED_TEXT: <<<\(context.selectedText)>>>
         TEXT_BEFORE_CURSOR: <<<\(String(context.textBeforeCursor.suffix(300)))>>>
-        </screen>
+        </screen>\(elements.isEmpty ? "" : "\n<elements>\n\(elements)\n</elements>")
         <memory>
         \(Memory.shared.promptText)
         </memory>
@@ -258,7 +259,9 @@ final class AgentRunner {
         running = true
         defer { running = false }
         let level: AgentLevel = deep ? .deep : .fast
-        let req = AgentRequest(message: message(request, context: context, recent: recent),
+        // The elements with their ids go with the request (cloud engines): one observe less per task.
+        let elements = currentChoice()?.engine == .local ? "" : tools.initialObservation()
+        let req = AgentRequest(message: message(request, context: context, recent: recent, elements: elements),
                                localMessage: localMessage(request, context: context, recent: recent),
                                userRequest: request, level: level)
         var tried: Set<EngineID> = []
@@ -300,7 +303,7 @@ final class AgentRunner {
                                                  reason: error.localizedDescription, next: next)
                 }
                 guard next != nil else { throw error }
-                tools.reset()
+                tools.reset(keepElements: true)
                 // Loop: the selector picks the next engine and announces the switch.
             }
         }

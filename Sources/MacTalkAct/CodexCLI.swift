@@ -165,7 +165,10 @@ final class CodexCLI: @unchecked Sendable {
             group.addTask {
                 var parser = CodexEventParser()
                 for try await line in stdout.bytes.lines {
-                    if let outcome = parser.feed(line) { return outcome }
+                    if let outcome = parser.feed(line) {
+                        if !parser.usage.isEmpty { Log.info("Codex: token \(parser.usage)") }
+                        return outcome
+                    }
                 }
                 if let outcome = parser.finish() { return outcome }
                 let err = String(data: errBuffer.value, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -207,6 +210,8 @@ final class CodexCLI: @unchecked Sendable {
 struct CodexEventParser {
     private(set) var lastMessage = ""
     private(set) var toolCalls = 0
+    /// Token use of the turn («12000 in (8000 cached), 300 out»), for the log.
+    private(set) var usage = ""
 
     /// Returns an outcome when the turn is over, or when an error makes waiting useless
     /// (usage limit, missing login: Codex would retry for ~20 s).
@@ -224,6 +229,9 @@ struct CodexEventParser {
             }
             return nil
         case "turn.completed":
+            if let u = obj["usage"] as? [String: Any] {
+                usage = "\(u["input_tokens"] as? Int ?? 0) in (\(u["cached_input_tokens"] as? Int ?? 0) cached), \(u["output_tokens"] as? Int ?? 0) out"
+            }
             return .answer(lastMessage)
         case "turn.failed":
             let message = ((obj["error"] as? [String: Any])?["message"] as? String) ?? "errore"
