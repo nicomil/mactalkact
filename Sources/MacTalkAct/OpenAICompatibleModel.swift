@@ -96,20 +96,26 @@ struct ServerModelExecutor: LanguageModelExecutor {
 
     func respond(to request: LanguageModelExecutorGenerationRequest, model: ServerLanguageModel,
                  streamingInto channel: LanguageModelExecutorGenerationChannel) async throws {
-        let body = try Self.body(for: request, configuration: configuration)
+        var body = try Self.body(for: request, configuration: configuration)
         guard let url = OpenAICompatibleModel.endpoint(configuration.baseURL, "/chat/completions") else {
             throw OpenAICompatibleModel.ServerError(message: "indirizzo non valido")
         }
-        var req = URLRequest(url: url, timeoutInterval: 180)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await URLSession.shared.data(for: req)
-        } catch {
-            throw OpenAICompatibleModel.ServerError(message: "server non raggiungibile: \(error.localizedDescription)")
+        func send(_ body: [String: Any]) async throws -> (Data, URLResponse) {
+            var req = URLRequest(url: url, timeoutInterval: 180)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            do {
+                return try await URLSession.shared.data(for: req)
+            } catch {
+                throw OpenAICompatibleModel.ServerError(message: "server non raggiungibile: \(error.localizedDescription)")
+            }
+        }
+        var (data, response) = try await send(body)
+        if (response as? HTTPURLResponse)?.statusCode == 400, body["reasoning_effort"] != nil {
+            // A server that does not know «reasoning_effort»: same request without it.
+            body.removeValue(forKey: "reasoning_effort")
+            (data, response) = try await send(body)
         }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let text = String(data: data, encoding: .utf8) ?? ""
@@ -195,6 +201,11 @@ struct ServerModelExecutor: LanguageModelExecutor {
         }
         if OpenAICompatibleModel.isOllama(configuration.baseURL) {
             body["keep_alive"] = "\(configuration.keepAliveMinutes)m"
+        }
+        // Reasoning models (Qwen 3.5…) would spend seconds «thinking» before a short plan:
+        // the agent's steps are simple, so no reasoning unless the session asks for it.
+        if request.contextOptions.reasoningLevel == nil {
+            body["reasoning_effort"] = "none"
         }
         return body
     }

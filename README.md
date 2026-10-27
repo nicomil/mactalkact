@@ -182,9 +182,21 @@ Se non ce la fa lo dice («Col modello locale non ci riesco: …») invece di di
 **Un modello più capace sul Mac.** In Impostazioni › Motori › Locale si può scegliere «Server sul Mac»: qualunque server compatibile con l'API OpenAI (Ollama, LM Studio, `mlx_lm.server`, Rapid-MLX). L'app legge l'elenco dei modelli dal server, il pulsante **Prova** misura il tempo al primo strumento, e il modello viene tenuto in memoria solo per il tempo indicato (10 minuti). Per Ollama:
 
 ```bash
-ollama pull qwen3.5:4b        # oppure il modello consigliato dal banco di prova
+ollama pull qwen3.5:9b                    # il migliore sul banco di prova (90%)
+OLLAMA_CONTEXT_LENGTH=8192 ollama serve   # contesto ridotto: molta meno memoria
 # Impostazioni › Motori › Locale › Server sul Mac › http://127.0.0.1:11434/v1
 ```
+
+Risultati sul banco di prova (M1, 16 GB):
+
+| Modello | Compiti riusciti | Tempo per compito (mediana) | Memoria |
+|---|---|---|---|
+| Modello Apple (predefinito) | 80% | 6,5 s | di sistema |
+| qwen3.5:9b su Ollama | 90% | 20 s | ~10 GB |
+| qwen3.5:4b su Ollama | 65% | 13 s | ~9 GB |
+| gemma4:e4b su Ollama | 45% | 16 s | ~10 GB |
+
+Ollama usa già il motore MLX di Apple Silicon. I modelli Qwen 3.5 «ragionano» prima di rispondere: l'app lo disattiva (`reasoning_effort: none`), perché per i passi dell'agente non serve e costerebbe decine di secondi. Con il motore locale le modifiche a testi già scritti (celle di notebook, documenti) vengono rifiutate invece di rischiare di rovinarli: per quelle serve Claude o Codex.
 
 Se il server è spento l'app usa il modello Apple e lo dice. Un indirizzo fuori da questo Mac richiede una conferma esplicita, perché la richiesta e il contenuto dello schermo lascerebbero il Mac.
 

@@ -135,3 +135,54 @@ Con `--ignore-user-config` il modello predefinito è `gpt-6.1-sol`. Elenco dispo
 - **Login mancante o scaduto:** eventi `error` «Reconnecting… n/5 (unexpected status 401 Unauthorized …)» e poi `turn.failed` con lo stesso testo, dopo circa 20 s di tentativi. Per non aspettare, lo stato «accesso da fare» si ricava da `codex login status` (uscita 1, «Not logged in») al ricontrollo dei Motori.
 - **Limite d'uso:** nel binario compaiono «You've hit your usage limit. … or try again at <ora>» con i formati `%-I:%M %p` e `%b %-d, %Y %-I:%M %p`, e «try again in <durata>». Esempi in `Tests/fixtures/codex/`.
 - **Risposta finale:** l'ultimo `item.completed` di tipo `agent_message` prima di `turn.completed`.
+
+## 5. Banco di prova e motore locale (Storie 5.1 e 5.4, 27/10)
+
+### 5.1 Il Banco
+
+20 compiti (15 brevi, 5 medi) su 6 pagine HTML locali in `Tests/bench/pages/` (posta, tabella con caselle, notebook, modulo, elenco di 150 articoli, sito con menu). Ogni pagina scrive il proprio stato nel titolo della finestra; `--agent-bench` apre la pagina in Safari, esegue la richiesta col motore indicato, rilegge il titolo con l'Accessibilità e confronta. Le conferme vengono approvate dal banco, le domande restano senza risposta.
+
+### 5.2 Modello Apple: dal 5% all'80%
+
+Registro delle prove (ogni riga è il Banco completo; «primo» è il tempo fino alla prima azione con effetti):
+
+| Versione | Riusciti | Primo (mediana) | Tempo (mediana) | Cosa è cambiato |
+| --- | --- | --- | --- | --- |
+| Strumenti liberi (tool calling di FoundationModels) | 1/20 (5%) | 4,0 s | 12,0 s | Base: clicca id mai visti, apre app sbagliate (Mail, una ricerca Google), dichiara riusciti compiti non fatti |
+| Passi guidati (un'azione per volta, generazione vincolata) | 4/5 su un sottoinsieme | 4,5 s | 6,7 s | Azioni giuste, ma il modello non dice mai «fatto» e ripete (ha scritto un nome 8 volte): scartata |
+| Piano intero in una chiamata, elementi indicati per testo | 8/20 (40%) | 5,6 s | 6,5 s | L'app risolve il testo in id; nessuna ripetizione |
+| + filtro della barra del browser, clic prima di scrivere, verifica del campo | 10/20 | 6,7 s | 8,1 s | |
+| + ricerca nella pagina di numeri e nomi fuori schermo, menu a tendina, ripresa del passo dopo un clic | 14/20 (70%) | 6,6 s | 7,4 s | Un errore grave: ha eliminato la mail sbagliata copiando un esempio del prompt |
+| + esempi con nomi inventati, scarto dei clic non pertinenti, conferma che cita la richiesta | 15/20 (75%) | 6,8 s | 8,8 s | Nel notebook ha inserito testo in mezzo a una cella |
+| + regola «niente scrittura su testi esistenti», solo elementi della pagina, riepilogo onesto, ruoli corretti | **16/20 (80%)** | **5,6 s** | **6,5 s** | Versione adottata |
+
+Le quattro richieste che non riesce restano sicure: le modifiche di testo nel notebook vengono rifiutate («Col modello locale non modifico testi già scritti: chiedilo a Claude o a Codex») invece di sporcare la cella; «spunta le 18:30 per tutti quelli che hanno già le 21:30» richiede un ragionamento che il modello piccolo non fa; lo scorrimento in fondo a una pagina lunga è a volte instabile.
+
+**Decisioni.** Il motore locale lavora in modalità **piano** (`LocalEngine.Mode.plan`): una chiamata produce tutti i passi con generazione vincolata, l'app li esegue risolvendo ogni elemento per testo solo dentro la pagina web, scarta i clic che non c'entrano con la richiesta e quelli rischiosi non chiesti (inviare, eliminare), mette per ultimi quelli rischiosi, chiede conferma citando la richiesta, non scrive mai su testi già presenti quando la richiesta è una modifica, e alla fine dice che cosa ha fatto davvero («Ho cliccato «Prezzi»»). Le modalità «passi» e «strumenti» restano per confronto (`--local-mode`).
+
+**Miglioramenti utili anche ai motori cloud.** `observe` ora segna lo stato delle caselle (`checked`/`unchecked`) e gli elementi interni alla pagina web (`(page)`); la ricerca con `query` trova anche elementi fuori schermo e il clic con il mouse li porta prima in vista; `type_text` verifica che il campo mostri il testo scritto.
+
+## 6. Esito dello spike sui modelli locali (Storia 5.2, 27/10)
+
+Stesso Banco, stesso motore locale in modalità piano, modello servito da **Ollama 0.40.11** tramite il provider compatibile OpenAI (`--agent-bench --engine local --model …`). Mac: M1, 16 GB, Safari aperto.
+
+| Modello | Riusciti | Brevi | Medi | Prima azione (mediana / 90°) | Tempo (mediana / 90°) | Memoria (`ollama ps`) |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Apple sul dispositivo** | **16/20 (80%)** | 12/15 | 4/5 | 5,6 s / 8,8 s | **6,5 s** / 9,5 s | di sistema |
+| qwen3.5:4b | 13/20 (65%) | 11/15 | 2/5 | 11,3 s / 35,9 s | 12,9 s / 39,4 s | 9,4 GB |
+| **qwen3.5:9b** | **18/20 (90%)** | 13/15 | 5/5 | 18,9 s / 44,5 s | 20,2 s / 47,2 s | 10 GB |
+| gemma4:e4b | 9/20 (45%) | 7/15 | 2/5 | 9,0 s / 65,6 s | 15,8 s / 94,8 s | 10 GB |
+
+**Osservazioni.**
+
+- **Ollama usa già MLX.** Il log del server dice «starting mlx runner subprocess» per tutti e tre i modelli e `ollama ps` riporta `RUNNER mlx`, `100% GPU`. Il confronto con LM Studio (anch'esso MLX) non avrebbe cambiato il quadro e non è stato fatto; il provider funziona con entrambi perché usa la stessa API.
+- **Il ragionamento va spento.** I modelli Qwen 3.5 «pensano» prima di rispondere: con 800 token di limite la risposta arrivava vuota dopo 55 s. Con `reasoning_effort: "none"` lo stesso piano costa 57 token. Il provider lo manda sempre (e riprova senza se un server lo rifiuta).
+- **Memoria.** Ollama riserva il contesto massimo (131.072 token): 9–10 GB anche per il modello da 4 miliardi. Su 16 GB con il browser aperto è al limite. Con `OLLAMA_CONTEXT_LENGTH=8192` all'avvio di Ollama la memoria scende di molto: l'agente non usa più di qualche migliaio di token.
+- **gemma4:e4b** produce spesso JSON non valido con lo schema imposto ed è il più lento: scartato.
+- **MLX dentro l'app** (`mlx-swift-lm`, prodotto `MLXFoundationModels`): il pacchetto esiste e si integra con `LanguageModelSession`, ma la compilazione del pacchetto esterno non è stata autorizzata in questa sessione. Visto che Ollama gira già su MLX, il guadagno atteso è solo l'assenza del server, a fronte di gigabyte di pesi nel processo dell'app: resta rinviato.
+
+**Decisioni.**
+
+1. **Predefinito: modello Apple.** È il più veloce (6,5 s a compito), non occupa memoria propria e supera la soglia di SM-6 (70%).
+2. **Modello locale esteso consigliato: `qwen3.5:9b` su Ollama.** Supera la soglia di SM-6 (85%) con il 90%, ma costa circa 20 s a compito e 10 GB: conviene quando la precisione conta più del tempo e il Mac ha memoria libera. **NFR-9 non è rispettato** per il modello esteso su M1 (prima azione 18,9 s contro 5 s): il limite viene dalla lettura del prompt su M1, non dal codice. Su Mac con più memoria e chip più recenti il quadro migliora.
+3. `qwen3.5:4b` non conviene: più lento e meno preciso del modello Apple.

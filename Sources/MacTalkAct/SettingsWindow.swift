@@ -459,7 +459,7 @@ private struct AgentSection: View {
         }
 
         Card(title: "Locale (sul Mac)",
-             footer: "Il modello Apple è sempre presente con Apple Intelligence. Un server sul Mac (Ollama, LM Studio, mlx_lm.server) può ospitare un modello più capace: se non risponde l'app usa il modello Apple.") {
+             footer: "Il modello Apple è sempre presente con Apple Intelligence: sul banco di prova riesce l'80% dei compiti in circa 6 secondi. Un server sul Mac (Ollama, LM Studio, mlx_lm.server) può ospitare un modello più capace: con qwen3.5:9b su Ollama il 90%, ma circa 20 secondi a compito e 10 GB di memoria su un M1. Se il server non risponde l'app usa il modello Apple.") {
             Picker("Modello", selection: $settings.localProvider) {
                 ForEach(LocalProvider.allCases) { Text($0.title).tag($0) }
             }
@@ -528,6 +528,10 @@ private struct AgentSection: View {
     private func loadModels() async {
         do {
             serverModels = try await OpenAICompatibleModel.models(baseURL: settings.localServerURL)
+            // The model that did best on the bench, when it is there and nothing is chosen yet.
+            if settings.localServerModel.isEmpty, let best = ["qwen3.5:9b", "qwen3.5:4b"].first(where: serverModels.contains) {
+                settings.localServerModel = best
+            }
             serverStatus = serverModels.isEmpty ? "Server raggiungibile, nessun modello installato." : "Server raggiungibile: \(serverModels.count) modelli."
         } catch {
             serverModels = []
