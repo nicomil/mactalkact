@@ -43,7 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// What the warm `claude` processes depend on: when it changes they are replaced.
     private var agentConfigKey: String {
         [settings.model, settings.fastModel, "\(settings.useFastModel)", settings.deepEffort, settings.fastEffort,
-         "\(settings.agentMaxTurns)", settings.backend.rawValue, settings.claudePath, "\(settings.useAI)"].joined(separator: "|")
+         "\(settings.agentMaxTurns)", settings.backend.rawValue, settings.claudePath, "\(settings.useAI)",
+         settings.agentEngine.rawValue, "\(settings.engineFallback)", settings.codexPath, settings.localProvider.rawValue,
+         settings.localServerURL, settings.localServerModel, "\(settings.localServerAllowRemote)"].joined(separator: "|")
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -91,6 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     let key = self.agentConfigKey
                     if key != self.lastAgentConfigKey {
                         self.lastAgentConfigKey = key
+                        // Engines may have changed: re-check them, then warm the next one (AD-14).
+                        self.coordinator.agent.refreshAvailability()
                         self.coordinator.prewarmAI()
                     }
                 }
@@ -145,9 +149,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Status
         let agentLine = NSMenuItem(title: "Agente: \(agentStatusText)", action: #selector(openStatusSection), keyEquivalent: "")
         agentLine.target = self
-        agentLine.image = NSImage(systemSymbolName: coordinator.agent.availability == .available ? "sparkles" : "pause.circle",
+        let choice = coordinator.agent.currentChoice()
+        agentLine.image = NSImage(systemSymbolName: choice == nil ? "pause.circle" : (choice!.isFallback ? "arrow.triangle.branch" : "sparkles"),
                                   accessibilityDescription: nil)
         menu.addItem(agentLine)
+        let engineItem = NSMenuItem(title: "Motore dell'agente", action: nil, keyEquivalent: "")
+        engineItem.image = NSImage(systemSymbolName: "cpu", accessibilityDescription: nil)
+        let em = NSMenu()
+        for id in EngineID.allCases {
+            let state = coordinator.agent.availability(of: id)
+            let note = state == .available ? "" : " — \(EngineSelector.state(state))"
+            let item = NSMenuItem(title: id.title + note, action: #selector(chooseEngine(_:)), keyEquivalent: "")
+            item.representedObject = id.rawValue
+            item.state = settings.agentEngine == id ? .on : .off
+            item.target = self
+            em.addItem(item)
+        }
+        em.addItem(.separator())
+        let fb = NSMenuItem(title: "Passa agli altri motori quando serve", action: #selector(quickToggle(_:)), keyEquivalent: "")
+        fb.representedObject = "engineFallback"
+        fb.state = settings.engineFallback ? .on : .off
+        fb.target = self
+        em.addItem(fb)
+        let recheck = NSMenuItem(title: "Ricontrolla i motori", action: #selector(recheckEngines), keyEquivalent: "")
+        recheck.target = self
+        em.addItem(recheck)
+        engineItem.submenu = em
+        menu.addItem(engineItem)
         let routerLine = NSMenuItem(title: "Comprensione: \(routerStatusText)", action: #selector(openUnderstandingSection), keyEquivalent: "")
         routerLine.target = self
         routerLine.image = NSImage(systemSymbolName: "brain", accessibilityDescription: nil)
@@ -179,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toggle("Modello Apple per capire le frasi", settings.useOnDeviceRouter, "useOnDeviceRouter")
         toggle("Corsia locale ⚡️ (comandi semplici senza Claude)", settings.useLocalLane, "useLocalLane")
         toggle("Modello rapido per le richieste semplici", settings.useFastModel, "useFastModel")
-        toggle("Usa Claude", settings.useAI, "useAI")
+        toggle("Usa l'agente", settings.useAI, "useAI")
         q.addItem(.separator())
         toggle("Rispondi a voce", settings.speakReplies, "speakReplies")
         toggle("Suoni", settings.soundsEnabled, "soundsEnabled")
@@ -196,17 +224,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         conv.submenu = cm
         q.addItem(conv)
-        let models = NSMenuItem(title: "Modello per i compiti lunghi", action: nil, keyEquivalent: "")
-        let mm = NSMenu()
-        for (id, name) in [("claude-opus-5-5", "Opus 5.5"), ("claude-sonnet-5-5", "Sonnet 5.5"), ("claude-haiku-5-5", "Haiku 5.5")] {
-            let item = NSMenuItem(title: name, action: #selector(setDeepModel(_:)), keyEquivalent: "")
-            item.representedObject = id
-            item.state = settings.model == id ? .on : .off
-            item.target = self
-            mm.addItem(item)
+        if settings.agentEngine != .local {
+            let codex = settings.agentEngine == .codex
+            let models = NSMenuItem(title: "Modello di \(settings.agentEngine.displayName) per i compiti lunghi", action: nil, keyEquivalent: "")
+            let mm = NSMenu()
+            let list = codex
+                ? [("gpt-6.1-sol", "GPT-6.1 Sol"), ("gpt-6-astra", "GPT-6 Astra"), ("gpt-6.1-terra", "GPT-6.1 Terra")]
+                : [("claude-opus-5-5", "Opus 5.5"), ("claude-sonnet-5-5", "Sonnet 5.5"), ("claude-haiku-5-5", "Haiku 5.5")]
+            for (id, name) in list {
+                let item = NSMenuItem(title: name, action: #selector(setDeepModel(_:)), keyEquivalent: "")
+                item.representedObject = id
+                item.state = (codex ? settings.codexModel : settings.model) == id ? .on : .off
+                item.target = self
+                mm.addItem(item)
+            }
+            models.submenu = mm
+            q.addItem(models)
         }
-        models.submenu = mm
-        q.addItem(models)
         quick.submenu = q
         menu.addItem(quick)
 
@@ -288,6 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "useLocalLane": settings.useLocalLane.toggle()
         case "useFastModel": settings.useFastModel.toggle()
         case "useAI": settings.useAI.toggle()
+        case "engineFallback": settings.engineFallback.toggle()
         case "speakReplies": settings.speakReplies.toggle()
         case "soundsEnabled": settings.soundsEnabled.toggle()
         case "startListening": settings.startListening.toggle()
@@ -297,8 +332,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setConversationSeconds(_ sender: NSMenuItem) { settings.conversationSeconds = Double(sender.tag) }
 
+    @objc private func chooseEngine(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let id = EngineID(rawValue: raw) else { return }
+        settings.agentEngine = id
+        coordinator.agent.updateAggregate()
+    }
+
+    @objc private func recheckEngines() {
+        coordinator.agent.refreshAvailability()
+    }
+
     @objc private func setDeepModel(_ sender: NSMenuItem) {
-        if let id = sender.representedObject as? String { settings.model = id }
+        guard let id = sender.representedObject as? String else { return }
+        if id.hasPrefix("gpt-") { settings.codexModel = id } else { settings.model = id }
     }
 
     @objc private func openSection(_ sender: NSMenuItem) {

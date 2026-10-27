@@ -36,6 +36,9 @@ final class AgentTools {
         self.executor = executor
     }
 
+    /// Debug only (`--fallback-test`): counts an action with effects without doing anything.
+    func simulateEffect() { effectfulCalls += 1 }
+
     /// Fresh state for a new task.
     func reset() {
         registry.removeAll()

@@ -11,10 +11,15 @@ final class AgentRunner {
     private let settings: AppSettings
     private(set) var engines: [EngineID: AgentEngine] = [:]
     var running = false
-    /// Debug commands only: use this engine, without fallback and without touching the settings.
-    var forcedEngine: EngineID?
-    private var chosenEngine: EngineID { forcedEngine ?? settings.agentEngine }
-    private var fallbackOn: Bool { forcedEngine == nil && settings.engineFallback }
+    /// Debug commands only: chosen engine and fallback, without touching the user's settings.
+    var overrideChoice: (engine: EngineID, fallback: Bool)?
+    /// Debug commands only: use this engine, without fallback.
+    var forcedEngine: EngineID? {
+        get { overrideChoice?.engine }
+        set { overrideChoice = newValue.map { ($0, false) } }
+    }
+    private var chosenEngine: EngineID { overrideChoice?.engine ?? settings.agentEngine }
+    private var fallbackOn: Bool { overrideChoice?.fallback ?? settings.engineFallback }
 
     static let systemPrompt = """
     You are the hands of a person who controls their Mac by voice because their hands are busy \

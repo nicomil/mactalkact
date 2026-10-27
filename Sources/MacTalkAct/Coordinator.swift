@@ -165,10 +165,15 @@ final class Coordinator {
         if settings.speakReplies { Task { await speaker.say(message) } }
     }
 
+    private var lastAggregate: AgentAvailability = .available
+
     private func availabilityChanged(_ a: AgentAvailability) {
         onModeChange?()
+        let previous = lastAggregate
+        lastAggregate = a
         switch a {
         case .available:
+            guard case .paused = previous else { return } // e.g. Codex found at launch: nothing came back
             hud.show(.info, "L'agente è tornato disponibile", autoHide: 3)
             if settings.speakReplies { Task { await speaker.say("L'agente è di nuovo disponibile.") } }
         case .paused(let until):

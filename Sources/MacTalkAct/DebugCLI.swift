@@ -591,3 +591,78 @@ extension DebugCLI {
         window.close()
     }
 }
+
+/// A pretend engine for `--fallback-test`: optionally "acts" a few times, then fails or answers.
+@MainActor
+final class FakeEngine: AgentEngine {
+    let id: EngineID
+    var availability: AgentAvailability = .available
+    var onAvailabilityChange: ((AgentAvailability) -> Void)?
+    private let tools: AgentTools
+    private let effectsBeforeFailure: Int
+    private let fails: Bool
+    private(set) var runs = 0
+
+    init(_ id: EngineID, tools: AgentTools, effectsBeforeFailure: Int = 0, fails: Bool) {
+        self.id = id
+        self.tools = tools
+        self.effectsBeforeFailure = effectsBeforeFailure
+        self.fails = fails
+    }
+
+    func model(for level: AgentLevel) -> String { "finto-\(id.rawValue)" }
+    func refreshAvailability() {}
+    func prewarm() {}
+    func cancel() {}
+    func shutdown() {}
+
+    func run(_ request: AgentRequest) async throws -> String {
+        runs += 1
+        for _ in 0..<effectsBeforeFailure { tools.simulateEffect() }
+        if fails {
+            let until = Date().addingTimeInterval(3600)
+            availability = .paused(until: until)
+            onAvailabilityChange?(availability)
+            throw AgentEngineError.limit(message: "limite simulato", until: until)
+        }
+        return "fatto da \(id.rawValue)"
+    }
+}
+
+extension DebugCLI {
+    /// `--fallback-test`: a limit before any action moves the request to the next engine;
+    /// a limit after an action stops it (FR-28, AD-15). No real engine, nothing on screen.
+    static func fallbackTest() async -> Bool {
+        var failures = 0
+        func check(_ name: String, _ ok: Bool) {
+            print(ok ? "  ok   \(name)" : "  FAIL \(name)")
+            if !ok { failures += 1 }
+        }
+        for effects in [0, 1] {
+            let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+            try? await agent.start()
+            let claude = FakeEngine(.claude, tools: agent.tools, effectsBeforeFailure: effects, fails: true)
+            let codex = FakeEngine(.codex, tools: agent.tools, fails: false)
+            let local = FakeEngine(.local, tools: agent.tools, fails: false)
+            agent.register(claude); agent.register(codex); agent.register(local)
+            agent.overrideChoice = (.claude, true)
+            var switches: [String] = []
+            agent.onEngineSwitch = { switches.append($0.message) }
+            do {
+                let answer = try await agent.run("prova", context: ScreenContext(), deep: false)
+                print("  N=\(effects): risposta «\(answer)», passaggi: \(switches)")
+                check("N=\(effects): completata dal secondo motore", effects == 0 && answer == "fatto da codex" && codex.runs == 1)
+                check("N=\(effects): passaggio annunciato", switches.first?.hasPrefix("Claude in pausa fino alle") == true && switches.first?.hasSuffix("uso Codex") == true)
+            } catch {
+                print("  N=\(effects): fermata · \(error.localizedDescription)")
+                let midway: Bool
+                if case AgentRunner.RunError.stoppedMidway(let e, let steps, _, let next) = error {
+                    midway = e == .claude && steps == 1 && next == .codex
+                } else { midway = false }
+                check("N=\(effects): fermata a metà senza ripetere", effects == 1 && midway && codex.runs == 0)
+            }
+            agent.shutdown()
+        }
+        return failures == 0
+    }
+}
