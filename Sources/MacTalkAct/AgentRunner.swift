@@ -339,6 +339,13 @@ final class AgentRunner {
             let attemptLevel: AgentLevel = instantPending && engine.id == .claude ? .instant : level
             var attempt = req
             attempt.level = attemptLevel
+            if attemptLevel == .instant {
+                // The Instant level has one tool call (FR-43): say so, so one `act` does the whole step.
+                let rule = "\n<instant>You have exactly ONE tool call for this request. If it needs more than one action (click a field and type, open a menu and pick an item), put all of them in ONE `act` call; `type_text` takes the field id directly. After that call, reply.</instant>"
+                attempt.message += rule
+                let since = attempt.messageSince
+                attempt.messageSince = { since($0) + rule }
+            }
             lastLevel = attemptLevel
             tools.instantGuard = attemptLevel == .instant
             tools.onEscalate = { [weak engine] _ in engine?.interrupt() }
@@ -364,6 +371,12 @@ final class AgentRunner {
             }
             do {
                 let answer = try await engine.run(attempt)
+                if attemptLevel == .instant, tools.escalation == nil, !tools.cancelled,
+                   let reason = AgentTools.instantGaveUp(answer: answer, effectfulCalls: tools.effectfulCalls) {
+                    // Haiku gave up inside its one call: the fast level tries, with what was done (FR-43).
+                    escalate(reason)
+                    continue
+                }
                 if attemptLevel == .instant, let reason = tools.escalation {
                     // The model stopped after the tool said so: the request goes on at the fast level.
                     escalate(reason)

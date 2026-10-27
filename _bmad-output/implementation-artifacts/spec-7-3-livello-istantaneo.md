@@ -2,7 +2,7 @@
 title: 'Storia 7.3 — Livello istantaneo per i comandi a un passo'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-progress'
+status: 'in-review'
 baseline_commit: 'b294d2232d687743c798bb42607be30dcfa7a953'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -61,14 +61,14 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `AgentEngine.swift`, `IntentClassifier.swift`, `IntentRouter.swift` -- livello, euristiche, decisione.
-- [ ] `ClaudeCLI.swift`, `ClaudeEngine.swift` -- terzo livello e interruzione del turno.
-- [ ] `AgentTools.swift`, `AgentRunner.swift` -- regola di scalata e ripartenza.
-- [ ] `Coordinator.swift` -- bersaglio noto e livello.
-- [ ] `Settings.swift`, `SettingsWindow.swift` -- impostazioni.
-- [ ] `DebugCLI.swift` -- `--selftest` (euristiche, regola di scalata), `--fallback-test` (scalata con Motore finto, interrupt col claude finto), Banco con livello e scalata.
-- [ ] `Tests/corpus/instradamento.tsv` -- righe nuove per `.instant` (convenzione: ogni regola nuova del Router aggiunge righe al Corpus).
-- [ ] ricerca -- Banco con il Livello istantaneo: compiti a un passo senza scalata, costo della scalata, confronto con il rapido.
+- [x] `AgentEngine.swift`, `IntentClassifier.swift`, `IntentRouter.swift` -- livello, euristiche, decisione.
+- [x] `ClaudeCLI.swift`, `ClaudeEngine.swift` -- terzo livello e interruzione del turno.
+- [x] `AgentTools.swift`, `AgentRunner.swift` -- regola di scalata e ripartenza.
+- [x] `Coordinator.swift` -- bersaglio noto e livello.
+- [x] `Settings.swift`, `SettingsWindow.swift` -- impostazioni.
+- [x] `DebugCLI.swift` -- `--selftest` (euristiche, regola di scalata), `--fallback-test` (scalata con Motore finto, interrupt col claude finto), Banco con livello e scalata.
+- [x] `Tests/corpus/instradamento.tsv` -- righe nuove per `.instant` (convenzione: ogni regola nuova del Router aggiunge righe al Corpus).
+- [x] ricerca -- Banco con il Livello istantaneo: compiti a un passo senza scalata, costo della scalata, confronto con il rapido.
 
 **Acceptance Criteria:**
 - Given il Banco con Claude, when lo eseguo con il Livello istantaneo, then la ricerca riporta quota dei compiti a un passo senza scalata (obiettivo ≥ 70%), costo di una scalata (obiettivo ≤ 1 s) e compiti falliti rispetto al rapido.
@@ -88,6 +88,15 @@ Spike del 27/10: con `{"type":"control_request","request":{"subtype":"interrupt"
 ## Implementation Notes
 
 - Spec approvata in autonomia (Nico: «committa e procedi»).
+- Implementazione diretta (commit `c62ff37` e successivo).
+  - `ClaudeCLI.interruptCurrent` (control_request interrupt) con sessione tenuta viva dopo l'interruzione voluta.
+  - Regola `AgentTools.instantFailure` più `instantGaveUp`.
+  - Ripartenza in `AgentRunner` con `<already_done>` ed elementi attuali.
+  - Avviso `<instant>` (una sola chiamata, più azioni in un `act`).
+- «clicca X» resta alla grammatica (Comando rapido), che viene prima dell'Agente; il Corpus lo registra.
+- «mail»/«messaggio» rendono «complessa» una frase per la scelta del modello, ma non ne fanno più passi: `isOneStep` ha i suoi segni di più passi.
+- Regola aggiunta dopo il Banco: scalata anche se il turno istantaneo finisce senza azioni con effetti o con una risposta che ammette di non esserci riuscito. Senza, Haiku si arrendeva dentro la sua chiamata (4 fallimenti su 16).
+- Esito dei criteri (ricerca §15): 69% senza scalata; scalata da 1,8 a 6,5 s (obiettivo ≤ 1 s, non raggiunto); 1 fallimento contro 0 del rapido (non raggiunto); mediana 4,4 s contro circa 7 s.
 
 ## Spec Change Log
 

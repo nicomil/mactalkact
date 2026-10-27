@@ -96,6 +96,9 @@ enum DebugCLI {
             check("esito con errore → scalata", AgentTools.instantFailure(.error("No element 9")) != nil)
             check("nothing changed → scalata", AgentTools.instantFailure(.text("Clicked.\nRESULT: nothing changed")) == "nessun effetto")
             check("esito con cambiamento → resta", AgentTools.instantFailure(.text("Clicked.\nRESULT: title changed")) == nil)
+            check("nessuna azione → scalata", AgentTools.instantGaveUp(answer: "Fatto.", effectfulCalls: 0) == "nessuna azione")
+            check("«non trovo» → scalata", AgentTools.instantGaveUp(answer: "Non trovo l'articolo 137.", effectfulCalls: 1) != nil)
+            check("risposta riuscita → resta", AgentTools.instantGaveUp(answer: "Ho spuntato Bruno alle 18:30.", effectfulCalls: 1) == nil)
         }
         print("Eventi dei Motori per le fasi:")
         do {
@@ -1379,6 +1382,13 @@ extension DebugCLI {
                 await BenchFixtures.tearDown(kind, checks: task.checks)
                 continue
             }
+            // Like the Router: one step on a known target goes to the Instant level (Story 7.3).
+            // Decided before the clock starts: the Router's time is not part of the agent's phases.
+            var instant = false
+            if !kind.isPhrase, AppSettings.shared.instantLevel, engine == .claude, RouteHeuristics.isOneStep(task.request) {
+                let labels = ScreenContext.capture(includeLabels: true).visibleLabels
+                instant = RouteHeuristics.hasKnownTarget(task.request, knownApp: { ex.findApp($0) != nil }, labels: labels, memory: [])
+            }
             let started = Date()
             var note = ""
             var ranAgent = true
@@ -1405,11 +1415,7 @@ extension DebugCLI {
                     note = "router agisce: \(String(describing: decision).prefix(60))"
                 }
             } else {
-                // Like the Router: one step on a known target goes to the Instant level (Story 7.3).
                 let deep = task.level == "medio"
-                let labels = ScreenContext.capture(includeLabels: true).visibleLabels
-                let instant = AppSettings.shared.instantLevel && engine == .claude && RouteHeuristics.isOneStep(task.request)
-                    && RouteHeuristics.hasKnownTarget(task.request, knownApp: { ex.findApp($0) != nil }, labels: labels, memory: [])
                 do {
                     note = try await agent.run(task.request, context: ctx, deep: deep, instant: instant)
                 } catch {

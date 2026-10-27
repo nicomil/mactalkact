@@ -457,3 +457,27 @@ Stessi 34 compiti della riga di base (pagine, canvas, Finder, Frasi spurie), Mot
 Cosa dice: il guadagno è piccolo, circa 0,7 s sulla mediana del compito, e il primo strumento non migliora (la differenza sta nel rumore di una corsa). La ragione più probabile è che anche prima la cache del prompt lavorava: il prompt di sistema e gli strumenti restano in cache lato server per alcuni minuti anche tra processi diversi, come mostra `--session-test` (3.048 token letti dalla cache subito dopo un riavvio). L'avvio era già nascosto dal processo pronto. La Sessione lunga aggiunge invece la storia dei turni precedenti: in media 42 mila token letti dalla cache per turno, che pesano poco sul tempo ma crescono fino al riavvio.
 
 Conseguenze per l'Epic 7: la Sessione lunga resta attiva (non peggiora la precisione, accorcia un po' il compito, ricorda i turni precedenti), ma l'obiettivo di NFR-12 (primo strumento ≤ 1,5 s) non si raggiunge da questa parte. Il margine sta nel modello: il primo token (1,6–1,7 s) e il turno finale (1,3 s). Questo rende la Storia 7.3 (Livello istantaneo con Haiku 5.5) la leva principale. Va valutato se abbassare `sessionMaxRequests` riduce la storia senza perdere il guadagno. Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2039-claude.tsv` (prima), `…-2046-claude.tsv` (dopo).
+
+## 15. Livello istantaneo (Storia 7.3, 27 ottobre 2026)
+
+I compiti del Banco che il Router manda al Livello istantaneo sono 16 su 34: richieste a un passo su qualcosa di visibile o noto. Vanno a Claude Haiku 5.5 con effort basso, in una Sessione lunga propria, e sono stati misurati in tre giri.
+
+| Giro | Regola di scalata | Senza scalata | Riusciti | Compito, mediana |
+| --- | --- | --- | --- | --- |
+| Livello rapido (riferimento, §14) | — | — | 16/16 | ≈ 7 s |
+| 1 | seconda chiamata o azione senza effetto | 10/16 (62%) | 16/16 | 5,4 s |
+| 2 | + nel messaggio: «una sola chiamata, più azioni in un solo `act`» | 15/16 (94%) | 12/16 | 4,5 s |
+| 3 | + scalata anche se il turno finisce senza azioni o con una risposta che ammette di non esserci riuscito | 11/16 (69%) | 15/16 | 4,4 s |
+
+Esito rispetto ai criteri della storia (giro 3):
+- **Compiti a un passo risolti senza scalata: 69%.** Obiettivo ≥ 70%, raggiunto al limite.
+- **Costo di una scalata: tra 1,8 e 6,5 s** prima di passare al rapido. Obiettivo ≤ 1 s, **non raggiunto**. Haiku impiega quasi sempre un turno intero prima di fare la seconda chiamata o di arrendersi.
+- **Compiti falliti: 1, contro 0 del rapido.** Il criterio «non più del rapido» **non è raggiunto**. In `finder-rinomina` Haiku ha aperto il file in TextEdit con un doppio clic invece di rinominarlo. Il livello rapido, ricevuto il già fatto, si è fermato per la regola di sicurezza sull'app in primo piano cambiata.
+- **Velocità:** sui compiti senza scalata il compito scende a 2,2–4,7 s (mediana complessiva 4,4 s contro circa 7 s del rapido) e il primo strumento a 1,8 s di mediana. È la leva più forte vista finora verso NFR-12.
+
+Cosa resta da decidere (per la Storia 7.5 o un ciclo successivo):
+1. Come ridurre il costo della scalata. Si potrebbe interrompere il turno appena arriva la seconda chiamata, che oggi viene rifiutata ma lascia il modello finire, oppure partire in parallelo con il rapido.
+2. Se escludere dal Livello istantaneo le azioni del Finder sui file (rinomina, sposta), dove un clic sbagliato apre un'altra app.
+3. Se la regola «risposta che ammette di non esserci riuscito», che legge parole italiane, sia accettabile come euristica.
+
+Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2113-claude.tsv` (giro 1, Banco completo), `…-2117-claude.tsv` (giro 2), `…-2121-claude.tsv` (giro 3).

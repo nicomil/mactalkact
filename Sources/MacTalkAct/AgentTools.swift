@@ -587,6 +587,16 @@ final class AgentTools {
         return nil
     }
 
+    /// The Instant turn ended without doing the job: no action with effects, or an answer that says so.
+    /// Pure, tested by `--selftest`.
+    static func instantGaveUp(answer: String, effectfulCalls: Int) -> String? {
+        if effectfulCalls == 0 { return "nessuna azione" }
+        let n = Grammar.normalize(answer)
+        let signs = ["non sono riuscit", "non riesco", "non ho potuto", "non posso", "non trovo", "non ho trovato",
+                     "non ho ancora", "non e stato possibile", "non si e aperto", "dimmi se", "vuoi che"]
+        return signs.contains(where: n.contains) ? "risposta senza risultato" : nil
+    }
+
     private func escalate(_ reason: String) {
         guard escalation == nil else { return }
         escalation = reason
