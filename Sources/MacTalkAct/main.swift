@@ -142,6 +142,11 @@ if let path = argument(after: "--transcribe") {
     dispatchMain()
 }
 
+if let path = argument(after: "--vad-test") {
+    MainActor.assumeIsolated { DebugCLI.vadTest(path) }
+    exit(0)
+}
+
 if let path = argument(after: "--stream-test") {
     Task { @MainActor in
         await DebugCLI.streamTest(path)

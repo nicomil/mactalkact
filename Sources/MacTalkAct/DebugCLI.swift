@@ -342,6 +342,42 @@ enum DebugCLI {
 extension DebugCLI {
     /// `--stream-test <file>`: feeds a file into an analyzer through a stream that stays open
     /// (like the microphone in continuous mode) and checks how finalize behaves.
+    /// `--vad-test file`: the voice detector of the app over an audio file, chunk by chunk like the
+    /// microphone tap: when sentences open and close, and how much of them was crying.
+    static func vadTest(_ path: String) {
+        do {
+            let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
+            let format = file.processingFormat
+            let router = AudioRouter()
+            var t: Double = 0
+            var opened: Double = 0
+            var cryChunks = 0, chunks = 0
+            router.onSegmentStart = { _, _ in opened = t; print(String(format: "%6.2fs  apre", t)) }
+            router.onSegmentEnd = { _ in print(String(format: "%6.2fs  chiude (frase di %.1fs)", t, t - opened)) }
+            router.setVAD(true)
+            let size: AVAudioFrameCount = 1024
+            while file.framePosition < file.length {
+                guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: size) else { break }
+                try file.read(into: buf, frameCount: size)
+                let n = Int(buf.frameLength)
+                guard n > 0, let ch = buf.floatChannelData?[0] else { break }
+                var sum: Float = 0
+                for i in 0..<n { sum += ch[i] * ch[i] }
+                let rms = (sum / Float(n)).squareRoot()
+                let p = Pitch.dominant(ch, count: n, sampleRate: format.sampleRate)
+                let cry = rms > 0.004 && Pitch.isCry(p) && ProcessInfo.processInfo.environment["MTA_NOCRY"] == nil
+                chunks += 1
+                if cry { cryChunks += 1 }
+                router.process([], rms: rms, duration: Double(n) / format.sampleRate, cry: cry)
+                t += Double(n) / format.sampleRate
+            }
+            router.closeAny()
+            print(String(format: "Durata %.1fs · pezzi riconosciuti come pianto: %d%%", t, cryChunks * 100 / max(1, chunks)))
+        } catch {
+            print("Errore: \(error.localizedDescription)")
+        }
+    }
+
     static func streamTest(_ path: String) async {
         do {
             let t0 = Date()

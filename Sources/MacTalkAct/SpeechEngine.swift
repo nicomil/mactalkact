@@ -57,6 +57,7 @@ final class AudioRouter: @unchecked Sendable {
     private var speechTime: TimeInterval = 0
     private var silenceTime: TimeInterval = 0
     private var segmentTime: TimeInterval = 0
+    private var cryTime: TimeInterval = 0
     private var noiseFloor: Float = 0.004
     private var peakRMS: Float = 0
 
@@ -117,6 +118,7 @@ final class AudioRouter: @unchecked Sendable {
     }
 
     private func openLocked() -> AsyncStream<AnalyzerInput> {
+        cryTime = 0
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         for input in preroll { continuation.yield(input) }
         preroll.removeAll()
@@ -139,7 +141,9 @@ final class AudioRouter: @unchecked Sendable {
     var lastInputAt: Date { lock.withLock { lastInput } }
     private var lastInput = Date()
 
-    func process(_ inputs: [AnalyzerInput], rms: Float, duration: TimeInterval) {
+    /// `cry`: the chunk is a high, steady sound (a baby crying, around 400–600 Hz) and does not
+    /// count as speech, neither to open a sentence nor to keep it open.
+    func process(_ inputs: [AnalyzerInput], rms: Float, duration: TimeInterval, cry: Bool = false) {
         var started: AsyncStream<AnalyzerInput>?
         var ended = false
 
@@ -164,7 +168,7 @@ final class AudioRouter: @unchecked Sendable {
         let threshold = max(config.minStartRMS, noiseFloor * config.noiseFactor)
 
         if active == nil {
-            if vadEnabled && rms > threshold {
+            if vadEnabled && rms > threshold && !cry {
                 speechTime += duration
                 if speechTime >= config.minSpeech { started = openLocked() }
             } else {
@@ -175,10 +179,11 @@ final class AudioRouter: @unchecked Sendable {
             peakRMS = max(peakRMS, rms)
             // Hysteresis: once a sentence is open, even a soft last word counts as speech.
             let keepGoing = max(config.minStartRMS * 0.4, noiseFloor * 2)
-            silenceTime = rms > keepGoing ? 0 : silenceTime + duration
+            if cry { cryTime += duration }
+            silenceTime = rms > keepGoing && !cry ? 0 : silenceTime + duration
             if silenceTime >= config.endSilence || segmentTime >= config.maxSegment {
-                Log.debug(String(format: "VAD: frase %.2fs, picco %.4f, fondo %.4f, soglia %.4f, continua %.4f",
-                                 segmentTime, peakRMS, noiseFloor, threshold, keepGoing))
+                Log.debug(String(format: "VAD: frase %.2fs, picco %.4f, fondo %.4f, soglia %.4f, continua %.4f, pianto %.1fs",
+                                 segmentTime, peakRMS, noiseFloor, threshold, keepGoing, cryTime))
                 closeLocked()
                 ended = true
             }
@@ -187,6 +192,49 @@ final class AudioRouter: @unchecked Sendable {
 
         if let started { onSegmentStart?(started, false) }
         if ended { onSegmentEnd?(false) }
+    }
+}
+
+// MARK: - Pitch
+
+/// The pitch of a short chunk of audio, by autocorrelation (on a copy decimated to ~16 kHz).
+/// Adult speech is 85–255 Hz; a baby crying is a steady 400–600 Hz.
+enum Pitch {
+    struct Estimate { let hz: Double; let strength: Float }
+
+    nonisolated static func dominant(_ x: UnsafePointer<Float>, count n: Int, sampleRate: Double) -> Estimate {
+        let step = max(1, Int((sampleRate / 16_000).rounded()))
+        let sr = sampleRate / Double(step)
+        var y = [Float](repeating: 0, count: n / step)
+        for i in 0..<y.count { y[i] = x[i * step] }
+        let m = y.count
+        let minLag = max(2, Int(sr / 900)), maxLag = min(m / 2, Int(sr / 100))
+        guard maxLag > minLag else { return Estimate(hz: 0, strength: 0) }
+        var energy: Float = 0
+        for v in y { energy += v * v }
+        guard energy > 0 else { return Estimate(hz: 0, strength: 0) }
+        var r = [Float](repeating: 0, count: maxLag + 1)
+        var best: Float = 0
+        for lag in minLag...maxLag {
+            var sum: Float = 0, e1: Float = 0, e2: Float = 0
+            for i in 0..<(m - lag) {
+                sum += y[i] * y[i + lag]
+                e1 += y[i] * y[i]
+                e2 += y[i + lag] * y[i + lag]
+            }
+            r[lag] = e1 > 0 && e2 > 0 ? sum / (e1 * e2).squareRoot() : 0
+            best = max(best, r[lag])
+        }
+        // The shortest period close to the best one: multiples of the period correlate as well.
+        guard best > 0, let lag = (minLag...maxLag).first(where: { r[$0] >= best * 0.9 && ($0 == minLag || r[$0] >= r[$0 - 1]) && ($0 == maxLag || r[$0] >= r[$0 + 1]) }) else {
+            return Estimate(hz: 0, strength: 0)
+        }
+        return Estimate(hz: sr / Double(lag), strength: r[lag])
+    }
+
+    /// A clear, high pitch: a cry (or a whistle), not a voice speaking.
+    nonisolated static func isCry(_ p: Estimate) -> Bool {
+        p.strength > 0.6 && p.hz > 380
     }
 }
 
@@ -211,6 +259,9 @@ final class TranscriptionSession {
     private var text: String {
         (finals + [volatileText]).filter { !$0.isEmpty }.joined(separator: " ")
     }
+
+    /// At least one word recognized so far.
+    var hasWords: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     func start(stream: AsyncStream<AnalyzerInput>, locale: Locale, format: AVAudioFormat, vocabulary: [String] = []) {
         let transcriber = SpeechEngine.makeTranscriber(locale: locale)
@@ -487,7 +538,17 @@ final class SpeechEngine {
         s.start(stream: stream, locale: locale, format: format, vocabulary: vocabulary)
         session = s
         Log.debug("Inizio frase (\(forced ? "tasto" : "voce"))")
-        if !forced { onSpeechStart?() }
+        if !forced {
+            onSpeechStart?()
+            // Noise that is not a voice (crying, a TV, the vacuum cleaner) keeps a sentence open
+            // without words: close it after a few seconds instead of listening for up to a minute.
+            Task { @MainActor [weak self, weak s] in
+                try? await Task.sleep(for: .seconds(4))
+                guard let self, let s, self.session === s, !s.forced, !s.hasWords else { return }
+                Log.info("Frase senza parole dopo 4 s: chiusa (rumore o pianto)")
+                self.router.closeAny()
+            }
+        }
     }
 
     private func segmentEnded(forced: Bool) {
@@ -526,7 +587,12 @@ final class SpeechEngine {
                 rms = (sum / Float(n)).squareRoot()
             }
             let duration = Double(n) / buffer.format.sampleRate
-            router.process(inputs, rms: rms, duration: duration)
+            var cry = false
+            if rms > 0.004, let channel = buffer.floatChannelData?[0] {
+                let p = Pitch.dominant(channel, count: n, sampleRate: buffer.format.sampleRate)
+                cry = Pitch.isCry(p)
+            }
+            router.process(inputs, rms: rms, duration: duration, cry: cry)
 
             if let handler = levelBox.value, Date().timeIntervalSince(lastLevel.value) > 0.05 {
                 lastLevel.value = Date()
