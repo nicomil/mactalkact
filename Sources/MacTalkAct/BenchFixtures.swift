@@ -78,7 +78,7 @@ enum BenchFixtures {
         await tearDown(kind, checks: checks) // leftovers of an interrupted run
         switch kind {
         case .app(let name, let inFolder):
-            if checks.contains(where: { $0.target == .file }) || inFolder {
+            if name == "Finder" || checks.contains(where: { $0.target == .file }) {
                 do {
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                     try "Bozza del Banco di prova.\n".write(to: folder.appendingPathComponent("bozza.txt"), atomically: true, encoding: .utf8)
