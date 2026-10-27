@@ -116,6 +116,16 @@ enum DebugCLI {
             var other = CodexEventParser()
             check("Codex: «item.» dentro il testo non conta", other.phase(#"{"type":"error","message":"vedi \"item.started\""}"#) == nil)
         }
+        print("Soglie NFR-12 (Storia 7.5):")
+        do {
+            check("mediana pari = media dei due centrali", median([1, 2, 3, 4]) == 2.5 && median([3, 1, 2]) == 2 && median([]) == nil)
+            let v = nfr12Verdicts(firsts: [1.0, 1.4], totals: [5, 6, 7], instantTotals: [], engineIsClaude: true)
+            check("sotto la soglia: rispettata", v[0].hasSuffix(": rispettata"))
+            check("sopra la soglia: non rispettata", v[1].hasSuffix(": non rispettata"))
+            check("niente valori: non misurata, mai 0 s", v[2] == "livello istantaneo: non misurata")
+            check("al limite: rispettata", nfr12Verdicts(firsts: [1.5], totals: [], instantTotals: [], engineIsClaude: true)[0].hasSuffix(": rispettata"))
+            check("altro motore: non applicabile", nfr12Verdicts(firsts: [1], totals: [1], instantTotals: [1], engineIsClaude: false).allSatisfy { $0.contains("non applicabile") })
+        }
         print("Compiti del Banco:")
         do {
             let tasks = parseBench("""
@@ -1167,6 +1177,28 @@ extension DebugCLI {
         var kind: BenchKind { BenchKind(page) }
     }
 
+    /// The median; the mean of the two middle values for an even count; nil when empty.
+    static func median(_ v: [Double]) -> Double? {
+        let s = v.sorted()
+        guard !s.isEmpty else { return nil }
+        return s.count % 2 == 1 ? s[s.count / 2] : (s[s.count / 2 - 1] + s[s.count / 2]) / 2
+    }
+
+    /// NFR-12 (Story 7.5): first tool ≤ 1,5 s, task ≤ 4,5 s, Instant level ≤ 2,5 s per task, as medians.
+    /// «rispettata» / «non rispettata» / «non misurata»; with another engine the thresholds do not apply.
+    static func nfr12Verdicts(firsts: [Double], totals: [Double], instantTotals: [Double], engineIsClaude: Bool) -> [String] {
+        let rows: [(String, [Double], Double)] = [
+            ("primo strumento", firsts, 1.5), ("compito", totals, 4.5), ("livello istantaneo", instantTotals, 2.5),
+        ]
+        return rows.map { name, values, limit in
+            guard engineIsClaude else { return "\(name): non applicabile (le soglie valgono per Claude)" }
+            guard let m = median(values) else { return "\(name): non misurata" }
+            let shown = String(format: "%.2f", m).replacingOccurrences(of: ".", with: ",")
+            let limitShown = String(format: "%.1f", limit).replacingOccurrences(of: ".", with: ",")
+            return "\(name) \(shown) s (soglia \(limitShown) s): \(m <= limit ? "rispettata" : "non rispettata")"
+        }
+    }
+
     static func loadBench(_ path: String) -> [BenchTask] {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
         return parseBench(text)
@@ -1401,7 +1433,7 @@ extension DebugCLI {
         do { try await agent.start() } catch { print("Server strumenti: \(error)"); return }
         // Restarts of the Long session (Story 7.5): every one is announced with «Riavvio l'Agente».
         let restarts = Box(0)
-        agent.onNotice = { _ in restarts.value += 1 }
+        agent.onNotice = { text in if text == ClaudeEngine.restartNotice { restarts.value += 1 } }
         await closeBenchPages(ex)
         agent.refreshAvailability()
         try? await Task.sleep(for: .seconds(2))
@@ -1561,7 +1593,7 @@ extension DebugCLI {
         agent.shutdown()
         if let previous { await ex.bringToFront(previous) }
 
-        func median(_ v: [Double]) -> Double { let s = v.sorted(); return s.isEmpty ? 0 : s[s.count / 2] }
+        func median(_ v: [Double]) -> Double { Self.median(v) ?? 0 }
         func p90(_ v: [Double]) -> Double { let s = v.sorted(); return s.isEmpty ? 0 : s[min(s.count - 1, Int(Double(s.count) * 0.9))] }
         let ran = rows.filter { $0.skipped == nil }
         let firsts = ran.compactMap(\.first)
@@ -1589,22 +1621,16 @@ extension DebugCLI {
                          instantRows.filter(\.ok).count, median(instantRows.map(\.total)),
                          costs.isEmpty ? "—" : String(format: "%.1f s", median(costs))))
         }
-        // NFR-12 (Story 7.5): the outcome is stated, passed or not.
-        let actionRows = ran.filter { !$0.task.kind.isPhrase }
-        let instantClean = instantRows.filter { $0.escalation.isEmpty }
-        let thresholds: [(String, Double?, Double)] = [
-            ("primo strumento", actionRows.isEmpty ? nil : median(actionRows.compactMap(\.first)), 1.5),
-            ("compito", actionRows.isEmpty ? nil : median(actionRows.map(\.total)), 4.5),
-            ("livello istantaneo", instantClean.isEmpty ? nil : median(instantClean.map(\.total)), 2.5),
-        ]
-        var verdicts: [String] = []
-        for (name, value, limit) in thresholds {
-            let v = value.map { String(format: "%.1f s", $0) } ?? "—"
-            let verdict = value.map { $0 <= limit ? "superata" : "non superata" } ?? "non misurata"
-            verdicts.append("\(name) \(v) (soglia \(String(format: "%.1f", limit)) s): \(verdict)")
+        // NFR-12 (Story 7.5): the outcome is stated, met or not. Rows that never ran stay out.
+        let measured = ran.filter { !$0.task.kind.isPhrase && $0.note != "pagina non aperta" }
+        let verdicts = Self.nfr12Verdicts(firsts: measured.compactMap(\.first), totals: measured.map(\.total),
+                                          instantTotals: instantRows.map(\.total), engineIsClaude: engine == .claude)
+        let restartsText = engine == .claude && AppSettings.shared.longSession ? "\(restarts.value)" : "—"
+        print("  soglie NFR-12 (mediane su \(measured.count) compiti): " + verdicts.joined(separator: " · "))
+        if !instantRows.isEmpty, let clean = Self.median(instantRows.filter { $0.escalation.isEmpty }.map(\.total)) {
+            print(String(format: "  (istantaneo senza scalata, solo informativo: %.2f s)", clean))
         }
-        print("  soglie NFR-12 (mediane): " + verdicts.joined(separator: " · "))
-        print("  riavvii della Sessione lunga: \(restarts.value)")
+        print("  riavvii della Sessione lunga: \(restartsText)")
         print("  somma delle fasi = totale entro 0,2 s: \(ran.allSatisfy(\.sumOK) ? "sì, su ogni compito" : "NO su \(ran.filter { !$0.sumOK }.map(\.task.id).joined(separator: ", "))")")
 
         let f = DateFormatter()
@@ -1619,8 +1645,11 @@ extension DebugCLI {
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
             tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
-        tsv += "# soglie NFR-12: " + verdicts.joined(separator: " · ") + " · riavvii della Sessione lunga: \(restarts.value)\n"
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
+        // The verdict in a file of its own, next to the table: the TSV stays a plain table.
+        let summary = "soglie NFR-12 (mediane su \(measured.count) compiti, motore \(engine.rawValue)): " + verdicts.joined(separator: " · ")
+            + "\nriavvii della Sessione lunga: \(restartsText)\n"
+        try? summary.write(to: out.deletingPathExtension().appendingPathExtension("soglie.txt"), atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")
     }
 }

@@ -195,6 +195,10 @@ La sessione si riavvia da sola, scrivendo il motivo nel log e «Riavvio l'Agente
 
 Se la sessione si chiude a metà senza aver fatto azioni, la richiesta viene ripetuta una volta. L'interruttore **Impostazioni › Agente › Claude › Sessione lunga** spento torna al comportamento di prima: un processo pronto, usato una volta per richiesta.
 
+La Sessione lunga richiede `claude` 2.1.299 o successivo. L'app legge la versione con `claude --version` e la mostra in **Stato e diagnostica**, insieme a quella di `codex` (minima 0.131.0). Con una versione non verificata, o se `claude` parte senza il login dell'abbonamento, l'app usa un processo per richiesta. Le versioni minime vanno rilette entro il **1° novembre 2026**.
+
+L'agente ha tre livelli, ognuno con la sua sessione: **istantaneo** (Claude Haiku 5.5, effort basso) per i comandi a un passo, descritto qui sotto; **rapido** (Claude Sonnet 5.5, effort basso) per le richieste semplici; **profondo** (Claude Opus 5.5, effort medio) per quelle lunghe (più passi, mail, ricerche, «tutte le…»). Dire «pensaci bene» forza il profondo. I modelli si scelgono nelle impostazioni, e ogni sessione si riavvia per conto suo con le regole qui sopra. Le prime tre corsie non usano mai Claude e non consumano l'abbonamento.
+
 **Livello istantaneo.** Le richieste a un passo su qualcosa che l'app conosce vanno a **Claude Haiku 5.5** con effort basso, in una Sessione lunga propria: per esempio «apri la mail di Laura» o «clicca il preventivo». Conta come noto un elemento visibile sullo schermo, un'app installata, un sito, o qualcosa detto prima nella conversazione.
 
 A questo livello l'Agente ha una sola chiamata di strumento (più azioni stanno in un solo `act`). La richiesta passa da sola al livello rapido, senza ripetere quello che è già stato fatto, in questi casi:
@@ -203,15 +207,12 @@ A questo livello l'Agente ha una sola chiamata di strumento (più azioni stanno 
 - serve una seconda chiamata;
 - il turno finisce senza azioni, o con una risposta che ammette di non esserci riuscito.
 
-Il turno si interrompe senza chiudere la sessione. Vale solo con Claude: con Codex o con il modello locale si usa il livello rapido. Interruttore, modello ed effort sono in **Impostazioni › Agente › Claude**. «Clicca X» lo fa già la grammatica, ancora prima.
+Alla scalata il turno istantaneo si interrompe ma la sua sessione resta aperta per la richiesta successiva. Vale solo con Claude: con Codex o con il modello locale si usa il livello rapido. Interruttore («Livello istantaneo per i comandi a un passo»), modello ed effort sono in **Impostazioni › Agente › Claude**. Le frasi che la grammatica conosce già, come «clicca Salva», restano Comandi rapidi e non arrivano all'Agente.
 
-**Osservazione a costo fisso.** Delle liste lunghe si legge solo la parte visibile, al massimo 60 elementi per contenitore, con un budget di 0,9 s. Così la lettura dello schermo costa lo stesso su una webmail e su una pagina semplice; il resto si trova scorrendo o con una ricerca (`observe` con `query`). Al primo contatto con un'app Electron o Chromium l'app aspetta fino a 1 s che la pagina sia leggibile. Interruttore in **Impostazioni › Agente**; spento, la lettura torna quella di prima.
+**Osservazione a costo fisso.** Delle liste lunghe si legge solo la parte visibile, al massimo 60 elementi per contenitore, con un budget di 0,9 s. Così la lettura dello schermo costa lo stesso su una webmail e su una pagina semplice; il resto si trova scorrendo o con una ricerca (`observe` con `query`). Al primo contatto con un'app Electron o Chromium l'app aspetta fino a 1 s che la pagina sia leggibile. Interruttore «Osservazione a costo fisso» in **Impostazioni › Agente**; spento, la lettura torna quella di prima.
 
-I numeri di ciascuna di queste parti (riga di base, Sessione lunga, Livello istantaneo, osservazione) sono nella ricerca `_bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md`, §13–§17. `--agent-bench` dichiara a ogni corsa se le soglie di velocità (NFR-12) sono superate.
+I numeri di ciascuna di queste parti (riga di base, Sessione lunga, Livello istantaneo, osservazione) sono nella ricerca `_bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md`, §13–§17. `--agent-bench` dichiara a ogni corsa se le soglie di velocità (NFR-12) sono rispettate, e scrive il verdetto in un file `…-soglie.txt` accanto alla tabella.
 
-La Sessione lunga richiede `claude` 2.1.299 o successivo. L'app legge la versione con `claude --version` e la mostra in **Stato e diagnostica**, insieme a quella di `codex` (minima 0.131.0). Con una versione non verificata, o se `claude` parte senza il login dell'abbonamento, l'app usa un processo per richiesta. Le versioni minime vanno rilette entro il **1° novembre 2026**.
-
-L'agente ha due livelli, ognuno con il suo processo: le richieste **semplici** usano **Claude Sonnet 5.5** con effort basso, quelle **lunghe** (più passi, mail, ricerche, «tutte le…») usano **Claude Opus 5.5** con effort medio. Dire «pensaci bene» forza il secondo. Entrambi i modelli si scelgono nelle impostazioni. Le prime tre corsie non usano mai Claude e non consumano l'abbonamento.
 
 ## Motori: Claude, Codex o il Mac
 
@@ -286,7 +287,7 @@ Se il server è spento l'app usa il modello Apple e lo dice. Un indirizzo fuori 
 | `Coordinator.swift` | Modalità di ascolto, dettatura lunga, esecuzione delle decisioni del Router, domande dell'agente, feedback |
 | `AgentRunner.swift` | Prompt e messaggio dell'agente, scelta del motore, catena di riserva, ripetizione solo prima delle azioni |
 | `AgentEngine.swift` | Protocollo dei motori, `EngineSelector`, lettura dei messaggi di limite di Claude e Codex |
-| `ClaudeEngine.swift`, `CodexEngine.swift`, `CodexCLI.swift` | I due motori cloud: avvio delle CLI, livelli rapido e profondo, pause per la quota |
+| `ClaudeEngine.swift`, `CodexEngine.swift`, `CodexCLI.swift` | I due motori cloud: avvio delle CLI, Sessione lunga, livelli istantaneo, rapido e profondo, pause per la quota |
 | `LocalEngine.swift` | Motore locale: sessione FoundationModels con gli strumenti dell'app, prompt corto, passi limitati |
 | `LocalStepAgent.swift` | Il ciclo guidato del motore locale: elementi pertinenti, un passo vincolato alla volta |
 | `OpenAICompatibleModel.swift` | Modello servito sul Mac (Ollama, LM Studio, MLX) tramite l'API compatibile OpenAI |

@@ -2,7 +2,7 @@
 title: 'Storia 7.5 — Misura finale della velocità'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-review'
+status: 'done'
 baseline_commit: '2c60c0acba24f906a821b79e91b1ebecf420a983'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -58,3 +58,21 @@ context:
 ## Spec Change Log
 
 ## Review Triage Log
+
+Prima review (3 revisori). Nessun rilievo di intento o di spec.
+
+| Rilievo | Verdetto | Evidenza / esito |
+|---|---|---|
+| «primo strumento 0,0 s rispettata» quando nessuna riga ha il primo strumento | medium | `median([])` dava 0. Patch: funzione pura `nfr12Verdicts`, «non misurata» sugli insiemi vuoti |
+| Righe «pagina non aperta» (0 s) dentro le mediane | medium | Patch: escluse; il riepilogo dice su quanti compiti è calcolato |
+| Mediana sbagliata con un numero pari di valori | medium | Patch: mediana vera (media dei due centrali), usata in tutto il Banco |
+| Istantaneo misurato solo sui compiti senza scalata, contro NFR-12 | medium | Patch: tutti i compiti partiti all'istantaneo; quelli senza scalata a parte, solo informativi. Ricalcolo della corsa finale: valori invariati |
+| «superata» si legge come «oltrepassata»; arrotondamento ambiguo | low | Patch: «rispettata/non rispettata», due decimali con la virgola |
+| Verdetto con un altro Motore | low | Patch: «non applicabile» se il Motore non è Claude |
+| Contatore dei riavvii che somma le ripetizioni, e «0» quando non c'è sessione | low | Patch: conta solo `ClaudeEngine.restartNotice`; la ripetizione dice «Ripeto la richiesta»; «—» senza Sessione lunga |
+| Riga di commento in coda al TSV | low | Patch: verdetto in un file `…-soglie.txt` accanto alla tabella |
+| README: paragrafo dei due livelli rimasto vecchio, ordine e nomi degli interruttori | low | Patch: tre livelli, ordine corretto, nomi dei controlli |
+| Nessun test del verdetto | gap | Patch: blocco «Soglie NFR-12» in `--selftest` |
+| Inoltro di `onNotice` senza test | gap | Rinviato: serve una sessione Claude vera attraverso `AgentRunner`; il numero è solo diagnostico |
+| Riavvii senza dettaglio per compito e motivo | low | Respinto: il motivo è già nel log («riavvio la sessione, <motivo>») |
+| Nessun codice d'uscita per le soglie | low | Respinto: il Banco agisce sullo schermo e non gira in automatico |

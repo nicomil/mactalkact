@@ -126,6 +126,8 @@ final class ClaudeEngine: AgentEngine {
 
     /// «Riavvio l'Agente» and similar, for the HUD through AgentRunner (engines never touch the HUD).
     var onNotice: ((String) -> Void)?
+    /// The notice of a Long-session restart (the Bench counts it).
+    nonisolated static let restartNotice = "Riavvio l'Agente"
     /// What the app knows about the `claude` version (FR-45).
     private(set) var cliStatus: CLIStatus = .unverified(nil)
     /// `claude` answered without the subscription login: no Long session until the engines are checked again.
@@ -227,7 +229,7 @@ final class ClaudeEngine: AgentEngine {
         let model = config.model
         let notice: @Sendable (String) -> Void = { [weak self] reason in
             Log.info("Agente (claude/\(model)): riavvio la sessione, \(reason)")
-            Task { @MainActor in self?.onNotice?("Riavvio l'Agente") }
+            Task { @MainActor in self?.onNotice?(ClaudeEngine.restartNotice) }
         }
         func attempt() async throws -> Data {
             // Both messages are composed here, on the main actor: the CLI only picks one.
@@ -245,7 +247,7 @@ final class ClaudeEngine: AgentEngine {
                     where Self.retriesDeadSession(reused: cli.lastAttemptReused, effectfulCalls: tools?.effectfulCalls ?? 1,
                                                   cancelled: tools?.cancelled ?? true) && tools?.escalation == nil {
             Log.info("Agente (claude/\(model)): sessione chiusa a metà senza azioni \(m), ripeto la richiesta")
-            onNotice?("Riavvio l'Agente")
+            onNotice?("Ripeto la richiesta")
             return try await attempt()
         }
     }
