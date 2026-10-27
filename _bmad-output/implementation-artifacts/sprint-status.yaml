@@ -67,8 +67,8 @@ development_status:
   6-6-misura-finale: done
   epic-6-retrospective: optional
 
-  epic-7: backlog
-  7-1-riga-di-base-il-banco-misura-fase-per-fase-anche-fuori-dal-b: backlog
+  epic-7: in-progress
+  7-1-riga-di-base-il-banco-misura-fase-per-fase-anche-fuori-dal-b: ready-for-dev
   7-2-sessione-lunga-sorvegliata-e-cli-sotto-controllo: backlog
   7-3-livello-istantaneo-per-i-comandi-a-un-passo: backlog
   7-4-osservazione-a-costo-fisso: backlog
