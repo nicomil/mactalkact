@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 let arguments = CommandLine.arguments
 
@@ -24,6 +25,33 @@ if arguments.contains("--agent-bench") {
         exit(0)
     }
     dispatchMain()
+}
+
+if let dir = argument(after: "--hud-shot") {
+    // Debug: the floating message in its styles, drawn off screen into PNG files.
+    MainActor.assumeIsolated {
+        _ = NSApplication.shared
+        let cases: [(String, HUDModel.Phase, String, String, Bool, Bool)] = [
+            ("1-ascolto-compatto", .listening, "Apri la mail di Marco", "", false, true),
+            ("2-risposta-compatta", .success, "Questa cartella è un progetto Swift: Sources contiene il codice, Tests le prove, build i file compilati. Le cartelle _bmad e _bmad-output contengono i documenti di progetto.", "", false, true),
+            ("3-ti-ascolto-mini", .listening, "Ti ascolto", "", true, true),
+            ("4-ascolto-normale", .listening, "Apri la mail di Marco", "✍️ Dettatura · di' «fine» per chiudere", false, false),
+        ]
+        for (name, phase, title, detail, mini, compact) in cases {
+            let model = HUDModel()
+            model.phase = phase; model.title = title; model.detail = detail; model.mini = mini; model.compact = compact
+            model.alignment = .bottom
+            let host = NSHostingView(rootView: HUDView(model: model))
+            host.frame = NSRect(x: 0, y: 0, width: 660, height: 300)
+            host.layoutSubtreeIfNeeded()
+            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent(name + ".png"))
+            }
+        }
+        print("Immagini in \(dir)")
+        exit(0)
+    }
 }
 
 if arguments.contains("--hands-test") {

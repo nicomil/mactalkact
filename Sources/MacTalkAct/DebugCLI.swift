@@ -15,6 +15,15 @@ enum DebugCLI {
             if !ok { failures += 1 }
         }
 
+        print("Fine della dettatura:")
+        check("«Fine»", Grammar.dictationEnding("Fine.") == (true, ""))
+        check("«Fine fine»", Grammar.dictationEnding("Fine fine") == (true, ""))
+        check("«Ok, fine»", Grammar.dictationEnding("Ok, fine.") == (true, ""))
+        check("«Basta così»", Grammar.dictationEnding("Basta così") == (true, ""))
+        check("testo e poi «Fine.»", Grammar.dictationEnding("Ci vediamo domani. Fine.") == (true, "Ci vediamo domani."))
+        check("«alla fine» resta testo", Grammar.dictationEnding("Siamo arrivati alla fine.") == (false, "Siamo arrivati alla fine."))
+        check("«fine settimana» resta testo", !Grammar.dictationEnding("Ci vediamo nel fine settimana").ends)
+
         print("Grammatica:")
         check("giù", Grammar.parse("Giù.") == .scroll(direction: "down", amount: 1))
         check("scorri giù per favore", Grammar.parse("Scorri giù, per favore.") == .scroll(direction: "down", amount: 1))
@@ -826,15 +835,13 @@ extension DebugCLI {
         esc.start { stopped += 1 }
         KeyCombo.lastEscapePosted = .distantPast
         try? ex.press("escape") // the agent's own Esc: marked, ignored
-        RunLoop.main.run(until: Date().addingTimeInterval(0.6)) // event monitors need the run loop
-        try? await Task.sleep(for: .milliseconds(50))
+        try? await Task.sleep(for: .milliseconds(600))
         check("Esc dell'agente ignorato", stopped == 0)
         KeyCombo.lastEscapePosted = .distantPast
         let src = CGEventSource(stateID: .hidSystemState) // like a real keyboard: no marker
         CGEvent(keyboardEventSource: src, virtualKey: 53, keyDown: true)?.post(tap: .cghidEventTap)
         CGEvent(keyboardEventSource: src, virtualKey: 53, keyDown: false)?.post(tap: .cghidEventTap)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
-        try? await Task.sleep(for: .milliseconds(50))
+        try? await Task.sleep(for: .milliseconds(600))
         if stopped == 0 {
             // Global key monitors need Input Monitoring for the process: the terminal may not have it.
             print("  —    Esc dell'utente: non verificabile da riga di comando (permesso Monitoraggio input del terminale)")

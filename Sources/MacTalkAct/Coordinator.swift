@@ -568,8 +568,9 @@ final class Coordinator {
             guard let self, !Task.isCancelled, !self.busy, self.conversation.isWindowOpen else { return }
             let left = self.conversation.windowUntil.timeIntervalSinceNow
             guard left > 1.5 else { return }
-            self.hud.show(.listening, "💬 Ti ascolto ancora", detail: "Continua senza «\(self.settings.firstWakePhrase)» · «basta così» per chiudere",
-                          autoHide: left)
+            self.hud.show(.listening, self.settings.hudCompact ? "Ti ascolto" : "💬 Ti ascolto ancora",
+                          detail: "Continua senza «\(self.settings.firstWakePhrase)» · «basta così» per chiudere",
+                          autoHide: left, mini: true)
         }
     }
 
@@ -663,7 +664,13 @@ final class Coordinator {
     private func dictate(_ raw: String) async {
         var text = raw
         if let stripped = WakeWord.extract(text, phrases: settings.wakePhraseList) { text = stripped }
-        if Grammar.isDictationEnd(text) || text.isEmpty {
+        let ending = Grammar.dictationEnding(text)
+        if ending.ends || text.isEmpty {
+            // «Ci vediamo domani. Fine.»: the text before the end phrase is still typed.
+            if !ending.keep.isEmpty {
+                Log.speech("✍️ \(ending.keep)")
+                if !dryRun { await executor.insertDictation(ending.keep, context: ScreenContext.capture(includeLabels: false)) }
+            }
             stopDictation(reason: "«\(text.isEmpty ? settings.firstWakePhrase : text)»")
             return
         }

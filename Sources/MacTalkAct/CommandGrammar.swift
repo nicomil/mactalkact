@@ -240,7 +240,36 @@ enum Grammar {
 
     /// "fine" / "basta" closes a long dictation.
     static func isDictationEnd(_ text: String) -> Bool {
-        dictationEndWords.contains(normalize(text))
+        dictationEnding(text).ends && dictationEnding(text).keep.isEmpty
+    }
+
+    private static let endFillers: Set<String> = ["ok", "okay", "allora", "dai", "ecco", "grazie", "va", "bene", "e"]
+
+    /// Whether a dictated sentence closes the dictation, and the text to type before closing.
+    /// «Fine», «fine fine», «ok fine», «basta così» → close, nothing to type.
+    /// «Ci vediamo domani. Fine.» → type «Ci vediamo domani.», then close.
+    /// «Siamo arrivati alla fine» → just text.
+    static func dictationEnding(_ text: String) -> (ends: Bool, keep: String) {
+        func isEndOnly(_ t: String) -> Bool {
+            let n = normalize(t)
+            if dictationEndWords.contains(n) { return true }
+            // Repeated or with fillers: «fine fine», «ok fine», «fine, grazie».
+            let words = n.split(separator: " ").map(String.init)
+            guard !words.isEmpty, words.count <= 4 else { return false }
+            let ends = words.filter { ["fine", "basta", "stop"].contains($0) }
+            return !ends.isEmpty && words.allSatisfy { ["fine", "basta", "stop", "dettatura", "cosi"].contains($0) || endFillers.contains($0) }
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isEndOnly(trimmed) { return (true, "") }
+        // The last sentence alone (after . ! ?) is an end phrase: type what comes before.
+        let ends = trimmed.indices.filter { ".!?".contains(trimmed[$0]) && $0 < trimmed.index(before: trimmed.endIndex) }
+        if let cut = ends.last {
+            let tail = String(trimmed[trimmed.index(after: cut)...])
+            if isEndOnly(tail) {
+                return (true, String(trimmed[...cut]).trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return (false, trimmed)
     }
 
     /// "dodici" → 12, "ventitre" → 23 … up to 300. Apple's formatter writes compound

@@ -151,6 +151,8 @@ final class AppSettings: ObservableObject {
         static let hudSuccessSeconds = 1.3
         static let hudAnswerSeconds = 5.0
         static let hudErrorSeconds = 4.0
+        static let hudPosition = HUDPosition.auto
+        static let hudCompact = true
         // Numbers
         static let numbersTimeout = 30.0
         static let numbersLimit = 180
@@ -236,6 +238,10 @@ final class AppSettings: ObservableObject {
     @Published var hudSuccessSeconds: Double { didSet { defaults.set(hudSuccessSeconds, forKey: "hudSuccessSeconds") } }
     @Published var hudAnswerSeconds: Double { didSet { defaults.set(hudAnswerSeconds, forKey: "hudAnswerSeconds") } }
     @Published var hudErrorSeconds: Double { didSet { defaults.set(hudErrorSeconds, forKey: "hudErrorSeconds") } }
+    /// Where the floating messages appear; `auto` moves them away from the caret and the pointer.
+    @Published var hudPosition: HUDPosition { didSet { defaults.set(hudPosition.rawValue, forKey: "hudPosition") } }
+    /// Smaller messages; «Ti ascolto ancora» becomes a small pill.
+    @Published var hudCompact: Bool { didSet { defaults.set(hudCompact, forKey: "hudCompact") } }
 
     // MARK: Numbers
     @Published var numbersTimeout: Double { didSet { defaults.set(numbersTimeout, forKey: "numbersTimeout") } }
@@ -322,6 +328,8 @@ final class AppSettings: ObservableObject {
         hudSuccessSeconds = double("hudSuccessSeconds", Defaults.hudSuccessSeconds)
         hudAnswerSeconds = double("hudAnswerSeconds", Defaults.hudAnswerSeconds)
         hudErrorSeconds = double("hudErrorSeconds", Defaults.hudErrorSeconds)
+        hudPosition = HUDPosition(rawValue: string("hudPosition", "")) ?? Defaults.hudPosition
+        hudCompact = bool("hudCompact", Defaults.hudCompact)
 
         numbersTimeout = double("numbersTimeout", Defaults.numbersTimeout)
         numbersLimit = int("numbersLimit", Defaults.numbersLimit)
@@ -365,6 +373,7 @@ final class AppSettings: ObservableObject {
             soundsEnabled = Defaults.soundsEnabled; soundsVolume = Defaults.soundsVolume
             hudSuccessSeconds = Defaults.hudSuccessSeconds; hudAnswerSeconds = Defaults.hudAnswerSeconds
             hudErrorSeconds = Defaults.hudErrorSeconds
+            hudPosition = Defaults.hudPosition; hudCompact = Defaults.hudCompact
         case .numbers:
             numbersTimeout = Defaults.numbersTimeout; numbersLimit = Defaults.numbersLimit
         case .memory, .permissions, .status:
@@ -422,6 +431,27 @@ final class AppSettings: ObservableObject {
         switch backend {
         case .subscription: return claudeExecutable != nil
         case .apiKey: return apiKey != nil
+        }
+    }
+}
+
+/// Where the floating messages (HUD) appear.
+enum HUDPosition: String, CaseIterable, Identifiable {
+    /// At the bottom, moving to the top when it would cover the caret or the pointer.
+    case auto
+    case bottom
+    case top
+    case topRight
+    case bottomRight
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .auto: return "Automatica (si sposta se copre)"
+        case .bottom: return "In basso al centro"
+        case .top: return "In alto al centro"
+        case .topRight: return "In alto a destra"
+        case .bottomRight: return "In basso a destra"
         }
     }
 }

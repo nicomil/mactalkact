@@ -51,7 +51,7 @@ Al primo avvio:
 | **Sessione a mani libere** | **Doppio tocco** su ⌥ destro. Si chiude dicendo «basta» o dopo 60 s di silenzio | Sequenze di comandi |
 | **Ascolto continuo** | Dal menu: «Ascolto continuo». Poi di' «**Computer**, apri Mail» | Zero mani |
 
-Dopo ogni risposta la **conversazione resta aperta per 20 secondi** (l'HUD mostra «💬 Ti ascolto ancora»): puoi continuare senza ripetere «Computer» («cambia anche la seconda», «no, quella sotto»), mentre la chiacchiera con chi è nella stanza viene ignorata. «Basta così» o «grazie» la chiudono subito; la durata si cambia nelle impostazioni. Se dici solo «Computer», la frase successiva viene accettata qualunque sia, e la parola «Computer» da sola non viene mai scritta.
+Dopo ogni risposta la **conversazione resta aperta per 20 secondi** (una piccola pillola «Ti ascolto»): puoi continuare senza ripetere «Computer» («cambia anche la seconda», «no, quella sotto»), mentre la chiacchiera con chi è nella stanza viene ignorata. «Basta così» o «grazie» la chiudono subito; la durata si cambia nelle impostazioni. Se dici solo «Computer», la frase successiva viene accettata qualunque sia, e la parola «Computer» da sola non viene mai scritta.
 
 L'agente ricorda le **ultime 5 interazioni dei 10 minuti precedenti**, con il testo prima e dopo ogni modifica: «rimetti la domanda di prima» funziona. Questa memoria vive solo in RAM; «dimentica la conversazione» la svuota. Se l'app ha scritto qualcosa che non volevi, «**cancella quello che hai scritto**» toglie esattamente quel testo (se il campo è cambiato nel frattempo usa Annulla e te lo dice).
 
@@ -145,6 +145,8 @@ Gli strumenti sono costruiti come il computer use di Claude e di Codex (studio i
 **L'agente parte già sapendo cosa c'è sullo schermo:** con Claude e Codex la richiesta contiene gli elementi della finestra con i loro ID, così il primo passo è già un'azione. Sul Banco di prova Claude riesce 25 compiti su 25 con 1–2 chiamate in media (prima 3) e 6 secondi invece di 9.
 
 **Gli ID restano gli stessi per tutto il compito** finché l'elemento esiste: lo stesso pulsante ha lo stesso numero in `observe`, negli screenshot e negli esiti; se un elemento sparisce, l'ID viene rifiutato con un messaggio chiaro. Dopo uno scorrimento le coordinate dello screenshot precedente non valgono più.
+
+**La pillola dei messaggi** è larga quanto il suo testo. In posizione automatica sta in basso e sale in alto quando coprirebbe il punto in cui scrivi o il puntatore. In alternativa si può fissare in alto, in alto a destra o in basso a destra (Impostazioni › Voce e suoni › Messaggi sullo schermo). In dettatura «fine» chiude anche ripetuto («fine fine») o in coda a una frase («…a domani. Fine.»).
 
 Durante un compito l'HUD mostra cosa sta facendo («Cerco «LangChain»…», «Clicco «Apri»»); «stop» a voce oppure **Esc** lo interrompono (gli Esc premuti dall'agente stesso non contano). Un compito tipico richiede 5–30 secondi; i comandi rapidi restano istantanei.
 
@@ -253,7 +255,7 @@ Se il server è spento l'app usa il modello Apple e lo dice. Un indirizzo fuori 
 | `Executor.swift` | Le "mani": tasti, incolla, clic per nome, scroll, apertura app |
 | `LLMPlanner.swift` | Prompt, schema del piano e rete di sicurezza; sceglie tra abbonamento e chiave API |
 | `ClaudeCLI.swift` | Esegue `claude -p` tenendo sempre pronto un processo in anticipo |
-| `HUD.swift` | La pillola in basso, che non prende mai il focus |
+| `HUD.swift` | La pillola dei messaggi, che non prende mai il focus e si sposta in alto se copre il punto in cui scrivi o il puntatore |
 | `Settings.swift` | Tutte le impostazioni con i loro predefiniti (`AppSettings.Defaults`), sezioni, Portachiavi |
 | `SettingsWindow.swift` | Finestra delle impostazioni: barra laterale, sezioni, ripristino dei predefiniti |
 

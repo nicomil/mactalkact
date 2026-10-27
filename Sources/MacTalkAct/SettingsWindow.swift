@@ -556,7 +556,11 @@ private struct VoiceSection: View {
             NumberRow(title: "Volume dei suoni", value: $settings.soundsVolume, range: 0.05...1, step: 0.05, unit: "", decimals: 2,
                       defaultValue: D.soundsVolume)
         }
-        Card(title: "Messaggi sullo schermo") {
+        Card(title: "Messaggi sullo schermo", footer: "In posizione automatica il messaggio sta in basso e sale in alto quando copre il punto in cui scrivi o il puntatore. Compatti: più piccoli, e «Ti ascolto ancora» diventa una pillola.") {
+            Picker("Posizione", selection: $settings.hudPosition) {
+                ForEach(HUDPosition.allCases) { Text($0.title).tag($0) }
+            }
+            ToggleRow(title: "Compatti", isOn: $settings.hudCompact)
             NumberRow(title: "Azione riuscita", value: $settings.hudSuccessSeconds, range: 0.5...5, step: 0.1, defaultValue: D.hudSuccessSeconds)
             NumberRow(title: "Risposta dell'agente", value: $settings.hudAnswerSeconds, range: 2...15, step: 0.5, defaultValue: D.hudAnswerSeconds)
             NumberRow(title: "Errore", value: $settings.hudErrorSeconds, range: 2...10, step: 0.5, defaultValue: D.hudErrorSeconds)
