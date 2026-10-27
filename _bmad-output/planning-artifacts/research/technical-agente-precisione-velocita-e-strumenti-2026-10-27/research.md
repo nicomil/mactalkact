@@ -415,3 +415,18 @@ Tutte valide al 27/10/2026.
 | [90] clausola legale binario non modificato | security | 2026-10-01 | 2027-01-01 |
 
 **Primo ricontrollo:** 2026-10-28. Le affermazioni di classe «versione» (Claude Code `--bare`, toolset, Ollama, mlx-swift-lm) scadono entro un mese: da rileggere prima di avviare l'epic di velocità.
+
+## 13. Riga di base del Banco (Storia 7.1, 27 ottobre 2026, parziale)
+
+Prima corsa del Banco con le fasi, Motore Claude (`claude-sonnet-5-5`, livello rapido), processo pronto come oggi. È **parziale**: 16 compiti su pagine HTML (posta, tabella, notebook, modulo) più 5 Frasi spurie e 1 compito Finder in prove separate. Mancano la seconda metà delle pagine, il canvas, Calendario e Mail (al primo giro macOS chiede i permessi e serve qualcuno davanti al Mac) e la webmail di prova. La corsa è stata interrotta perché il Mac era in uso.
+
+| Misura | Valore |
+| --- | --- |
+| Compiti riusciti (pagine) | 14/16 (88%); un fallimento dovuto a Keynote passato in primo piano durante la corsa |
+| Primo strumento, mediana | 2,3 s (90° percentile 4,0 s) |
+| Compito, mediana | 6,7 s (90° percentile 15,4 s) |
+| Fasi, mediane | scansione 0,06 s · avvio o riuso sessione 0,00 s · connessione MCP 0,09 s · primo token 2,04 s · azioni con assestamento 1,38 s · ragionamento tra le azioni 0,02 s · turno finale 1,97 s · chiusura 0,00 s |
+| Somma delle fasi = totale entro 0,2 s | sì, su ogni compito |
+| Frasi spurie con conversazione aperta | 5/5 senza azioni, ma ognuna occupa Claude per 4,5–10,4 s; la decisione del Router costa da sola fino a 3,1 s (classificatore on-device freddo) |
+
+Cosa dice già: con il processo pronto l'avvio e la connessione MCP pesano poco (sotto 0,1 s di mediana). Il tempo va quasi tutto nel modello: circa 2 s per il primo token e circa 2 s per il turno finale. Questo sostiene la Sessione lunga (cache del prompt, Storia 7.2) e il Livello istantaneo (Storia 7.3) più dell'osservazione a costo fisso (Storia 7.4) sulle pagine semplici; la 7.4 va giudicata sulla webmail. Le Frasi spurie confermano la Storia 8.1. La tabella completa va rifatta con tutti i compiti prima di chiudere la storia. Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-27-1631-claude.tsv`.
