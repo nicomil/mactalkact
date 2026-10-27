@@ -195,7 +195,7 @@ final class ClaudeEngine: AgentEngine {
                 if inSession {
                     data = try await runInSession(cli, config, request)
                 } else {
-                    data = try await cli.run(config, message: request.message, timeout: request.clock.remaining, onPhase: onPhase)
+                    data = try await cli.run(config, message: request.message, timeout: request.clock.remaining, clock: request.clock, onPhase: onPhase)
                 }
                 return (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             } catch let error as ClaudeCLIError {
@@ -247,7 +247,7 @@ final class ClaudeEngine: AgentEngine {
             let short = cursor.map(request.messageSince)
             let full = request.message
             return try await cli.runInSession(config, memory: request.memory, maxRequests: maxRequests,
-                                              timeout: request.clock.remaining,
+                                              timeout: request.clock.remaining, clock: request.clock,
                                               message: { seq in seq != nil && seq == cursor ? (short ?? full) : full },
                                               onPhase: onPhase, onRestart: notice)
         }

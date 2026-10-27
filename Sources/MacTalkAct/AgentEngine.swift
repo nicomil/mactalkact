@@ -88,17 +88,49 @@ struct MemorySnapshot: Equatable {
     let lastSeq: Int
 }
 
-/// One clock for the turn (AD-24). Started with the request; the pause while a question waits
-/// arrives with Story 9.2.
-struct TurnClock {
-    let deadline: ContinuousClock.Instant
+/// One clock for the turn (AD-24). Started with the request; paused while a question waits for
+/// the user's answer (Story 9.2), so a confirmation never makes the turn expire. Shared by reference:
+/// the CLI reading the engine's output and the tools asking the user see the same clock.
+final class TurnClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private let limit: Duration
+    private let started = ContinuousClock.now
+    private var paused: Duration = .zero
+    private var pausedSince: ContinuousClock.Instant?
+
     init(seconds: Double) {
         let s = seconds.isFinite ? min(max(1, seconds), 86_400) : 240
-        deadline = ContinuousClock.now + .milliseconds(Int(s * 1000))
+        limit = .milliseconds(Int(s * 1000))
     }
+
+    func pause() { lock.withLock { if pausedSince == nil { pausedSince = .now } } }
+
+    func resume() {
+        lock.withLock {
+            if let since = pausedSince { paused += ContinuousClock.now - since }
+            pausedSince = nil
+        }
+    }
+
+    var isPaused: Bool { lock.withLock { pausedSince != nil } }
+
+    /// Seconds left; it does not decrease while paused.
     var remaining: TimeInterval {
-        let d = deadline - ContinuousClock.now
-        return max(0, Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18)
+        lock.withLock {
+            let now = pausedSince ?? .now
+            let left = limit - (now - started - paused)
+            return max(0, Double(left.components.seconds) + Double(left.components.attoseconds) / 1e18)
+        }
+    }
+
+    /// Returns when the turn's time is over (never while a question is waiting).
+    func untilExpired() async {
+        while true {
+            let left = remaining
+            if left <= 0, !isPaused { return }
+            try? await Task.sleep(for: .milliseconds(Int(max(0.05, min(left, 0.5)) * 1000)))
+            if Task.isCancelled { return }
+        }
     }
 }
 

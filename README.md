@@ -160,7 +160,7 @@ Gli strumenti sono costruiti come il computer use di Claude e di Codex (studio i
 | `click_many` | Clic su più elementi in una chiamata (ad esempio tutte le caselle di una colonna), con lo stato di ognuno dopo il clic (spuntata o no) |
 | `browser_profiles` | Elenca i profili di Edge, Chrome e Brave, quando macOS lo consente |
 | `remember`, `forget`, `save_macro`, `delete_macro` | Memoria personale e macro vocali |
-| `ask_user`, `confirm` | Domande a voce; **conferma obbligatoria** per inviare, eliminare, comprare o chiudere: l'app blocca queste azioni finché non rispondi «sì» |
+| `ask_user` | Domande a voce. **Conferma obbligatoria** per inviare, eliminare, comprare o chiudere: l'azione si ferma, l'app chiede «Vuoi che clicchi «Invia»?» (con «che tu non hai chiesto» se la richiesta non la nominava) ed esegue solo con un «sì», che vale per quella sola azione. Non esiste più una finestra di tempo in cui un «sì» sblocca altre azioni. Vale anche per le scorciatoie che inviano o eliminano, per l'Invio nelle chat e per i trascinamenti nel Cestino. `confirm` resta per compatibilità e non dà permessi |
 
 **Ogni azione dice da sola cosa è cambiato.** Dopo un clic, una scrittura o un trascinamento lo strumento aspetta che l'interfaccia si fermi (anche il caricamento della pagina, fino a 6 secondi) e risponde con le differenze: nuovo titolo, elemento attivo, testo selezionato, elementi comparsi, scomparsi o cambiati. L'agente non deve riguardare lo schermo dopo ogni passo e non può dire «fatto» se non è cambiato nulla.
 

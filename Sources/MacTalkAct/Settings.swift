@@ -139,7 +139,6 @@ final class AppSettings: ObservableObject {
         static let fixedCostObservation = true
         /// The agent names the evidence before saying «fatto» (FR-46).
         static let evidenceBeforeDone = true
-        static let confirmValiditySeconds = 45.0
         static let cleanDictation = false
         // Engines (Epic 4-5)
         static let agentEngine = EngineID.claude
@@ -233,7 +232,6 @@ final class AppSettings: ObservableObject {
     @Published var instantEffort: String { didSet { defaults.set(instantEffort, forKey: "instantEffort") } }
     @Published var fixedCostObservation: Bool { didSet { defaults.set(fixedCostObservation, forKey: "fixedCostObservation") } }
     @Published var evidenceBeforeDone: Bool { didSet { defaults.set(evidenceBeforeDone, forKey: "evidenceBeforeDone") } }
-    @Published var confirmValiditySeconds: Double { didSet { defaults.set(confirmValiditySeconds, forKey: "confirmValiditySeconds") } }
     @Published var cleanDictation: Bool { didSet { defaults.set(cleanDictation, forKey: "cleanDictation") } }
 
     // MARK: Engines
@@ -364,7 +362,6 @@ final class AppSettings: ObservableObject {
         instantEffort = d.string(forKey: "instantEffort") ?? Defaults.instantEffort
         fixedCostObservation = bool("fixedCostObservation", Defaults.fixedCostObservation)
         evidenceBeforeDone = bool("evidenceBeforeDone", Defaults.evidenceBeforeDone)
-        confirmValiditySeconds = double("confirmValiditySeconds", Defaults.confirmValiditySeconds)
         cleanDictation = bool("cleanDictation", Defaults.cleanDictation)
 
         agentEngine = EngineID(rawValue: string("agentEngine", "")) ?? Defaults.agentEngine
@@ -430,7 +427,7 @@ final class AppSettings: ObservableObject {
             model = Defaults.model; fastModel = Defaults.fastModel; useFastModel = Defaults.useFastModel
             deepEffort = Defaults.deepEffort; fastEffort = Defaults.fastEffort
             agentMaxSteps = Defaults.agentMaxSteps; agentMaxTurns = Defaults.agentMaxTurns
-            agentTimeout = Defaults.agentTimeout; confirmValiditySeconds = Defaults.confirmValiditySeconds
+            agentTimeout = Defaults.agentTimeout
             longSession = Defaults.longSession; sessionMaxRequests = Defaults.sessionMaxRequests
             instantLevel = Defaults.instantLevel; instantModel = Defaults.instantModel; instantEffort = Defaults.instantEffort
             fixedCostObservation = Defaults.fixedCostObservation; evidenceBeforeDone = Defaults.evidenceBeforeDone

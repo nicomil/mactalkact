@@ -179,6 +179,18 @@ enum DebugCLI {
         check("solo con il consenso già dato si agisce", AppleEventsSpike.mayRun(noErr) && !AppleEventsSpike.mayRun(OSStatus(errAEEventWouldRequireUserConsent))
               && !AppleEventsSpike.mayRun(OSStatus(errAEEventNotPermitted)) && !AppleEventsSpike.mayRun(OSStatus(procNotFound)) && !AppleEventsSpike.mayRun(nil))
         check("etichette del consenso", AppleEventsSpike.consentLabel(noErr) == "concesso" && AppleEventsSpike.consentLabel(OSStatus(errAEEventWouldRequireUserConsent)).contains("-1744"))
+        print("Orologio del turno (Storia 9.2):")
+        do {
+            let clock = TurnClock(seconds: 10)
+            let before = clock.remaining
+            clock.pause()
+            Thread.sleep(forTimeInterval: 0.2)
+            let during = clock.remaining
+            clock.resume()
+            Thread.sleep(forTimeInterval: 0.1)
+            check("in pausa il tempo non scende", abs(before - during) < 0.05)
+            check("dopo la pausa riprende", clock.remaining < during && clock.remaining > during - 0.3)
+        }
         print("Soglie NFR-12 (Storia 7.5):")
         do {
             check("mediana pari = media dei due centrali", median([1, 2, 3, 4]) == 2.5 && median([3, 1, 2]) == 2 && median([]) == nil)
@@ -436,7 +448,7 @@ enum DebugCLI {
               && Df.armedSeconds == 8 && Df.proposalSeconds == 8 && Df.agentQuestionSeconds == 25 && Df.confirmationSeconds == 20
               && Df.conversationMemoryCount == 5 && Df.conversationMemoryMinutes == 10 && Df.classifierTimeout == 1.5
               && Df.localLaneMaxWords == 6 && Df.deepEffort == "medium" && Df.fastEffort == "low" && Df.agentMaxSteps == 60
-              && Df.agentMaxTurns == 40 && Df.agentTimeout == 240 && Df.confirmValiditySeconds == 45 && Df.speechVolume == 0.45
+              && Df.agentMaxTurns == 40 && Df.agentTimeout == 240 && Df.speechVolume == 0.45
               && Df.speechRate == 1.05 && Df.soundsVolume == 0.2 && Df.hudSuccessSeconds == 1.3 && Df.hudAnswerSeconds == 5
               && Df.hudErrorSeconds == 4 && Df.numbersTimeout == 30 && Df.numbersLimit == 180)
         let st = AppSettings.shared
@@ -1258,20 +1270,30 @@ extension DebugCLI {
             check("con parola di attivazione in un campo → chiedi di scriverlo (AD-2)", c.label == "chiedi" && !isAsk(c))
         }
 
-        print("Conferme e azioni bloccate (Storia 7.1):")
+        print("Conferma legata alla singola azione (Storie 7.1 e 9.2):")
         do {
             let tools = AgentTools(executor: Executor())
-            var answer = "no"
-            tools.askUser = { _, _ in answer }
-            _ = await tools.call("confirm", ["action": "elimina la mail"])
-            check("confermata negata: 1 chiesta, 1 bloccata", tools.confirmationsAsked == 1 && tools.blockedCalls == 1)
-            answer = "sì"
-            _ = await tools.call("confirm", ["action": "elimina la mail"])
-            check("confermata approvata: 2 chieste, sempre 1 bloccata", tools.confirmationsAsked == 2 && tools.blockedCalls == 1)
+            var questions: [String] = []
+            var paused = 0
+            tools.askUser = { q, confirmation in questions.append(q); return confirmation ? "no" : nil }
+            tools.onQuestion = { if $0 { paused += 1 } }
+            tools.currentRequest = "apri la posta"
+            // cmd+q is refused before being pressed: nothing happens on screen.
+            let denied = await tools.call("press_keys", ["keys": "cmd+q"])
+            check("scorciatoia rischiosa: chiede e, con «no», non la preme", denied.isError && denied.text.contains("NOT done") && questions.count == 1)
+            check("la domanda nomina il bersaglio e dice «che tu non hai chiesto»", questions.first?.contains("«cmd+q»") == true && questions.first?.contains("che tu non hai chiesto") == true)
+            check("l'orologio del turno si ferma durante la domanda", paused == 1)
+            check("diniego: 1 chiesta, 1 bloccata", tools.confirmationsAsked == 1 && tools.blockedCalls == 1)
+            let confirm = await tools.call("confirm", ["action": "elimina la mail"])
+            check("confirm del Motore: nessun permesso, nessuna domanda", confirm.text.hasPrefix("Not needed") && questions.count == 1)
             tools.reset(keepElements: true)
-            check("ripetizione su un altro Motore: contatori tenuti", tools.confirmationsAsked == 2 && tools.blockedCalls == 1)
+            check("ripetizione su un altro Motore: contatori tenuti", tools.confirmationsAsked == 1 && tools.blockedCalls == 1)
             tools.reset()
             check("richiesta nuova: contatori a zero", tools.confirmationsAsked == 0 && tools.blockedCalls == 0)
+            check("richiesta che nomina l'azione", AgentTools.requestMentions("elimina la mail della newsletter", "Elimina") && !AgentTools.requestMentions("apri la posta", "Elimina"))
+            check("Invio nelle chat", AgentTools.isSendKey("return") && AgentTools.isSendKey(" Enter ") && !AgentTools.isSendKey("cmd+return"))
+            let line = AgentTools.logLine(scenario: "prova", app: "Safari", target: .element(id: 7, action: "click"), label: "Invia", outcome: "negata")
+            check("riga di log nel formato della suite", line == "Sicurezza: blocco · scenario=prova · app=Safari · bersaglio=elemento 7 · click «Invia» · origine=model · esito=negata")
         }
         return failures == 0
     }
@@ -1511,6 +1533,20 @@ extension DebugCLI {
             let bad = await tools.call("act", ["steps": [["tool": "click", "id": 99999], ["tool": "type_text", "text": "x"]]])
             check("act si ferma al primo errore", bad.isError && bad.text.contains("not executed"), bad.text.replacingOccurrences(of: "\n", with: " | "))
         } else { check("campi trovati", false, f) }
+
+        print("Conferma per il pulsante Invia (Storia 9.2):")
+        await open("modulo.html")
+        let form = text(await tools.call("observe", [:]))
+        if let send = id(form, "button «Invia»") ?? id(form, "«Invia»") {
+            var asked: [String] = []
+            tools.askUser = { q, c in asked.append(q); return c ? "sì" : nil }
+            tools.currentRequest = "invia il modulo"
+            let r = await tools.call("click", ["id": send])
+            try? await Task.sleep(for: .seconds(0.7))
+            check("Invia: chiede una volta, con «sì» clicca", asked.count == 1 && !r.isError && title().contains("inviato"), (asked.first ?? "") + " · " + title())
+            check("richiesta che lo chiede: niente «che tu non hai chiesto»", asked.first.map { !$0.contains("non hai chiesto") } ?? false)
+            tools.askUser = { _, c in c ? "sì" : nil }
+        } else { check("pulsante Invia trovato", false, form.prefix(200).description) }
 
         print("Menu dell'app:")
         let m = text(await tools.call("menu", ["path": ""]))

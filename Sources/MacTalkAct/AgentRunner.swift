@@ -60,10 +60,10 @@ final class AgentRunner {
     of the browser. When the user talks about the page (links, buttons, fields), use the (page) elements.
     - Prefer reliable shortcuts (cmd+l address bar, cmd+t new tab, cmd+f find). To visit a site use open_url.
     - In web lists (mail, search results) click the item text with method 'mouse'.
-    - Call confirm right before (not earlier, after preparing everything) an action that deletes data, \
-    sends or publishes something to other people (messages, mails, forms, posts, comments, reservations), \
-    buys or pays, changes system or security settings, installs software, or closes unsaved work. \
-    If it is denied, stop.
+    - Actions that delete data, send or publish something to other people (messages, mails, forms, posts, \
+    comments, reservations), buy or pay, change system or security settings, install software, or close \
+    unsaved work: prepare everything, then just perform the action. The app itself asks the user right \
+    then and waits; if the user says no, the tool tells you and you stop. Never ask for these with ask_user.
     - If the request is really ambiguous, ask_user once with a short Italian question; otherwise make a \
     sensible choice.
     - Be quick: as few calls as possible.
@@ -316,6 +316,7 @@ final class AgentRunner {
             tools.onCall = nil
             tools.instantGuard = false
             tools.onEscalate = nil
+            tools.onQuestion = nil
             for engine in engines.values { engine.onPhase = nil }
             let (phases, total) = timer.finish()
             lastPhases = phases
@@ -339,6 +340,11 @@ final class AgentRunner {
                                localMessage: localMessage(request, context: context, recent: recent),
                                userRequest: request, level: level)
         req.clock = TurnClock(seconds: settings.agentTimeout)
+        // A question waiting for the user stops the turn's clock (AD-24): the confirmation never
+        // makes the turn expire, and the Long session is not restarted meanwhile.
+        let clock = req.clock
+        tools.currentRequest = request
+        tools.onQuestion = { asking in asking ? clock.pause() : clock.resume() }
         if let memory {
             req.memory = memory.snapshot
             req.messageSince = { [unowned self] seq in

@@ -124,7 +124,7 @@ final class LocalEngine: AgentEngine {
     - Usa gli id dell'ultimo observe per click, type_text e scroll.
     - Per aprire un sito usa open_url, per un'app open_app, per le scorciatoie press_keys.
     - Per cambiare un testo in un campo usa replace_text con il testo esatto da trovare.
-    - Prima di inviare, eliminare, comprare o pubblicare chiama confirm.
+    - Per inviare, eliminare, comprare o pubblicare esegui l'azione: la conferma la chiede l'app all'utente.
     - Fai solo quello che è chiesto. Se non ci riesci in pochi passi, fermati e dillo.
     """
 
@@ -144,7 +144,7 @@ final class LocalEngine: AgentEngine {
         "open_url": "Apre un sito o un indirizzo.",
         "scroll": "Scorre la finestra o l'elemento id. direction: up, down, left, right.",
         "wait": "Aspetta qualche secondo (max 5) che la pagina si aggiorni.",
-        "confirm": "Chiede conferma all'utente prima di inviare, eliminare, comprare. Risponde approved o denied.",
+        "confirm": "Non serve: l'app chiede da sola la conferma quando esegui un'azione che invia, elimina o compra.",
         "ask_user": "Fa una domanda breve all'utente e restituisce la risposta.",
     ]
 

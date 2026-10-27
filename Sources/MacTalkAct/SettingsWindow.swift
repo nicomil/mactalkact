@@ -539,10 +539,6 @@ private struct AgentSection: View {
             IntRow(title: "Turni massimi di Claude", value: $settings.agentMaxTurns, range: 10...100, step: 5, defaultValue: D.agentMaxTurns)
             NumberRow(title: "Tempo massimo", value: $settings.agentTimeout, range: 60...600, step: 30, decimals: 0,
                       defaultValue: D.agentTimeout)
-            NumberRow(title: "Dopo un «sì», azioni rischiose consentite per",
-                      help: "Inviare, eliminare, comprare: senza conferma recente l'app le blocca, con qualunque motore.",
-                      value: $settings.confirmValiditySeconds, range: 10...120, step: 5, decimals: 0,
-                      defaultValue: D.confirmValiditySeconds)
         }
         Card(title: "Dettatura") {
             ToggleRow(title: "Ripulisci la dettatura (più lento)",

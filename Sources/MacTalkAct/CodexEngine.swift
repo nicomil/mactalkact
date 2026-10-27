@@ -85,7 +85,7 @@ final class CodexEngine: AgentEngine {
                                      mcpURL: access.mcpURL, mcpToken: access.mcpToken)
         let outcome: CodexCLI.Outcome
         do {
-            outcome = try await cli.run(config, message: request.message, timeout: request.clock.remaining, onPhase: onPhase)
+            outcome = try await cli.run(config, message: request.message, timeout: request.clock.remaining, clock: request.clock, onPhase: onPhase)
         } catch let error as AgentEngineError {
             if case .notFound = error { setAvailability(.missing) }
             throw error

@@ -139,7 +139,7 @@ final class CodexCLI: @unchecked Sendable {
 
     // MARK: Running
 
-    func run(_ config: Config, message: String, timeout: TimeInterval, onPhase: PhaseSink? = nil) async throws -> Outcome {
+    func run(_ config: Config, message: String, timeout: TimeInterval, clock: TurnClock? = nil, onPhase: PhaseSink? = nil) async throws -> Outcome {
         guard let path = executablePath() else { throw AgentEngineError.notFound("Comando «codex» non trovato. Installa ChatGPT o Codex, o indica il percorso nelle impostazioni.") }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
@@ -183,7 +183,9 @@ final class CodexCLI: @unchecked Sendable {
                 return .failed(err.isEmpty ? "Codex si è chiuso senza risposta" : String(err.suffix(300)))
             }
             group.addTask {
-                try await Task.sleep(for: .seconds(timeout))
+                if let clock { await clock.untilExpired() } else { try await Task.sleep(for: .seconds(timeout)) }
+                try Task.checkCancellation()
+                if p.isRunning { p.terminate() } // the reader stops only when the stream ends
                 throw AgentEngineError.timeout
             }
             defer { group.cancelAll() }

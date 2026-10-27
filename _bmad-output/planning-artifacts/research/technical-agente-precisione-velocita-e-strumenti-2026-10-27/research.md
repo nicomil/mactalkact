@@ -618,3 +618,15 @@ Per completare la misura servono Nico davanti al Mac (per dare i consensi) e le 
 - **Revisione del protocollo.** Claude Code apre con `MCP-Protocol-Version: 2026-07-28` e poi negozia `2025-11-25`, l'ultima supportata dal server.
 - **Origin e Host.** Il server risponde 403 a una richiesta con `Origin` di una pagina web e a una con `Host` di un altro dominio (DNS rebinding); accetta le CLI, che non mandano `Origin`. Prove automatiche in `--fallback-test`.
 - **Codex e `~/.codex/AGENTS.md`.** Il file di Nico esiste ed è vuoto. Con quel file Codex (0.164.0-alpha) risponde in italiano e usa solo gli strumenti di MacTalkAct (2/2 compiti). La prova con un file di stile ostile richiede una cartella `CODEX_HOME` separata con il login e resta da fare.
+
+## 23. Conferma per singola azione (Storia 9.2, 27 ottobre 2026)
+
+Prima un «sì» allo strumento `confirm` apriva una finestra di 45 s in cui ogni azione rischiosa passava. Ora la conferma la chiede l'esecutore, al momento dell'azione, per quella sola azione, nominando il bersaglio («Vuoi che clicchi «Elimina»?»); aggiunge «che tu non hai chiesto» quando la richiesta non lo nomina. Il turno è fermo mentre la domanda aspetta.
+
+| Compito (Claude) | Conferme prima | Conferme dopo | Passi prima → dopo | Tempo prima → dopo |
+| --- | --- | --- | --- | --- |
+| posta-apri | 0 | 0 | 1 → 1 | 4,6 → 4,5 s |
+| posta-elimina | 1 | 1 | 3 → 2 | 12,2 → 7,1 s |
+| modulo-invia | 1 | 1 | — → 2 | — → 5,4 s |
+
+SM-C5 è rispettato: le conferme non aumentano. Il «fatto» costa meno, perché il modello non deve più chiamare `confirm` e poi ripetere l'azione. Ogni blocco va nel log nel formato `Sicurezza: blocco · scenario=… · app=… · bersaglio=… · origine=model · esito=…`, pronto per la suite di sicurezza (Storia 9.4).

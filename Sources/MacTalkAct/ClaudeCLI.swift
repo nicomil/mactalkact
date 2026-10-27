@@ -121,7 +121,8 @@ final class ClaudeCLI: @unchecked Sendable {
 
     /// Sends one message and returns the `structured_output` JSON as Data.
     /// Sends one message; for a plain-text config the Data is the final answer text.
-    func run(_ config: Config, message: String, timeout: TimeInterval = 60, onPhase: PhaseSink? = nil) async throws -> Data {
+    func run(_ config: Config, message: String, timeout: TimeInterval = 60, clock: TurnClock? = nil,
+             onPhase: PhaseSink? = nil) async throws -> Data {
         let proc: Running
         if let spare = takeSpare(config) {
             proc = spare
@@ -151,7 +152,8 @@ final class ClaudeCLI: @unchecked Sendable {
                 }
             }
             group.addTask {
-                try await Task.sleep(for: .seconds(timeout))
+                if let clock { await clock.untilExpired() } else { try await Task.sleep(for: .seconds(timeout)) }
+                try Task.checkCancellation()
                 // The reader does not stop on cancellation: ending the process ends its stream.
                 proc.terminate()
                 throw ClaudeCLIError.timeout
@@ -254,7 +256,7 @@ final class ClaudeCLI: @unchecked Sendable {
     /// Sends one message on the Long session, starting it again first when a rule says so.
     /// `message(nil)` is the full message, `message(seq)` the one with only the memory after `seq`.
     /// `onRestart` is called with the reason when a live session is replaced.
-    func runInSession(_ config: Config, memory: MemorySnapshot, maxRequests: Int, timeout: TimeInterval,
+    func runInSession(_ config: Config, memory: MemorySnapshot, maxRequests: Int, timeout: TimeInterval, clock: TurnClock? = nil,
                       message: (Int?) -> String, onPhase: PhaseSink?, onRestart: (String) -> Void) async throws -> Data {
         // Never a warm spare next to a Long session: one process per level.
         lock.withLock { spare?.terminate(); spare = nil }
@@ -306,7 +308,8 @@ final class ClaudeCLI: @unchecked Sendable {
                                               onCache: { [weak self] n in self?.lock.withLock { self?.lastCacheRead = n } })
                 }
                 group.addTask {
-                    try await Task.sleep(for: .seconds(timeout))
+                    if let clock { await clock.untilExpired() } else { try await Task.sleep(for: .seconds(timeout)) }
+                    try Task.checkCancellation()
                     s.process.terminate() // the reader stops only when the stream ends
                     throw ClaudeCLIError.timeout
                 }
