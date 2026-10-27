@@ -58,6 +58,7 @@ final class AudioRouter: @unchecked Sendable {
     private var silenceTime: TimeInterval = 0
     private var segmentTime: TimeInterval = 0
     private var cryTime: TimeInterval = 0
+    private var cryLevel: Float = 0
     private var noiseFloor: Float = 0.004
     private var peakRMS: Float = 0
 
@@ -149,6 +150,11 @@ final class AudioRouter: @unchecked Sendable {
 
         lock.lock()
         lastInput = Date()
+        // Crying is a sustained high sound: most recent chunks high (moving average over ~0.2 s),
+        // not a single high chunk inside a voice.
+        cryLevel = cryLevel * 0.88 + (cry ? 0.12 : 0)
+        let highChunk = cry
+        let cry = cryLevel > 0.5
         if let active {
             for input in inputs { active.yield(input) }
         } else {
@@ -168,7 +174,8 @@ final class AudioRouter: @unchecked Sendable {
         let threshold = max(config.minStartRMS, noiseFloor * config.noiseFactor)
 
         if active == nil {
-            if vadEnabled && rms > threshold && !cry {
+            // To open a sentence even a single high chunk does not count (crying starts high).
+            if vadEnabled && rms > threshold && !cry && !highChunk {
                 speechTime += duration
                 if speechTime >= config.minSpeech { started = openLocked() }
             } else {
@@ -225,16 +232,22 @@ enum Pitch {
             r[lag] = e1 > 0 && e2 > 0 ? sum / (e1 * e2).squareRoot() : 0
             best = max(best, r[lag])
         }
-        // The shortest period close to the best one: multiples of the period correlate as well.
-        guard best > 0, let lag = (minLag...maxLag).first(where: { r[$0] >= best * 0.9 && ($0 == minLag || r[$0] >= r[$0 - 1]) && ($0 == maxLag || r[$0] >= r[$0 + 1]) }) else {
+        // The best period. A voice also correlates at shorter lags (its formants, its harmonics):
+        // only an almost perfect half or third of the period counts as the true period (a cry
+        // found at twice its period), never a merely good short lag.
+        guard best > 0, var lag = (minLag...maxLag).max(by: { r[$0] < r[$1] }) else {
             return Estimate(hz: 0, strength: 0)
+        }
+        for d in [3, 2] {
+            let l = Int((Double(lag) / Double(d)).rounded())
+            if l >= minLag, r[l] >= 0.95 * best, r[l] > 0.85 { lag = l; break }
         }
         return Estimate(hz: sr / Double(lag), strength: r[lag])
     }
 
     /// A clear, high pitch: a cry (or a whistle), not a voice speaking.
     nonisolated static func isCry(_ p: Estimate) -> Bool {
-        p.strength > 0.6 && p.hz > 380
+        p.strength > 0.7 && p.hz > 400
     }
 }
 
