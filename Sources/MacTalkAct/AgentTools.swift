@@ -291,6 +291,19 @@ final class AgentTools {
         callLog.append("- \(name) \(Self.compact(args)) → \(result.isError ? "ERROR " : "")\(lines.first?.prefix(160) ?? "")\(resultLine)")
         // After a «no» of the user nothing escalates: the fast level must not ask again (FR-51).
         if instantGuard, !deniedThisRequest, Self.effectfulTools.contains(name) || name == "act", let why = Self.instantFailure(result) { escalate(why) }
+        if cloudEngine, PrivacyGuard.accessLevel().scope == .clickOnly {
+            if ["screenshot", "get_text", "read_text"].contains(name) {
+                return .error("In this app (access level «solo clic») the cloud engines get no text or images of the window: use observe, which shows the controls.")
+            }
+            if name == "observe" || Self.outcomeTools.contains(name) {
+                result.content = result.content.compactMap { item in
+                    guard (item["type"] as? String) == "text", let t = item["text"] as? String else { return nil }
+                    var copy = item
+                    copy["text"] = name == "observe" ? Self.controlsOnly(t) : (t.split(separator: "\n").first.map(String.init) ?? "")
+                    return copy
+                }
+            }
+        }
         if cloudEngine, AppSettings.shared.hideSensitiveFromCloud {
             result.content = result.content.map { item in
                 guard let t = item["text"] as? String else { return item }
@@ -326,6 +339,19 @@ final class AgentTools {
             Log.info("Agente: azione bloccata, app in primo piano cambiata")
             return .error(problem)
         }
+        // Access level of the app in front (FR-54, AD-22): the same rules for every engine.
+        let level = PrivacyGuard.accessLevel()
+        let app = AX.frontmostApplication()?.localizedName ?? "questa app"
+        if level.scope == .clickOnly, Self.effectfulTools.contains(name), !Self.clickOnlyTools.contains(name) {
+            Log.info("Agente: \(name) bloccato, \(app) è «solo clic»")
+            return .error("In «\(app)» the agent may only click and scroll (access level set by the user). Do not type or press keys here; tell the user in one short Italian sentence.")
+        }
+        if level.scope == .confirmAll, Self.effectfulTools.contains(name) {
+            guard await gate(.element(id: Self.int(args["id"]) ?? 0, action: name), label: "\(Self.toolWords[name] ?? name) in \(app)",
+                             verb: "esegua", scenario: "app con conferma per ogni azione") else { return Self.denied("\(name) in \(app)") }
+            levelConfirmed = true // the inner checks of this same call do not ask again
+        }
+        defer { levelConfirmed = false }
         if Self.effectfulTools.contains(name) {
             effectfulCalls += 1
             if firstEffectAt == nil { firstEffectAt = Date() }
@@ -335,6 +361,24 @@ final class AgentTools {
         } catch {
             return .error(error.localizedDescription)
         }
+    }
+
+    /// The tools a «solo clic» app allows.
+    private static let clickOnlyTools: Set<String> = ["click", "scroll", "hover", "open_app"]
+    private static let toolWords: [String: String] = ["click": "il clic", "type_text": "la scrittura", "press_keys": "i tasti",
+                                                     "drag": "il trascinamento", "menu": "la voce di menu", "set_value": "la modifica"]
+    /// Set while a «conferma ogni azione» app already asked for this call.
+    private var levelConfirmed = false
+
+    /// For the cloud engines in a «solo clic» app: only roles and labels of the controls, never
+    /// values, text or images (FR-54).
+    static func controlsOnly(_ observed: String) -> String {
+        observed.split(separator: "\n").compactMap { raw -> String? in
+            let line = String(raw)
+            if line.hasPrefix("APP:") || line.hasPrefix("WINDOW:") { return line.components(separatedBy: " size ").first }
+            guard line.hasPrefix("["), line.contains("]*") else { return nil }
+            return line.replacingOccurrences(of: #" value=«[^»]*»| value=\S+"#, with: "", options: .regularExpression)
+        }.joined(separator: "\n") + "\n(Access level «solo clic»: only the controls are shown, no text of the window.)"
     }
 
     private func dispatch(_ name: String, _ a: [String: Any]) async throws -> Result {
@@ -392,6 +436,10 @@ final class AgentTools {
 
         case "type_text":
             guard let text = a["text"] as? String else { return .error("Missing text") }
+            // Never into a password field (FR-52): the target, or the focused field.
+            let secureTarget = Self.int(a["id"]).flatMap { try? resolve($0) }.map { AX.isSecureField($0.element) }
+                ?? ScreenContext.capture(includeLabels: false).isSecure
+            if secureTarget { return .error("That is a password field: the agent never types there. Tell the user to type it themselves.") }
             // A line break typed in a chat sends the message, like Enter (FR-51).
             if text.contains("\n") || text.contains("\r"), let app = Self.composerApp(),
                !(await gate(.keyInComposer(app: app), label: "Invio in \(app)", verb: "prema", scenario: "invio in un campo di composizione")) {
@@ -634,6 +682,7 @@ final class AgentTools {
     /// is used by this action and ends with it. No extra round trip to the engine.
     private func gate(_ target: ConfirmationTarget, label: String, verb: String,
                       scenario: String = "azione con effetti esterni") async -> Bool {
+        if levelConfirmed { return true }
         confirmationsAsked += 1
         let notAsked = !Self.requestMentions(currentRequest, label)
         let question = "Vuoi che \(verb) «\(label)»\(notAsked ? ", che tu non hai chiesto" : "")?"
@@ -887,7 +936,8 @@ final class AgentTools {
         let view = scan(query: nil)
         lastView = view
         generation += 1
-        return render(view, query: nil)
+        let text = render(view, query: nil)
+        return cloudEngine && PrivacyGuard.accessLevel().scope == .clickOnly ? Self.controlsOnly(text) : text
     }
 
     private func observe(query: String?) -> String {

@@ -131,6 +131,8 @@ final class InsertionJournal {
     private(set) var last: Insertion?
 
     func record(text: String, before: ScreenContext) async {
+        // Never what was typed in a password field (FR-52), not even in RAM.
+        guard !before.isSecure else { last = nil; return }
         try? await Task.sleep(for: .milliseconds(120))
         let after = ScreenContext.capture(includeLabels: false)
         let element = AX.frontmostApplication().flatMap { AX.focusedElement(in: AX.app($0.processIdentifier)) }

@@ -179,6 +179,14 @@ enum DebugCLI {
         check("solo con il consenso già dato si agisce", AppleEventsSpike.mayRun(noErr) && !AppleEventsSpike.mayRun(OSStatus(errAEEventWouldRequireUserConsent))
               && !AppleEventsSpike.mayRun(OSStatus(errAEEventNotPermitted)) && !AppleEventsSpike.mayRun(OSStatus(procNotFound)) && !AppleEventsSpike.mayRun(nil))
         check("etichette del consenso", AppleEventsSpike.consentLabel(noErr) == "concesso" && AppleEventsSpike.consentLabel(OSStatus(errAEEventWouldRequireUserConsent)).contains("-1744"))
+        print("Livelli di accesso (Storia 9.3):")
+        check("Terminal: solo clic", AccessLevel.level(bundleID: "com.apple.Terminal", name: "Terminale", list: AccessLevel.defaultList) == .clickOnly)
+        check("Impostazioni di Sistema: conferma ogni azione", AccessLevel.level(bundleID: "com.apple.systempreferences", name: "", list: AccessLevel.defaultList) == .confirmAll)
+        check("app sconosciuta: normale", AccessLevel.level(bundleID: "com.example", name: "Esempio", list: AccessLevel.defaultList) == .full)
+        check("per nome e maiuscole", AccessLevel.level(bundleID: "x", name: "iTerm", list: "iterm = SOLO CLIC") == .clickOnly)
+        let observed = "APP: Terminal (com.apple.Terminal)\nWINDOW: nico — zsh size 800x600\n[1]* button «Chiudi» @1,1 10x10\n[2] textarea «Shell» value=«ls -la segreto»\n[3] statictext «password: 1234»"
+        let reduced = AgentTools.controlsOnly(observed)
+        check("solo i controlli: niente testo né valori", reduced.contains("«Chiudi»") && !reduced.contains("segreto") && !reduced.contains("1234") && !reduced.contains("size"))
         print("Bersagli della conferma (Storia 9.2):")
         check("Invio in una sequenza", AgentTools.containsSendKey("tab return") && !AgentTools.containsSendKey("cmd+return"))
         check("chat: app e pagine web", AgentTools.needsComposerGate(bundleID: "com.apple.MobileSMS", windowTitle: "")
@@ -1605,7 +1613,7 @@ extension DebugCLI {
         let inbox = text(await tools.call("observe", [:]))
         if let mail = id(inbox, "Newsletter ottobre") {
             _ = await tools.call("click", ["id": mail, "method": "mouse"])
-            try? await Task.sleep(for: .seconds(0.5))
+            try? await Task.sleep(for: .seconds(1.2))
             let opened = text(await tools.call("observe", [:]))
             if let del = id(opened, "button «Elimina»") {
                 let r1 = await tools.call("click", ["id": del])
@@ -1622,6 +1630,34 @@ extension DebugCLI {
             check("trascinamento nel Cestino con «no»: non fatto", r.text.contains("NOT done") && !title().contains("Cestino=Preventivo"), title())
         } else { check("scheda e Cestino trovati", false) }
         tools.askUser = { _, c in c ? "sì" : nil }
+
+        print("Campi sicuri e livelli di accesso (Storia 9.3):")
+        await open("password.html")
+        let login = text(await tools.call("observe", [:]))
+        check("campo password: mai valore né lunghezza", login.contains("(password field: content never read)") && !login.contains("segreto-del-banco"))
+        if let pw = id(login, "(password field") {
+            let typed = await tools.call("type_text", ["id": pw, "text": "prova"])
+            check("type_text nel campo password: errore", typed.isError && title().contains("lunghezza=17"), typed.text.prefix(120) + " · " + title())
+        } else { check("campo password trovato", false, login.prefix(200).description) }
+        // No field of the other Bench pages is taken for a password field.
+        var falseSecure: [String] = []
+        for page in ["modulo.html", "iscrizione.html", "posta.html", "notebook.html"] {
+            await open(page)
+            if text(await tools.call("observe", [:])).contains("(password field") { falseSecure.append(page) }
+        }
+        check("nessun campo normale del Banco preso per password", falseSecure.isEmpty, falseSecure.joined(separator: ", "))
+        // Safari as «solo clic», for the test only: no typing; to the cloud engines only the controls.
+        let levelsWas = AppSettings.shared.accessLevels
+        AppSettings.shared.accessLevels = "com.apple.Safari = solo clic"
+        await open("modulo.html")
+        let blocked = await tools.call("type_text", ["text": "x"])
+        check("«solo clic»: niente scrittura", blocked.isError && blocked.text.contains("only click"))
+        tools.cloudEngine = true
+        let controls = text(await tools.call("observe", [:]))
+        let cloudShot = await tools.call("screenshot", [:])
+        tools.cloudEngine = false
+        check("«solo clic», Motori cloud: solo i controlli, nessuna immagine", controls.contains("solo clic") && !controls.contains("value=") && cloudShot.isError)
+        AppSettings.shared.accessLevels = levelsWas
 
         print("Conferma per il pulsante Invia (Storia 9.2):")
         await open("modulo.html")

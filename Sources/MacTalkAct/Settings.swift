@@ -172,6 +172,8 @@ final class AppSettings: ObservableObject {
         static let privateModeMinutes = 30.0
         static let reservedApps = Privacy.defaultReservedApps
         static let reservedSites = Privacy.defaultReservedSites
+        /// Access levels per app (FR-54).
+        static let accessLevels = AccessLevel.defaultList
         static let hideSensitiveFromCloud = true
         static let logRetentionDays = 7
         static let detailedLog = false
@@ -277,6 +279,7 @@ final class AppSettings: ObservableObject {
     @Published var privateModeMinutes: Double { didSet { defaults.set(privateModeMinutes, forKey: "privateModeMinutes") } }
     /// Apps never shown to a cloud engine (bundle identifier or name, one per line).
     @Published var reservedApps: String { didSet { defaults.set(reservedApps, forKey: "reservedApps") } }
+    @Published var accessLevels: String { didSet { defaults.set(accessLevels, forKey: "accessLevels") } }
     /// Sites never shown to a cloud engine (domain or word, one per line).
     @Published var reservedSites: String { didSet { defaults.set(reservedSites, forKey: "reservedSites") } }
     /// Masks card numbers, IBANs, tax codes and numeric secrets in what the cloud engines read.
@@ -395,6 +398,7 @@ final class AppSettings: ObservableObject {
 
         privateModeMinutes = double("privateModeMinutes", Defaults.privateModeMinutes)
         reservedApps = string("reservedApps", Defaults.reservedApps)
+        accessLevels = string("accessLevels", Defaults.accessLevels)
         reservedSites = string("reservedSites", Defaults.reservedSites)
         hideSensitiveFromCloud = bool("hideSensitiveFromCloud", Defaults.hideSensitiveFromCloud)
         logRetentionDays = int("logRetentionDays", Defaults.logRetentionDays)
@@ -448,7 +452,7 @@ final class AppSettings: ObservableObject {
         case .numbers:
             numbersTimeout = Defaults.numbersTimeout; numbersLimit = Defaults.numbersLimit
         case .privacy:
-            privateModeMinutes = Defaults.privateModeMinutes; reservedApps = Defaults.reservedApps
+            privateModeMinutes = Defaults.privateModeMinutes; reservedApps = Defaults.reservedApps; accessLevels = Defaults.accessLevels
             reservedSites = Defaults.reservedSites; hideSensitiveFromCloud = Defaults.hideSensitiveFromCloud
             logRetentionDays = Defaults.logRetentionDays; detailedLog = Defaults.detailedLog
         case .memory, .permissions, .status:

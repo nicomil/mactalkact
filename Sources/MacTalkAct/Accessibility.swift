@@ -95,6 +95,16 @@ enum AX {
         Log.debug(String(format: "Accessibilità: albero di %@ pronto in %.2f s", bundleID ?? "", Date().timeIntervalSince(started)))
     }
 
+    /// A password field (FR-52): subrole `AXSecureTextField`, native or web. When the subrole cannot be
+    /// read, a single-line text field is treated as one (better a field not read than a password read).
+    static func isSecureField(_ el: AXUIElement) -> Bool {
+        var v: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(el, kAXSubroleAttribute as CFString, &v)
+        if err == .success { return (v as? String) == "AXSecureTextField" }
+        let readable: Set<AXError> = [.noValue, .attributeUnsupported]
+        return !readable.contains(err) && role(el) == "AXTextField"
+    }
+
     /// The label of the element under a screen point, or of its first labelled ancestor (a click by x/y).
     static func labelAt(_ point: CGPoint) -> String? {
         var el: AXUIElement?
@@ -361,7 +371,7 @@ struct ScreenContext {
             let range = AX.selectedRange(focused)
             ctx.isEditable = editableRoles.contains(ctx.focusedRole)
                 || (range != nil && AX.isSettable(focused, kAXValueAttribute))
-            ctx.isSecure = AX.string(focused, kAXSubroleAttribute) == "AXSecureTextField"
+            ctx.isSecure = AX.isSecureField(focused)
             if !ctx.isSecure {
                 ctx.selectedText = AX.string(focused, kAXSelectedTextAttribute) ?? ""
             }

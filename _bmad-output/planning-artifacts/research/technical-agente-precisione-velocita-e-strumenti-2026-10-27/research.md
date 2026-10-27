@@ -630,3 +630,10 @@ Prima un «sì» allo strumento `confirm` apriva una finestra di 45 s in cui ogn
 | modulo-invia | 1 | 1 | — → 2 | — → 5,4 s |
 
 SM-C5 è rispettato: le conferme non aumentano. Il «fatto» costa meno, perché il modello non deve più chiamare `confirm` e poi ripetere l'azione. Ogni blocco va nel log nel formato `Sicurezza: blocco · scenario=… · app=… · bersaglio=… · origine=model · esito=…`, pronto per la suite di sicurezza (Storia 9.4).
+
+## 24. Campi sicuri e livelli di accesso (Storia 9.3, 28 ottobre 2026)
+
+- **Campi password.** Su una pagina di prova (`password.html`) `observe` mostra «(password field: content never read)» senza valore né lunghezza, e `type_text` rifiuta. Nelle pagine modulo, iscrizione, posta e notebook nessun campo risulta password: zero falsi positivi.
+- **«Solo clic»** (Terminal, iTerm): niente scrittura né tasti. Ai Motori cloud l'osservazione contiene solo i controlli, e `screenshot`, `get_text` e `read_text` sono rifiutati. Provato forzando Safari a «solo clic».
+- **«Conferma ogni azione»** (Impostazioni di Sistema): ogni azione con effetti chiede una volta.
+- **Inserimento sicuro di macOS:** quando blocca la dettatura, l'HUD dice quale app lo ha attivato (letto da `IOConsoleUsers`).

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import ApplicationServices
 
 /// Privacy rules: what the app may write in its log, keep in its memory and send to the
@@ -148,9 +149,77 @@ enum Privacy {
     }
 }
 
+/// How much the agent may do in an app (FR-54, AD-22): two axes, who and how much.
+struct AccessLevel: Equatable {
+    enum Scope: String, Equatable {
+        /// Only clicks and scrolling; to the cloud engines only roles and labels of the controls.
+        case clickOnly = "solo clic"
+        /// Every action with effects asks first (Impostazioni di Sistema).
+        case confirmAll = "conferma ogni azione"
+        /// The normal rules: actions with external effects ask first.
+        case full = "normale"
+    }
+    var cloudAllowed: Bool
+    var scope: Scope
+
+    /// The default list, one app per line «bundle id o nome = solo clic | conferma ogni azione | normale».
+    static let defaultList = """
+    com.apple.Terminal = solo clic
+    com.googlecode.iterm2 = solo clic
+    com.apple.systempreferences = conferma ogni azione
+    com.apple.finder = normale
+    """
+
+    /// The level of an app from the list (pure, tested by `--selftest`); unknown apps are `.full`.
+    static func level(bundleID: String, name: String, list: String) -> Scope {
+        for line in list.split(separator: "\n") {
+            let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2, !parts[0].isEmpty, !parts[0].hasPrefix("#") else { continue }
+            let key = parts[0].lowercased()
+            guard key == bundleID.lowercased() || key == name.lowercased() else { continue }
+            return Scope.allCasesList.first { $0.rawValue == parts[1].lowercased() } ?? .full
+        }
+        return .full
+    }
+}
+
+extension AccessLevel.Scope {
+    static let allCasesList: [AccessLevel.Scope] = [.clickOnly, .confirmAll, .full]
+}
+
+/// macOS secure keyboard entry (a password field or an app that asks for it): no synthetic typing
+/// reaches other apps. The app that turned it on, for the message to the user (FR-52).
+enum SecureInput {
+    static var isOn: Bool { IsSecureEventInputEnabled() }
+
+    static func ownerName() -> String? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/ioreg")
+        p.arguments = ["-l", "-w", "0", "-d", "1", "-c", "IOConsoleUsers"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        p.waitUntilExit()
+        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard let r = text.range(of: #"kCGSSessionSecureInputPID"=(\d+)"#, options: .regularExpression) else { return nil }
+        let pid = pid_t(text[r].split(separator: "=").last.map(String.init) ?? "") ?? 0
+        return NSRunningApplication(processIdentifier: pid)?.localizedName
+    }
+}
+
 /// Decides, for the window in front, whether the cloud engines may see it.
 @MainActor
 enum PrivacyGuard {
+    /// The access level of the frontmost app (FR-54): reserved apps, sites and private mode keep the
+    /// cloud engines out; the list in the settings says how much the agent may do.
+    static func accessLevel() -> AccessLevel {
+        let front = AX.frontmostApplication()
+        let scope = AccessLevel.level(bundleID: front?.bundleIdentifier ?? "", name: front?.localizedName ?? "",
+                                      list: AppSettings.shared.accessLevels)
+        return AccessLevel(cloudAllowed: cloudBlockReason() == nil, scope: scope)
+    }
+
     private static var cache: (key: String, reason: String?, at: Date)?
 
     /// Why the cloud engines must not see or touch the frontmost window, or nil when they may:

@@ -653,6 +653,13 @@ final class Coordinator {
 
     /// One dictated sentence (not the long dictation mode).
     private func dictateOnce(_ text: String, context: ScreenContext) async {
+        // macOS secure keyboard entry: nothing typed by an app gets through. Say which app has it on (FR-52).
+        if SecureInput.isOn {
+            let owner = SecureInput.ownerName().map { "«\($0)»" } ?? "un'app"
+            fail("Non posso scrivere: \(owner) ha attivato l'inserimento sicuro della tastiera",
+                 detail: "Succede con i campi password o con app come Terminal (Inserimento sicuro). Chiudilo e riprova.")
+            return
+        }
         var out = text
         if settings.cleanDictation {
             hud.show(.thinking, text, detail: "Ripulisco il testo…")

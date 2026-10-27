@@ -698,6 +698,12 @@ private struct PrivacySection: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
             }
         }
+        Card(title: "Livelli di accesso per app",
+             footer: "Una riga per app: identificativo o nome = «solo clic», «conferma ogni azione» oppure «normale». Con «solo clic» l'agente può solo cliccare e scorrere, e a Claude e Codex mostra solo i controlli, mai il testo della finestra. Con «conferma ogni azione» chiede prima di ogni azione. Vale per l'agente e la Corsia locale, non per la dettatura.") {
+            TextEditor(text: $settings.accessLevels)
+                .font(.system(.callout, design: .monospaced)).frame(height: 90)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+        }
         Card(title: "Dati inviati a Claude e Codex",
              footer: "Le immagini (screenshot) non si possono mascherare: nelle finestre riservate non vengono fatte. La tua richiesta arriva così come l'hai detta. Le password non vengono mai lette dai campi password.") {
             ToggleRow(title: "Nascondi numeri di carta, IBAN, codici fiscali e codici segreti",
