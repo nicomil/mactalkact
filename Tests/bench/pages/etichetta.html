@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco etichetta</title>
+<style>body{font:15px -apple-system;margin:24px}canvas{border:1px solid #ddd;border-radius:4px}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Reso di un pacco</h1>
+<p>Questa è la foto dell'etichetta del pacco. Per avviare il reso serve il numero d'ordine stampato sull'etichetta.</p>
+<canvas id="c" width="300" height="110" aria-hidden="true"></canvas>
+<p><label>Numero d'ordine <input id="ordine" aria-label="Numero d'ordine"></label></p>
+<script>
+// La foto dell'etichetta è un'immagine: l'Accessibilità non ne legge il testo, serve guardarla.
+const ctx = document.getElementById("c").getContext("2d");
+ctx.fillStyle = "#fbf8ef"; ctx.fillRect(0, 0, 300, 110);
+ctx.fillStyle = "#333"; ctx.font = "bold 13px Helvetica"; ctx.fillText("SPEDIZIONI ROSSI", 14, 22);
+ctx.font = "11px Helvetica"; ctx.fillText("Destinatario: Negozio di prova, Via Roma 1", 14, 44);
+ctx.fillText("Peso: 1,2 kg", 14, 62);
+ctx.font = "11px Menlo"; ctx.fillText("Numero ordine: 4821-B", 14, 84);
+for (let x = 180; x < 290; x += 3) { ctx.fillRect(x, 70 + (x % 7), 1 + (x % 2), 30 - (x % 7)); }
+const o = document.getElementById("ordine");
+function aggiorna() { banco("etichetta", ["ordine=" + o.value.trim().toUpperCase()]); }
+o.addEventListener("input", aggiorna);
+setInterval(aggiorna, 500);
+aggiorna();
+</script>
+</body></html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco cursore</title>
+<style>body{font:15px -apple-system;margin:24px}input[type=range]{width:400px}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Audio</h1>
+<label>Volume <input id="v" type="range" min="0" max="100" value="70" aria-label="Volume"></label>
+<output id="o">70</output>
+<script>
+const v = document.getElementById("v");
+function aggiorna() { document.getElementById("o").textContent = v.value; banco("cursore", ["volume=" + v.value]); }
+v.addEventListener("input", aggiorna);
+v.addEventListener("change", aggiorna);
+setInterval(aggiorna, 500);
+aggiorna();
+</script>
+</body></html>

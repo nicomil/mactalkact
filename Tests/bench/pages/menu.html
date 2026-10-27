@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco menu</title>
+<style>
+body{font:15px -apple-system;margin:24px}
+nav ul{list-style:none;margin:0;padding:0;display:flex;gap:24px}
+nav li{position:relative;padding:6px 0}
+nav .sub{display:none;position:absolute;top:30px;left:0;background:#fff;border:1px solid #ccc;padding:6px 12px;min-width:140px}
+nav li:hover .sub{display:block}
+nav .sub a{display:block;padding:4px 0}
+</style>
+<script src="banco.js"></script></head>
+<body>
+<nav><ul>
+  <li><a href="#home">Home</a></li>
+  <li><span>Prodotti ▾</span>
+    <div class="sub"><a href="#accessori">Accessori</a><a href="#ricambi">Ricambi</a><a href="#offerte">Offerte</a></div></li>
+  <li><a href="#assistenza">Assistenza</a></li>
+</ul></nav>
+<h1 id="h">Home</h1>
+<script>
+const pagine = {home:"Home", accessori:"Accessori", ricambi:"Ricambi", offerte:"Offerte", assistenza:"Assistenza"};
+function aggiorna() {
+  const p = pagine[location.hash.slice(1)] || "Home";
+  document.getElementById("h").textContent = p;
+  banco("menu", ["pagina: " + p]);
+}
+window.addEventListener("hashchange", aggiorna);
+aggiorna();
+</script>
+</body></html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco kanban</title>
+<style>
+body{font:15px -apple-system;margin:24px}
+.board{display:flex;gap:16px}
+.col{width:220px;min-height:260px;background:#f1f1f4;border-radius:8px;padding:10px}
+.col h2{font-size:15px;margin:0 0 10px}
+.card{background:#fff;border:1px solid #ccc;border-radius:6px;padding:10px;margin-bottom:8px;cursor:grab;user-select:none}
+.card.drag{opacity:.6}
+</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Lavori della settimana</h1>
+<p>Trascina le schede tra le colonne.</p>
+<div class="board">
+  <section class="col" data-col="Da fare"><h2>Da fare</h2>
+    <div class="card">Preventivo</div><div class="card">Fattura</div></section>
+  <section class="col" data-col="In corso"><h2>In corso</h2>
+    <div class="card">Riunione</div></section>
+  <section class="col" data-col="Fatto"><h2>Fatto</h2></section>
+</div>
+<script>
+// Trascinamento col mouse (eventi del puntatore), come nelle bacheche reali: nessuna alternativa da tastiera.
+let presa = null;
+document.querySelectorAll(".card").forEach(c => c.addEventListener("pointerdown", e => {
+  presa = c; c.classList.add("drag"); e.preventDefault();
+}));
+document.addEventListener("pointerup", e => {
+  if (!presa) return;
+  presa.classList.remove("drag");
+  const col = document.elementFromPoint(e.clientX, e.clientY)?.closest(".col");
+  if (col) col.appendChild(presa);
+  presa = null;
+  aggiorna();
+});
+function aggiorna() {
+  const stato = [...document.querySelectorAll(".col")].map(col =>
+    col.dataset.col + "=" + [...col.querySelectorAll(".card")].map(c => c.textContent).join(","));
+  banco("kanban", stato);
+}
+aggiorna();
+</script>
+</body></html>

@@ -20,3 +20,8 @@ elenco-articolo	elenco.html	breve	apri l'articolo 137	+scelto: Articolo 137
 elenco-fondo	elenco.html	breve	scorri fino in fondo alla pagina	+fondo=sì
 sito-prezzi	sito.html	breve	vai alla pagina dei prezzi	+pagina: Prezzi
 sito-contatti	sito.html	breve	apri i contatti	+pagina: Contatti
+kanban-sposta	kanban.html	medio	sposta la scheda Preventivo nella colonna Fatto	+Fatto=Preventivo;+Da fare=Fattura
+menu-accessori	menu.html	breve	apri la pagina Accessori dal menu Prodotti	+pagina: Accessori
+cursore-volume	cursore.html	breve	porta il volume a 30	+volume=30
+iscrizione-tutto	iscrizione.html	medio	compila l'iscrizione: nome Luca, cognome Verdi, email luca@esempio.it, telefono 333 1234567, città Bari, note arrivo alle 9	+nome=Luca;+cognome=Verdi;+email=luca@esempio.it;+tel=3331234567;+città=Bari;+note=arrivo alle 9
+etichetta-ordine	etichetta.html	medio	scrivi il numero d'ordine che si vede sull'etichetta del pacco	+ordine=4821-B

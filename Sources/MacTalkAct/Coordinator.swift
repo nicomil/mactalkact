@@ -43,6 +43,7 @@ final class Coordinator {
     private var lastRepeatable: Command?
     private var busy = false
     private var cancelRequested = false
+    private let escape = EscapeMonitor()
 
     private struct PendingPlan {
         let plan: Plan
@@ -806,6 +807,16 @@ final class Coordinator {
             engineNotice = "💻 Col modello locale potrebbe non riuscire"
         }
         hud.show(.thinking, text, detail: engineNotice ?? (deep ? "🤖 Ci penso con calma…" : "🤖 Ci penso…"))
+        // Esc stops the agent while it works (FR-39).
+        escape.start { [weak self] in
+            guard let self, self.agent.running, !self.cancelRequested else { return }
+            Log.info("Agente: interrotto con Esc")
+            self.cancelRequested = true
+            self.agent.cancel()
+            self.answerAgent(nil)
+            self.hud.show(.info, "Mi fermo", autoHide: 1.2)
+        }
+        defer { escape.stop() }
         do {
             try await agent.start()
             let answer = try await agent.run(text, context: context, recent: conversation.log.promptBlock, deep: deep)

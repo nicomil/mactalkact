@@ -59,14 +59,35 @@ struct KeyCombo {
         return KeyCombo(code: code, flags: flags)
     }
 
+    /// When the app last pressed Esc itself: the Esc monitor ignores it even if the marker is lost.
+    nonisolated(unsafe) static var lastEscapePosted = Date.distantPast
+
     func post() {
+        if code == 53 { KeyCombo.lastEscapePosted = Date() }
         let src = CGEventSource(stateID: .combinedSessionState)
         let down = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true)
         down?.flags = flags
+        Executor.mark(down)
         down?.post(tap: .cghidEventTap)
         let up = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false)
         up?.flags = flags
+        Executor.mark(up)
         up?.post(tap: .cghidEventTap)
+    }
+
+    /// "cmd+shift" or ["cmd", "shift"] → modifier flags for a click or a drag. Unknown names are ignored.
+    static func modifiers(_ names: [String]) -> CGEventFlags {
+        var flags: CGEventFlags = []
+        for n in names.flatMap({ $0.lowercased().split(separator: "+").map { $0.trimmingCharacters(in: .whitespaces) } }) {
+            switch n {
+            case "cmd", "command", "⌘", "meta", "super": flags.insert(.maskCommand)
+            case "shift", "⇧": flags.insert(.maskShift)
+            case "alt", "option", "opt", "⌥": flags.insert(.maskAlternate)
+            case "ctrl", "control", "⌃": flags.insert(.maskControl)
+            default: break
+            }
+        }
+        return flags
     }
 }
 
@@ -319,28 +340,72 @@ final class Executor {
     }
 
     /// A real mouse click (the pointer jumps there and comes back).
-    func mouseClick(at point: CGPoint, count: Int = 1, right: Bool = false) async {
+    /// Value written in `eventSourceUserData` of every event the app posts: the Esc monitor
+    /// (and anyone else) can tell the agent's keys from the user's.
+    nonisolated static let eventMarker: Int64 = 0x4D54_4B41 // "MTKA"
+
+    nonisolated static func mark(_ event: CGEvent?) {
+        event?.setIntegerValueField(.eventSourceUserData, value: eventMarker)
+    }
+
+    /// Posts one mouse event with explicit modifiers: without them, a modifier still down in the
+    /// system turns a click on a web link into ⌘-click, which opens the link in a new tab.
+    private func postMouse(_ type: CGEventType, at point: CGPoint, button: CGMouseButton = .left,
+                           clickState: Int64 = 1, flags: CGEventFlags = []) {
+        let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button)
+        e?.setIntegerValueField(.mouseEventClickState, value: clickState)
+        e?.flags = flags
+        Self.mark(e)
+        e?.post(tap: .cghidEventTap)
+    }
+
+    /// Clicks `count` times (2 = double, 3 = triple) with the given button and modifiers,
+    /// then puts the pointer back where the user had it.
+    func mouseClick(at point: CGPoint, count: Int = 1, right: Bool = false, middle: Bool = false,
+                    flags: CGEventFlags = []) async {
         let original = CGEvent(source: nil)?.location
-        let down: CGEventType = right ? .rightMouseDown : .leftMouseDown
-        let up: CGEventType = right ? .rightMouseUp : .leftMouseUp
-        let button: CGMouseButton = right ? .right : .left
-        CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button)?
-            .post(tap: .cghidEventTap)
+        let down: CGEventType = right ? .rightMouseDown : middle ? .otherMouseDown : .leftMouseDown
+        let up: CGEventType = right ? .rightMouseUp : middle ? .otherMouseUp : .leftMouseUp
+        let button: CGMouseButton = right ? .right : middle ? .center : .left
+        postMouse(.mouseMoved, at: point, button: button, flags: flags)
         try? await Task.sleep(for: .milliseconds(30))
-        for n in 1...max(1, count) {
-            let d = CGEvent(mouseEventSource: nil, mouseType: down, mouseCursorPosition: point, mouseButton: button)
-            d?.setIntegerValueField(.mouseEventClickState, value: Int64(n))
-            // A plain click: without this, a modifier still down in the system turns a click on
-            // a web link into ⌘-click, which opens the link in a new tab.
-            d?.flags = []
-            d?.post(tap: .cghidEventTap)
-            let u = CGEvent(mouseEventSource: nil, mouseType: up, mouseCursorPosition: point, mouseButton: button)
-            u?.setIntegerValueField(.mouseEventClickState, value: Int64(n))
-            u?.flags = []
-            u?.post(tap: .cghidEventTap)
+        for n in 1...min(3, max(1, count)) {
+            postMouse(down, at: point, button: button, clickState: Int64(n), flags: flags)
+            postMouse(up, at: point, button: button, clickState: Int64(n), flags: flags)
             try? await Task.sleep(for: .milliseconds(40))
         }
         try? await Task.sleep(for: .milliseconds(60))
+        if let original { CGWarpMouseCursorPosition(original) }
+    }
+
+    /// Moves the pointer to `point` in small steps (menus that open on hover need real movement)
+    /// and leaves it there.
+    func moveMouse(to point: CGPoint) async {
+        let start = CGEvent(source: nil)?.location ?? point
+        for i in 1...8 {
+            let t = CGFloat(i) / 8
+            postMouse(.mouseMoved, at: CGPoint(x: start.x + (point.x - start.x) * t, y: start.y + (point.y - start.y) * t))
+            try? await Task.sleep(for: .milliseconds(15))
+        }
+    }
+
+    /// Presses at `from`, moves to `to` in steps (like a hand: web pages need the intermediate
+    /// moves to start a drag), releases, then puts the pointer back.
+    func drag(from: CGPoint, to: CGPoint, flags: CGEventFlags = []) async {
+        let original = CGEvent(source: nil)?.location
+        postMouse(.mouseMoved, at: from, flags: flags)
+        try? await Task.sleep(for: .milliseconds(50))
+        postMouse(.leftMouseDown, at: from, flags: flags)
+        try? await Task.sleep(for: .milliseconds(120))
+        let steps = 20
+        for i in 1...steps {
+            let t = CGFloat(i) / CGFloat(steps)
+            postMouse(.leftMouseDragged, at: CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t), flags: flags)
+            try? await Task.sleep(for: .milliseconds(18))
+        }
+        try? await Task.sleep(for: .milliseconds(120))
+        postMouse(.leftMouseUp, at: to, flags: flags)
+        try? await Task.sleep(for: .milliseconds(80))
         if let original { CGWarpMouseCursorPosition(original) }
     }
 
@@ -372,6 +437,7 @@ final class Executor {
             let ev = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
             ev?.location = point
             ev?.flags = [] // ⌘ still down would zoom instead of scrolling
+            Self.mark(ev)
             ev?.post(tap: .cghidEventTap)
             try? await Task.sleep(for: .milliseconds(12))
         }

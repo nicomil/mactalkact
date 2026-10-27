@@ -705,6 +705,164 @@ extension DebugCLI {
         }
     }
 
+    /// `--hands-test`: the hands of Epic 6 without a model, on the Bench pages (it acts on the screen).
+    /// Stable ids, outcome of actions, hover, drag, set_value, select_text, menu, act, zoom.
+    static func handsTest() async -> Bool {
+        guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else { print("Safari assente"); return false }
+        let previous = AX.frontmostApplication()
+        let ex = Executor()
+        let tools = AgentTools(executor: ex)
+        tools.askUser = { _, c in c ? "sì" : nil }
+        let base = URL(fileURLWithPath: "Tests/bench/pages")
+        var ok = true
+        func check(_ name: String, _ pass: Bool, _ detail: String = "") {
+            print("  \(pass ? "ok  " : "FAIL") \(name)\(detail.isEmpty ? "" : " — \(detail.prefix(220))")")
+            if !pass { ok = false }
+        }
+        func open(_ page: String) async {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            _ = try? await NSWorkspace.shared.open([base.appendingPathComponent(page)], withApplicationAt: safari, configuration: config)
+            try? await Task.sleep(for: .seconds(2))
+            if let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").first { await ex.bringToFront(app) }
+            try? await Task.sleep(for: .seconds(0.4))
+            tools.reset()
+        }
+        func text(_ r: AgentTools.Result) -> String { r.text }
+        func id(_ observed: String, _ containing: String) -> Int? {
+            guard let line = observed.split(separator: "\n").first(where: { $0.contains(containing) }),
+                  let r = line.range(of: #"\[(\d+)\]"#, options: .regularExpression) else { return nil }
+            return Int(line[r].dropFirst().dropLast())
+        }
+        func title() -> String { ScreenContext.capture(includeLabels: false).windowTitle }
+
+        print("Menu a comparsa (hover) e id stabili:")
+        await open("menu.html")
+        let o1 = text(await tools.call("observe", [:]))
+        let o2 = text(await tools.call("observe", [:]))
+        check("stessi id in due observe", id(o1, "«Home»") != nil && id(o1, "«Home»") == id(o2, "«Home»"))
+        if let p = id(o1, "Prodotti") {
+            let r = text(await tools.call("hover", ["id": p]))
+            check("hover mostra le voci nascoste", r.contains("Accessori"), r.components(separatedBy: "\n").prefix(3).joined(separator: " | "))
+            if let acc = id(r, "link «Accessori»") {
+                let c = text(await tools.call("click", ["id": acc]))
+                check("clic con esito: nuovo titolo", c.contains("pagina: Accessori"), c.components(separatedBy: "\n").prefix(2).joined(separator: " | "))
+            } else { check("id di Accessori nell'esito", false, r) }
+        } else { check("Prodotti visibile", false) }
+        let same = text(await tools.call("press_keys", ["keys": "shift"]))
+        check("azione senza effetti: nothing changed", same.contains("nothing changed"), same)
+
+        print("Trascinamento:")
+        await open("kanban.html")
+        let k = text(await tools.call("observe", [:]))
+        if let card = id(k, "«Preventivo»"), let col = id(k, "heading «Fatto»") {
+            let r = text(await tools.call("drag", ["from_id": card, "to_id": col]))
+            check("scheda in Fatto", title().contains("Fatto=Preventivo"), r.components(separatedBy: "\n").prefix(2).joined(separator: " | "))
+        } else { check("scheda e colonna trovate", false, k) }
+
+        print("Cursore:")
+        await open("cursore.html")
+        let c = text(await tools.call("observe", [:]))
+        if let s = id(c, "slider «Volume»") {
+            let line = c.split(separator: "\n").first { $0.contains("slider «Volume»") } ?? ""
+            check("slider con value e settable", line.contains("value=70"), String(line))
+            let r = text(await tools.call("set_value", ["id": s, "value": "30"]))
+            try? await Task.sleep(for: .seconds(0.7))
+            check("set_value 30", title().contains("volume=30"), r.components(separatedBy: "\n").first ?? "")
+        } else { check("slider trovato", false, c) }
+
+        print("Modulo in una chiamata e selezione:")
+        await open("iscrizione.html")
+        let f = text(await tools.call("observe", [:]))
+        if let n = id(f, "textfield «Nome»"), let cg = id(f, "textfield «Cognome»"), let note = id(f, "textarea «Note»") {
+            let r = await tools.call("act", ["steps": [
+                ["tool": "type_text", "id": n, "text": "Luca"],
+                ["tool": "type_text", "id": cg, "text": "Verdi"],
+                ["tool": "type_text", "id": note, "text": "arrivo alle 9"],
+            ]])
+            try? await Task.sleep(for: .seconds(0.7))
+            check("act compila tre campi", title().contains("nome=Luca") && title().contains("cognome=Verdi") && title().contains("note=arrivo alle 9"), r.text.components(separatedBy: "\n").prefix(4).joined(separator: " | "))
+            let sel = text(await tools.call("select_text", ["id": note, "text": "9"]))
+            let typed = text(await tools.call("type_text", ["text": "10"]))
+            try? await Task.sleep(for: .seconds(0.7))
+            check("select_text + type_text", title().contains("note=arrivo alle 10"), sel + " | " + (typed.components(separatedBy: "\n").first ?? ""))
+            let bad = await tools.call("act", ["steps": [["tool": "click", "id": 99999], ["tool": "type_text", "text": "x"]]])
+            check("act si ferma al primo errore", bad.isError && bad.text.contains("not executed"), bad.text.replacingOccurrences(of: "\n", with: " | "))
+        } else { check("campi trovati", false, f) }
+
+        print("Menu dell'app:")
+        let m = text(await tools.call("menu", ["path": ""]))
+        check("barra dei menu di Safari", m.contains("File") || m.contains("Archivio") || m.contains("Modifica"), m)
+        let v = text(await tools.call("menu", ["path": m.contains("View") ? "View" : "Vista"]))
+        check("voci del menu Vista con scorciatoie", v.contains("⌘"), v)
+
+        print("Zoom:")
+        await open("etichetta.html")
+        let shot = await tools.call("screenshot", [:])
+        let z = await tools.call("screenshot", ["region": [0, 0, 400, 300]])
+        check("screenshot con region", !z.isError && z.content.contains { ($0["type"] as? String) == "image" }, z.text)
+        _ = shot
+
+        print("Esc:")
+        let esc = EscapeMonitor()
+        var stopped = 0
+        esc.start { stopped += 1 }
+        KeyCombo.lastEscapePosted = .distantPast
+        try? ex.press("escape") // the agent's own Esc: marked, ignored
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6)) // event monitors need the run loop
+        try? await Task.sleep(for: .milliseconds(50))
+        check("Esc dell'agente ignorato", stopped == 0)
+        KeyCombo.lastEscapePosted = .distantPast
+        let src = CGEventSource(stateID: .hidSystemState) // like a real keyboard: no marker
+        CGEvent(keyboardEventSource: src, virtualKey: 53, keyDown: true)?.post(tap: .cghidEventTap)
+        CGEvent(keyboardEventSource: src, virtualKey: 53, keyDown: false)?.post(tap: .cghidEventTap)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        try? await Task.sleep(for: .milliseconds(50))
+        if stopped == 0 {
+            // Global key monitors need Input Monitoring for the process: the terminal may not have it.
+            print("  —    Esc dell'utente: non verificabile da riga di comando (permesso Monitoraggio input del terminale)")
+        } else {
+            check("Esc dell'utente ferma", stopped == 1, "chiamate: \(stopped)")
+        }
+        esc.stop()
+
+        await closeBenchPages(ex)
+        if let previous { await ex.bringToFront(previous) }
+        return ok
+    }
+
+    /// Closes every Safari tab of the Bench (title «Banco …»), answering Safari's «unsubmitted form»
+    /// sheet when it appears: otherwise windows pile up and confuse screenshots and clicks.
+    /// Only Bench pages are closed; keys are pressed only while Safari is in front.
+    static func closeBenchPages(_ ex: Executor) async {
+        guard let safari = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").first else { return }
+        let app = AX.app(safari.processIdentifier)
+        func buttons(in el: AXUIElement, depth: Int = 0) -> [AXUIElement] {
+            guard depth < 6 else { return [] }
+            return AX.children(el).flatMap { c in AX.role(c) == "AXButton" ? [c] : buttons(in: c, depth: depth + 1) }
+        }
+        for _ in 0..<60 {
+            let windows = (AX.value(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+            guard let w = windows.first(where: { (AX.string($0, kAXTitleAttribute) ?? "").hasPrefix("Banco") }) else { return }
+            if let sheet = AX.children(w).first(where: { AX.role($0) == "AXSheet" }) {
+                let all = buttons(in: sheet)
+                let close = all.first { b in
+                    let t = Grammar.normalize(AX.string(b, kAXTitleAttribute) ?? "")
+                    return t.contains("chiudi") || t.contains("close") || t.contains("esci") || t.contains("leave")
+                } ?? all.first { !Grammar.normalize(AX.string($0, kAXTitleAttribute) ?? "").contains("annulla") }
+                if let close { AX.press(close) }
+                try? await Task.sleep(for: .milliseconds(400))
+                continue
+            }
+            AXUIElementPerformAction(w, kAXRaiseAction as CFString)
+            await ex.bringToFront(safari)
+            try? await Task.sleep(for: .milliseconds(250))
+            guard AX.frontmostApplication()?.bundleIdentifier == "com.apple.Safari" else { return }
+            try? ex.press("cmd+w")
+            try? await Task.sleep(for: .milliseconds(450))
+        }
+    }
+
     /// `--agent-bench [file] --engine claude|codex|local [--only id,id] [--server URL --model NAME]`:
     /// runs every task on a local page in Safari with one engine and checks the page state.
     /// It acts on the screen: run it only when the Mac is idle.
@@ -726,6 +884,7 @@ extension DebugCLI {
             return confirmation ? "sì" : nil
         }
         do { try await agent.start() } catch { print("Server strumenti: \(error)"); return }
+        await closeBenchPages(ex)
         agent.refreshAvailability()
         try? await Task.sleep(for: .seconds(2))
         print("Banco di prova · motore \(engine.rawValue)\(engine == .local ? " (\((mode ?? LocalEngine.defaultMode).rawValue))" : "") · \(tasks.count) compiti · \(agent.availability(of: engine))")
@@ -766,9 +925,7 @@ extension DebugCLI {
             print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, agent.tools.callCount,
                          first.map { String(format: "%4.1f s", $0) } ?? "  — ", total, String(note.prefix(70))))
             if !ok { print("      titolo: \(title.prefix(160))") }
-            // Close the tab only if Safari is still in front (never press keys elsewhere).
-            if AX.frontmostApplication()?.bundleIdentifier == "com.apple.Safari" { try? ex.press("cmd+w") }
-            try? await Task.sleep(for: .seconds(0.5))
+            await closeBenchPages(ex)
         }
         agent.shutdown()
         if let previous { await ex.bringToFront(previous) }

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco iscrizione</title>
+<style>body{font:15px -apple-system;margin:24px}label{display:block;margin:10px 0}textarea{width:320px;height:60px}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Iscrizione alla gita</h1>
+<form onsubmit="return false">
+  <label>Nome <input id="nome" aria-label="Nome"></label>
+  <label>Cognome <input id="cognome" aria-label="Cognome"></label>
+  <label>Email <input id="email" type="email" aria-label="Email"></label>
+  <label>Telefono <input id="tel" type="tel" aria-label="Telefono"></label>
+  <label>Città <input id="citta" aria-label="Città"></label>
+  <label>Note <textarea id="note" aria-label="Note"></textarea></label>
+</form>
+<script>
+function aggiorna() {
+  const v = id => document.getElementById(id).value.trim();
+  banco("iscrizione", ["nome=" + v("nome"), "cognome=" + v("cognome"), "email=" + v("email"),
+                       "tel=" + v("tel").replace(/\s/g, ""), "città=" + v("citta"), "note=" + v("note").toLowerCase()]);
+}
+document.querySelectorAll("input,textarea").forEach(e => e.addEventListener("input", aggiorna));
+setInterval(aggiorna, 500);
+aggiorna();
+</script>
+</body></html>

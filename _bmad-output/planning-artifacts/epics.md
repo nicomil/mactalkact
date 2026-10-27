@@ -903,13 +903,13 @@ So that misuro le nuove mani prima e dopo averle costruite.
 
 **Acceptance Criteria:**
 
-**Given** le nuove pagine `kanban.html`, `menu.html`, `cursore.html`, `iscrizione.html`, `codice.html` in `Tests/bench/pages/`
+**Given** le nuove pagine `kanban.html`, `menu.html`, `cursore.html`, `iscrizione.html`, `etichetta.html` in `Tests/bench/pages/`
 **When** le apro
 **Then** ognuna scrive il proprio stato nel titolo come le altre (FR-40) e non contiene dati privati
 
 **Given** `Tests/bench/agente.tsv`
 **When** lo leggo
-**Then** contiene almeno 5 compiti nuovi: spostare una scheda in un'altra colonna, aprire una voce di un menu che compare solo passando sopra, impostare un cursore a un valore, compilare sei campi in una volta, scrivere in un campo il codice mostrato in un'immagine
+**Then** contiene almeno 5 compiti nuovi: spostare una scheda in un'altra colonna, aprire una voce di un menu che compare solo passando sopra, impostare un cursore a un valore, compilare sei campi in una volta, scrivere in un campo il numero d'ordine leggibile solo nella foto di un'etichetta
 
 **Given** il Banco esteso con Claude prima dell'Epic 6
 **When** lo eseguo

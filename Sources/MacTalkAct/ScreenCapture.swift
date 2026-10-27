@@ -1,6 +1,10 @@
 import AppKit
 import ScreenCaptureKit
 
+/// Private but stable since macOS 10.x, used by every window manager: the window number of an AX window.
+@_silgen_name("_AXUIElementGetWindow")
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
+
 enum CaptureError: LocalizedError {
     case noWindow
     case encoding
@@ -76,18 +80,21 @@ enum ScreenCapture {
 
     /// Captures the frontmost app's main window, scaled so its longest side is at most `maxSide`.
     @MainActor
-    static func frontWindow(maxSide: CGFloat = 1400) async throws -> WindowShot {
+    /// `scaleFactor` 2 captures Retina pixels (for zooming into a region).
+    static func frontWindow(maxSide: CGFloat = 1400, scaleFactor: CGFloat = 1) async throws -> WindowShot {
         guard let front = AX.frontmostApplication() else { throw CaptureError.noWindow }
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         let candidates = content.windows.filter {
             $0.owningApplication?.processID == front.processIdentifier && $0.windowLayer == 0
                 && $0.frame.width > 80 && $0.frame.height > 80
         }
-        // Prefer the window Accessibility reports as focused; otherwise the largest.
+        // The window Accessibility reports as focused, by its window number: several windows of
+        // the same app can have the same frame. Otherwise the closest frame, then the largest.
         let axFrame = ScreenContext.capture(includeLabels: false).windowFrame
-        let window = candidates.min { a, b in
-            distance(a.frame, axFrame) < distance(b.frame, axFrame)
-        } ?? candidates.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+        let focusedID = AX.frontApp().flatMap { AX.focusedWindow(in: $0.app) }.flatMap(windowID(of:))
+        let window = candidates.first { focusedID != nil && $0.windowID == focusedID }
+            ?? candidates.min { a, b in distance(a.frame, axFrame) < distance(b.frame, axFrame) }
+            ?? candidates.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
         let filter: SCContentFilter
         let frame: CGRect
         let config = SCStreamConfiguration()
@@ -107,7 +114,7 @@ enum ScreenCapture {
             Log.debug("Screenshot: finestra non elencata, ritaglio dallo schermo")
         }
         guard frame.width > 10, frame.height > 10 else { throw CaptureError.noWindow }
-        let scale = min(1, maxSide / max(frame.width, frame.height))
+        let scale = min(scaleFactor, maxSide / max(frame.width, frame.height))
         config.width = Int(frame.width * scale)
         config.height = Int(frame.height * scale)
         config.showsCursor = false
@@ -115,6 +122,29 @@ enum ScreenCapture {
 
         return WindowShot(image: image, imageSize: CGSize(width: image.width, height: image.height),
                           windowFrame: frame)
+    }
+
+    /// A region of an image, resized to fit `maxSide` (enlarged at most `maxUpscale` times), as JPEG.
+    static func zoomJPEG(_ image: CGImage, crop: CGRect, maxSide: CGFloat = 1400, maxUpscale: CGFloat = 3) -> (Data, CGSize)? {
+        let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        let r = crop.integral.intersection(bounds)
+        guard r.width >= 4, r.height >= 4, let part = image.cropping(to: r) else { return nil }
+        let scale = min(maxUpscale, maxSide / max(r.width, r.height))
+        let w = Int(r.width * scale), h = Int(r.height * scale)
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(part, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let out = ctx.makeImage(),
+              let data = NSBitmapImageRep(cgImage: out).representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else { return nil }
+        return (data, CGSize(width: w, height: h))
+    }
+
+    /// The window number (as in ScreenCaptureKit and CGWindowList) of an Accessibility window.
+    static func windowID(of window: AXUIElement) -> CGWindowID? {
+        var id: CGWindowID = 0
+        return _AXUIElementGetWindow(window, &id) == .success && id != 0 ? id : nil
     }
 
     private static func distance(_ a: CGRect, _ b: CGRect?) -> CGFloat {

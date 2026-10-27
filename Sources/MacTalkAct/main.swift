@@ -26,6 +26,26 @@ if arguments.contains("--agent-bench") {
     dispatchMain()
 }
 
+if arguments.contains("--hands-test") {
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        let ok = await DebugCLI.handsTest()
+        print(ok ? "Tutto ok." : "Prova fallita.")
+        exit(ok ? 0 : 1)
+    }
+    dispatchMain()
+}
+
+if arguments.contains("--bench-cleanup") {
+    // Debug: closes the Bench pages left open in Safari.
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        await DebugCLI.closeBenchPages(Executor())
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if let text = argument(after: "--clean") {
     // Debug: dictation cleanup with Apple's model (FR-33).
     Task { @MainActor in

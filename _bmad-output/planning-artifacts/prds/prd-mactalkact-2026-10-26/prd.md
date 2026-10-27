@@ -398,7 +398,7 @@ Mentre l'Agente lavora, il tasto Esc premuto dall'utente lo ferma subito, come �
 
 #### FR-40: Banco esteso
 
-Il Banco di prova include compiti che richiedono le nuove mani: trascinare una scheda, passare sopra un menu, impostare un cursore, compilare un modulo lungo, leggere un codice dentro un'immagine.
+Il Banco di prova include compiti che richiedono le nuove mani: trascinare una scheda, passare sopra un menu, impostare un cursore, compilare un modulo lungo, leggere un numero dentro la foto di un'etichetta.
 
 **Feature-specific NFRs:**
 - **NFR-11 Meno giri.** Sui 20 compiti del Banco del 27/10, con Claude e Codex: chiamate per compito −30% e tempo mediano −25% [ASSUMPTION]; con il Motore locale nessun peggioramento.
