@@ -446,7 +446,7 @@ private struct AgentSection: View {
                     Picker("Effort istantaneo", selection: $settings.instantEffort) { ForEach(efforts, id: \.0) { Text($0.1).tag($0.0) } }
                         .pickerStyle(.segmented)
                 }
-                Text("«Clicca Salva», «apri la mail di Laura»: un passo su qualcosa che l'app conosce (app, sito, elemento sullo schermo, conversazione) va a un modello veloce. Se la prima azione non cambia niente, o serve un secondo passo, la richiesta passa da sola al livello rapido, senza ripetere quello che è già stato fatto.")
+                Text("Solo con Claude. «Clicca il preventivo», «apri la mail di Laura»: un passo su qualcosa che l'app conosce (app, sito, elemento sullo schermo, conversazione) va a un modello veloce. Se la prima azione non cambia niente, o serve un secondo passo, la richiesta passa da sola al livello rapido, senza ripetere quello che è già stato fatto.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Sessione lunga: Claude resta pronto tra una richiesta e l'altra", isOn: $settings.longSession)
                 Stepper("Riavvio dopo \(settings.sessionMaxRequests) richieste", value: $settings.sessionMaxRequests, in: 1...50)

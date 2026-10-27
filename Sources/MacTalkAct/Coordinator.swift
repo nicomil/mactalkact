@@ -187,11 +187,13 @@ final class Coordinator {
             && agent.currentChoice()?.engine == .claude && PrivacyGuard.cloudBlockReason() == nil
         if s.instantLevel {
             let executor = self.executor
-            let memory = conversation.log.entries.flatMap { [$0.request, $0.outcome] }
+            let log = conversation.log
             s.knownTarget = { text in
-                // The screen is read only here, when the sentence could be one step.
+                // Read only here, when the sentence could be one step. From the memory only Nico's
+                // requests: the agent's answers are long sentences where almost any word appears.
                 let labels = ScreenContext.capture(includeLabels: true).visibleLabels
-                return RouteHeuristics.hasKnownTarget(text, knownApp: { executor.findApp($0) != nil }, labels: labels, memory: memory)
+                return RouteHeuristics.hasKnownTarget(text, knownApp: { executor.findApp($0) != nil }, labels: labels,
+                                                      memory: log.entries.map(\.request))
             }
         }
         return s

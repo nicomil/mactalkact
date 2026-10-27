@@ -848,6 +848,13 @@ final class FakeEngine: AgentEngine {
     var phased = false
     /// At the Instant level, calls two tools (the second one escalates); at other levels answers at once.
     var twoCallsWhenInstant = false
+    /// At the Instant level: a click on an element that does not exist (an action that fails).
+    var failingActionWhenInstant = false
+    /// At the Instant level: no tool call and «Non trovo Salva.».
+    var givesUpWhenInstant = false
+    /// `interrupt()` makes the running request throw, like the real CLI after a control_request.
+    var throwsOnInterrupt = false
+    private var interruptedRun = false
     private(set) var levels: [AgentLevel] = []
     private(set) var interrupts = 0
     private(set) var runs = 0
@@ -863,18 +870,25 @@ final class FakeEngine: AgentEngine {
     func refreshAvailability() {}
     func prewarm() {}
     func cancel() {}
-    func interrupt() { interrupts += 1 }
+    func interrupt() { interrupts += 1; if throwsOnInterrupt { interruptedRun = true } }
     func shutdown() {}
 
     func run(_ request: AgentRequest) async throws -> String {
         runs += 1
         levels.append(request.level)
-        if twoCallsWhenInstant {
+        if twoCallsWhenInstant || failingActionWhenInstant || givesUpWhenInstant {
             guard request.level == .instant else {
                 return request.message.contains("<already_done>") ? "fatto rapido con il già fatto" : "fatto rapido"
             }
-            _ = await tools.call("menu", ["path": ""])
-            _ = await tools.call("menu", ["path": ""])
+            interruptedRun = false
+            if givesUpWhenInstant { return "Non trovo Salva." }
+            if failingActionWhenInstant {
+                _ = await tools.call("click", ["id": 99_999])
+            } else {
+                _ = await tools.call("observe", [:])
+                _ = await tools.call("observe", [:])
+            }
+            if interruptedRun { throw AgentEngineError.failed("error_during_execution") }
             return "ok"
         }
         if phased {
@@ -999,6 +1013,17 @@ extension DebugCLI {
             var died = false
             if case .failure(ClaudeCLIError.sessionDied) = dead { died = true }
             check("processo uscito a metà → sessione morta, era riusata", died && cli.lastAttemptReused)
+            // Instant level: an interrupt ends the turn, the session stays, the cursor does not move.
+            _ = await ask("sette", extra, memory: MemorySnapshot(generation: 0, lastSeq: 13))
+            let interruptTask = Task.detached { try? await Task.sleep(for: .milliseconds(300)); cli.interruptCurrent() }
+            let interrupted = await ask("ASPETTA", extra, memory: MemorySnapshot(generation: 0, lastSeq: 14))
+            _ = await interruptTask.value
+            var failedOnInterrupt = false
+            if case .failure(ClaudeCLIError.failed) = interrupted { failedOnInterrupt = true }
+            check("interrupt: turno chiuso con errore", failedOnInterrupt)
+            check("interrupt: sessione ancora viva, cursore fermo", cli.liveCursor(memory: MemorySnapshot(generation: 0, lastSeq: 14)) == 14)
+            let after = await ask("otto", extra, memory: MemorySnapshot(generation: 0, lastSeq: 15))
+            check("dopo l'interrupt la sessione è riusata", cli.lastAttemptReused && (try? after.get())?.hasPrefix("ricevuto: dopo 14") == true)
             check("ripete solo una sessione riusata, senza azioni, non annullata",
                   ClaudeEngine.retriesDeadSession(reused: true, effectfulCalls: 0, cancelled: false)
                   && !ClaudeEngine.retriesDeadSession(reused: true, effectfulCalls: 1, cancelled: false)
@@ -1008,6 +1033,36 @@ extension DebugCLI {
         }
 
         print("Livello istantaneo e scalata (Storia 7.3):")
+        let instantWas = AppSettings.shared.instantLevel
+        AppSettings.shared.instantLevel = true
+        defer { AppSettings.shared.instantLevel = instantWas }
+        func instantRun(_ setup: (FakeEngine) -> Void) async -> (AgentRunner, FakeEngine, String?) {
+            let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+            try? await agent.start()
+            let claude = FakeEngine(.claude, tools: agent.tools, fails: false)
+            setup(claude)
+            agent.register(claude)
+            agent.overrideChoice = (.claude, false)
+            let answer = try? await agent.run("clicca Salva", context: ScreenContext(), deep: false, instant: true)
+            agent.shutdown()
+            return (agent, claude, answer)
+        }
+        do {
+            let (a1, c1, ans1) = await instantRun { $0.twoCallsWhenInstant = true; $0.throwsOnInterrupt = true }
+            check("interruzione che lancia → scalata, non errore", c1.levels == [.instant, .fast] && ans1 == "fatto rapido con il già fatto"
+                  && a1.lastEscalation?.hasPrefix("seconda chiamata") == true)
+            let (a2, c2, ans2) = await instantRun { $0.failingActionWhenInstant = true }
+            check("azione fallita → scalata con il già fatto", c2.levels == [.instant, .fast] && ans2 == "fatto rapido con il già fatto"
+                  && a2.lastEscalation?.hasPrefix("errore") == true)
+            let (a3, c3, ans3) = await instantRun { $0.givesUpWhenInstant = true }
+            check("turno senza azioni che si arrende → scalata", c3.levels == [.instant, .fast] && ans3 == "fatto rapido"
+                  && a3.lastEscalation == "nessuna azione" && a3.firstLevel == .instant && (a3.lastEscalationCost ?? 99) < 1)
+            check("mappa dei livelli: istantaneo solo se attivo", ClaudeEngine.effective(.instant, instantOn: true, useFastModel: true) == .instant
+                  && ClaudeEngine.effective(.instant, instantOn: false, useFastModel: true) == .fast
+                  && ClaudeEngine.effective(.instant, instantOn: false, useFastModel: false) == .deep
+                  && ClaudeEngine.effective(.fast, instantOn: true, useFastModel: true) == .fast)
+            check("predefiniti dell'istantaneo", AppSettings.Defaults.instantModel == "claude-haiku-5-5" && AppSettings.Defaults.instantEffort == "low")
+        }
         do {
             let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
             try? await agent.start()
@@ -1328,6 +1383,7 @@ extension DebugCLI {
             /// Level of the first attempt and the reason of a scalata (Story 7.3).
             var level = ""
             var escalation = ""
+            var escalationCost: Double?
             var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) + router - total) <= 0.2 }
         }
         var rows: [Row] = []
@@ -1441,15 +1497,21 @@ extension DebugCLI {
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
             row.router = routerTime
             if ranAgent {
-                row.level = agent.lastEscalation != nil ? "istantaneo" : (agent.lastLevel?.rawValue ?? "")
+                let names: [AgentLevel: String] = [.instant: "istantaneo", .fast: "rapido", .deep: "profondo"]
+                let first = agent.firstLevel.flatMap { names[$0] } ?? ""
+                let last = agent.lastLevel.flatMap { names[$0] } ?? ""
+                row.level = first == last ? first : "\(first)→\(last)"
                 row.escalation = agent.lastEscalation ?? ""
+                row.escalationCost = agent.lastEscalationCost
             }
             rows.append(row)
             print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, row.steps,
                          first.map { String(format: "%4.1f s", $0) } ?? "  — ", total, String(note.prefix(70))))
             if !row.phases.isEmpty {
                 let parts = BenchPhase.allCases.compactMap { p in row.phases[p].map { String(format: "%@ %.1f", p.rawValue, $0) } }
-                if !row.level.isEmpty { print("      livello: \(row.level)\(row.escalation.isEmpty ? "" : " → rapido (\(row.escalation))")") }
+                if !row.level.isEmpty {
+                    print("      livello: \(row.level)\(row.escalation.isEmpty ? "" : " (\(row.escalation), \(String(format: "%.1f", row.escalationCost ?? 0)) s prima della scalata)")")
+                }
                 print("      fasi: \(routerTime > 0 ? String(format: "router %.1f · ", routerTime) : "")\(parts.joined(separator: " · "))\(row.sumOK ? "" : " ⚠︎ somma ≠ totale") · turni \(row.turns.map(String.init) ?? "—") · conferme \(row.confirmations) · bloccate \(row.blocked)")
             }
             if !ok, !quiet.value, task.kind.isPhrase == false { print("      titolo: \(title.prefix(160))") }
@@ -1478,12 +1540,14 @@ extension DebugCLI {
         let withPhases = ran.filter { !$0.phases.isEmpty }
         let phaseMedians = BenchPhase.allCases.map { p in (p, median(withPhases.map { $0.phases[p] ?? 0 })) }
         print("  fasi (mediane): " + phaseMedians.map { String(format: "%@ %.2f s", $0.0.rawValue, $0.1) }.joined(separator: " · "))
-        let instantRows = ran.filter { $0.level == "instant" || $0.level == "istantaneo" }
+        let instantRows = ran.filter { $0.level.hasPrefix("istantaneo") }
         if !instantRows.isEmpty {
             let clean = instantRows.filter { $0.escalation.isEmpty }
-            print(String(format: "  livello istantaneo: %d compiti, %d senza scalata (%.0f%%), riusciti %d · tempo mediana %.1f s",
+            let costs = instantRows.compactMap(\.escalationCost)
+            print(String(format: "  livello istantaneo: %d compiti, %d senza scalata (%.0f%%), riusciti %d · tempo mediana %.1f s · costo della scalata mediana %@ (obiettivo ≤ 1 s)",
                          instantRows.count, clean.count, Double(clean.count) / Double(instantRows.count) * 100,
-                         instantRows.filter(\.ok).count, median(instantRows.map(\.total))))
+                         instantRows.filter(\.ok).count, median(instantRows.map(\.total)),
+                         costs.isEmpty ? "—" : String(format: "%.1f s", median(costs))))
         }
         print("  somma delle fasi = totale entro 0,2 s: \(ran.allSatisfy(\.sumOK) ? "sì, su ogni compito" : "NO su \(ran.filter { !$0.sumOK }.map(\.task.id).joined(separator: ", "))")")
 
@@ -1492,12 +1556,12 @@ extension DebugCLI {
         let out = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
         let phaseHeader = BenchPhase.allCases.map { "\($0.rawValue)_s" }.joined(separator: "\t")
-        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tlivello_usato\tscalata\tturni\tconferme\tbloccate\tmodello\trisposta\n"
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tturni\tconferme\tbloccate\tmodello\trisposta\n"
         for r in rows {
             let esito = r.skipped != nil ? "saltato" : (r.ok ? "ok" : "no")
             let phases = BenchPhase.allCases.map { p in r.phases[p].map { String(format: "%.2f", $0) } ?? "" }.joined(separator: "\t")
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")

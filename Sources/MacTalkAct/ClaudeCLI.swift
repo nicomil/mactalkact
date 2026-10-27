@@ -176,7 +176,13 @@ final class ClaudeCLI: @unchecked Sendable {
                                    "request": ["subtype": "interrupt"]]
         guard var data = try? JSONSerialization.data(withJSONObject: line) else { proc.terminate(); return }
         data.append(0x0A)
-        if (try? proc.stdin.write(contentsOf: data)) == nil { proc.terminate() }
+        if (try? proc.stdin.write(contentsOf: data)) == nil { proc.terminate(); return }
+        // If the CLI does not close the turn quickly, the process goes: the fast level must not wait.
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self else { return }
+            let stuck = self.lock.withLock { self.interrupted && self.current === proc }
+            if stuck { Log.info("claude: interruzione senza risposta, chiudo il processo"); proc.terminate() }
+        }
     }
 
     func shutdown() {
@@ -326,8 +332,9 @@ final class ClaudeCLI: @unchecked Sendable {
             scheduleIdleEnd(s)
             throw ClaudeCLIError.noOutput(m)
         } catch ClaudeCLIError.failed(let m) where lock.withLock({ interrupted }) && s.process.process.isRunning {
-            // Interrupted on purpose (scalata): the session stays for the next Instant request.
-            lock.withLock { s.requests += 1; s.lastUsed = Date(); s.cursor = Self.cursor(after: memory); interrupted = false }
+            // Interrupted on purpose (scalata): the session stays for the next Instant request. The cursor
+            // stays too: the outcome of this request comes from the fast level, so it is sent next time.
+            lock.withLock { s.requests += 1; s.lastUsed = Date(); interrupted = false }
             scheduleIdleEnd(s)
             throw ClaudeCLIError.failed(m)
         } catch {

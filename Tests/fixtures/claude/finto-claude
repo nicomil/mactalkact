@@ -1,12 +1,14 @@
 #!/usr/bin/python3 -I
 # A fake `claude -p --input-format stream-json` for --fallback-test: one `result` per message,
-# echoing the text it received. «MUORI» ends the process mid-message, «DORMI» never answers.
+# echoing the text it received. «MUORI» ends the process mid-message, «DORMI» never answers,
+# «ASPETTA» answers only to an interrupt.
 import json, sys, time
 if "--version" in sys.argv:
     print("2.1.311 (Claude Code)")
     sys.exit(0)
 first = True
-for line in sys.stdin:
+lines = iter(sys.stdin)
+for line in lines:
     try:
         text = json.loads(line)["message"]["content"]
     except Exception:
@@ -16,6 +18,15 @@ for line in sys.stdin:
         first = False
     if "MUORI" in text:
         sys.exit(3)
+    if "ASPETTA" in text:
+        # Waits for the interrupt control_request, then closes the turn like the real CLI.
+        for other in lines:
+            o = json.loads(other)
+            if o.get("type") == "control_request":
+                print(json.dumps({"type": "control_response", "response": {"subtype": "success", "request_id": o.get("request_id")}}), flush=True)
+                print(json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True}), flush=True)
+                break
+        continue
     if "DORMI" in text:
         time.sleep(60)
     print(json.dumps({"type": "stream_event", "event": {"type": "content_block_delta"}}), flush=True)

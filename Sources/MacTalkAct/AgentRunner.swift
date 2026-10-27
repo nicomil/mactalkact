@@ -99,7 +99,10 @@ final class AgentRunner {
     private(set) var lastTurns: Int?
     /// Level used by the last attempt and the reason of a scalata, for the Bench (FR-43).
     private(set) var lastLevel: AgentLevel?
+    private(set) var firstLevel: AgentLevel?
     private(set) var lastEscalation: String?
+    /// Seconds spent at the Instant level before the scalata (goal ≤ 1 s, FR-43).
+    private(set) var lastEscalationCost: Double?
     /// Called when any engine changes state; the aggregate is `availability`.
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
     /// Called when one engine changes state (menu, "Codex è tornato").
@@ -276,7 +279,9 @@ final class AgentRunner {
              memory: ConversationLog? = nil, instant: Bool = false) async throws -> String {
         // A request refused below must not leave the previous request's phases for the Bench.
         lastEscalation = nil
+        lastEscalationCost = nil
         lastLevel = nil
+        firstLevel = nil
         lastPhases = [:]
         lastTotal = 0
         lastTurns = nil
@@ -325,9 +330,12 @@ final class AgentRunner {
         }
         var tried: Set<EngineID> = []
         // Instant level (FR-43): Claude only, once; after a scalata the same request goes on at `.fast`.
-        var instantPending = instant && settings.instantLevel
+        var instantPending = instant && !deep && settings.instantLevel
 
         while true {
+            // After a scalata: nothing more once the user stopped or the turn's time is over.
+            if tools.cancelled { throw AgentEngineError.failed("interrotto dall'utente") }
+            if req.clock.remaining <= 0 { throw AgentEngineError.timeout }
             guard let choice = EngineSelector.select(chosen: chosenEngine, engines: engineStates,
                                                      fallback: fallbackOn, excluding: tried),
                   let engine = engines[choice.engine] else {
@@ -347,6 +355,7 @@ final class AgentRunner {
                 attempt.messageSince = { since($0) + rule }
             }
             lastLevel = attemptLevel
+            if firstLevel == nil { firstLevel = attemptLevel }
             tools.instantGuard = attemptLevel == .instant
             tools.onEscalate = { [weak engine] _ in engine?.interrupt() }
             let model = engine.model(for: attemptLevel)
@@ -356,8 +365,10 @@ final class AgentRunner {
             tools.cloudEngine = engine.id.isCloud
             /// A scalata: the same engine goes on at `.fast` with what was done and the current elements.
             func escalate(_ reason: String) {
-                Log.info("Agente: istantaneo → rapido, \(reason) (\(String(format: "%.1f", Date().timeIntervalSince(started))) s)")
+                let cost = Date().timeIntervalSince(started)
+                Log.info("Agente: istantaneo → \(level == .deep ? "profondo" : "rapido"), \(reason) (\(String(format: "%.1f", cost)) s)")
                 lastEscalation = reason
+                lastEscalationCost = cost
                 instantPending = false
                 tools.instantGuard = false
                 tools.onEscalate = nil
@@ -366,8 +377,14 @@ final class AgentRunner {
                     + tools.callLog.joined(separator: "\n") + "\n</already_done>"
                 let now = tools.initialObservation()
                 req.message = message(request, context: context, recent: recent, elements: now) + done
-                req.messageSince = { [unowned self] _ in self.message(request, context: context, recent: recent, elements: now) + done }
-                req.memory = MemorySnapshot(generation: -1, lastSeq: 0) // never the Instant session's memory
+                // The fast session keeps its own memory cursor: the real snapshot, no restart.
+                if let memory {
+                    req.messageSince = { [unowned self] seq in
+                        self.message(request, context: context, recent: memory.promptBlock(after: seq), elements: now) + done
+                    }
+                } else {
+                    req.messageSince = { [unowned self] _ in self.message(request, context: context, recent: recent, elements: now) + done }
+                }
             }
             do {
                 let answer = try await engine.run(attempt)
@@ -377,7 +394,7 @@ final class AgentRunner {
                     escalate(reason)
                     continue
                 }
-                if attemptLevel == .instant, let reason = tools.escalation {
+                if attemptLevel == .instant, let reason = tools.escalation, !tools.cancelled {
                     // The model stopped after the tool said so: the request goes on at the fast level.
                     escalate(reason)
                     continue
@@ -391,9 +408,16 @@ final class AgentRunner {
                 return answer
             } catch let error as AgentEngineError {
                 engine.onPhase = nil // a late event of this engine must not move the next attempt's phases
-                if attemptLevel == .instant, let reason = tools.escalation, !tools.cancelled {
-                    escalate(reason) // the turn was interrupted on purpose
-                    continue
+                if attemptLevel == .instant, !tools.cancelled {
+                    if let reason = tools.escalation {
+                        escalate(reason) // the turn was interrupted on purpose
+                        continue
+                    }
+                    if case .limit = error {} else {
+                        // Haiku failed on its own (model missing, network blip): fast Claude, not another engine.
+                        escalate("errore del livello istantaneo: \(error.localizedDescription.prefix(60))")
+                        continue
+                    }
                 }
                 lastEngine = engine.id
                 lastModel = model

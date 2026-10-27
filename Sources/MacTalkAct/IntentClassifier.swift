@@ -231,9 +231,13 @@ enum RouteHeuristics {
         let words = n.split(separator: " ")
         // «mail» or «messaggio» make a request complex for the model choice, not more than one step:
         // «apri la mail di Laura» is one click.
-        guard !words.isEmpty, words.count <= 8, !multiStepMarkers.contains(where: { n.contains($0) }) else { return false }
-        if text.contains(",") || words.contains("e") || words.contains("poi") || words.contains("anche") { return false }
-        return true
+        guard !words.isEmpty, words.count <= 8 else { return false }
+        // Whole words or phrases: «ricerca» is not «cerca», «sogni» is not «ogni».
+        let padded = " " + n + " "
+        if multiStepMarkers.contains(where: { padded.contains(" \($0) ") }) { return false }
+        if text.contains(where: { ",.;".contains($0) }) { return false }
+        let joiners: Set<Substring> = ["e", "ed", "poi", "anche", "quindi", "dopo", "oppure", "infine", "o"]
+        return !words.contains(where: joiners.contains)
     }
 
     /// The request names something the app knows (AD-23, FR-43): an installed app, a site,
@@ -258,6 +262,7 @@ enum RouteHeuristics {
     ]
 
     private static let targetStopwords: Set<String> = [
+        "seleziona", "spunta", "riapri", "attiva", "disattiva", "copia", "incolla", "vedere", "torna", "scorri", "porta",
         "apri", "clicca", "premi", "chiudi", "vai", "metti", "togli", "scrivi", "mostra", "fammi", "della", "dello",
         "delle", "degli", "nella", "nello", "sulla", "sullo", "con", "per", "che", "una", "uno", "gli", "dal", "dalla",
         "pulsante", "bottone", "tasto", "voce", "scheda", "finestra", "pagina", "questa", "questo", "quella", "quello",

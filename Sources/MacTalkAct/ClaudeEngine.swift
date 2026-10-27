@@ -60,8 +60,13 @@ final class ClaudeEngine: AgentEngine {
 
     /// The level actually used: the Instant level only when switched on, the fast one only when used.
     private func effective(_ level: AgentLevel) -> AgentLevel {
-        if level == .instant, settings.instantLevel { return .instant }
-        return level == .deep || !settings.useFastModel ? .deep : .fast
+        Self.effective(level, instantOn: settings.instantLevel, useFastModel: settings.useFastModel)
+    }
+
+    /// Pure, tested by `--selftest`.
+    nonisolated static func effective(_ level: AgentLevel, instantOn: Bool, useFastModel: Bool) -> AgentLevel {
+        if level == .instant, instantOn { return .instant }
+        return level == .deep || !useFastModel ? .deep : .fast
     }
 
     /// The spawn may happen on a background queue: capture the path setting now.
@@ -113,6 +118,7 @@ final class ClaudeEngine: AgentEngine {
         var pairs: [(ClaudeCLI, ClaudeCLI.Config)] = []
         if let c = config(.deep) { pairs.append((cliDeep, c)) }
         if settings.useFastModel, let c = config(.fast) { pairs.append((cliFast, c)) }
+        if settings.instantLevel, let c = config(.instant) { pairs.append((cliInstant, c)) }
         for (cli, c) in pairs {
             DispatchQueue.global(qos: .utility).async { cli.prewarm(c) }
         }
@@ -199,8 +205,8 @@ final class ClaudeEngine: AgentEngine {
                             cliStatus = cliStatus.unverifiedForLogin
                             Log.info("Motore Claude: avvio senza il login dell'abbonamento, \(cliStatus)")
                         }
-                        let effects = toolAccess()?.tools.effectfulCalls ?? 1
-                        if inSession, effects == 0 {
+                        let tools = toolAccess()?.tools
+                        if inSession, (tools?.effectfulCalls ?? 1) == 0, tools?.escalation == nil {
                             // Without a verified login: the same request with one process, as before (FR-45).
                             inSession = false
                             continue
@@ -237,7 +243,7 @@ final class ClaudeEngine: AgentEngine {
             return try await attempt()
         } catch ClaudeCLIError.sessionDied(let m)
                     where Self.retriesDeadSession(reused: cli.lastAttemptReused, effectfulCalls: tools?.effectfulCalls ?? 1,
-                                                  cancelled: tools?.cancelled ?? true) {
+                                                  cancelled: tools?.cancelled ?? true) && tools?.escalation == nil {
             Log.info("Agente (claude/\(model)): sessione chiusa a metà senza azioni \(m), ripeto la richiesta")
             onNotice?("Riavvio l'Agente")
             return try await attempt()

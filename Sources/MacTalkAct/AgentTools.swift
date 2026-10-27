@@ -273,8 +273,6 @@ final class AgentTools {
         }
         var result = await perform(name, args)
         if result.isError, result.text.hasSuffix(Self.confirmFirst) { unconfirmedRisky = true }
-        callLog.append("- \(name) \(Self.compact(args)) → \(result.isError ? "ERROR " : "")\(result.text.split(separator: "\n").first.map(String.init)?.prefix(160) ?? "")")
-        if instantGuard, Self.effectfulTools.contains(name), let why = Self.instantFailure(result) { escalate(why) }
         if reportOutcome, Self.outcomeTools.contains(name), !result.readOnly, !cancelled,
            !result.text.hasPrefix("MacTalkAct does not have"), !result.text.hasPrefix("The frontmost app changed") {
             await settle()
@@ -285,6 +283,12 @@ final class AgentTools {
             }
             result.content.append(["type": "text", "text": outcome()])
         }
+        // After the outcome: «nothing changed» is in it (FR-43). `act` is judged too: it is the call
+        // the Instant level is told to use.
+        let lines = result.text.split(separator: "\n").map(String.init)
+        let resultLine = lines.first { $0.hasPrefix("RESULT") }.map { " · " + $0.prefix(120) } ?? ""
+        callLog.append("- \(name) \(Self.compact(args)) → \(result.isError ? "ERROR " : "")\(lines.first?.prefix(160) ?? "")\(resultLine)")
+        if instantGuard, Self.effectfulTools.contains(name) || name == "act", let why = Self.instantFailure(result) { escalate(why) }
         if cloudEngine, AppSettings.shared.hideSensitiveFromCloud {
             result.content = result.content.map { item in
                 guard let t = item["text"] as? String else { return item }
@@ -591,9 +595,12 @@ final class AgentTools {
     /// Pure, tested by `--selftest`.
     static func instantGaveUp(answer: String, effectfulCalls: Int) -> String? {
         if effectfulCalls == 0 { return "nessuna azione" }
-        let n = Grammar.normalize(answer)
+        // Only the first sentence: «Fatto. Vuoi che lo invii?» is a success.
+        let first = answer.split(whereSeparator: { ".!?\n".contains($0) }).first.map(String.init) ?? answer
+        let n = Grammar.normalize(first)
         let signs = ["non sono riuscit", "non riesco", "non ho potuto", "non posso", "non trovo", "non ho trovato",
-                     "non ho ancora", "non e stato possibile", "non si e aperto", "dimmi se", "vuoi che"]
+                     "non ho ancora", "non e stato possibile", "non si e aperto", "non vedo", "non c e", "non ce",
+                     "impossibile", "purtroppo", "non esiste", "i couldn", "i can t", "unable"]
         return signs.contains(where: n.contains) ? "risposta senza risultato" : nil
     }
 
