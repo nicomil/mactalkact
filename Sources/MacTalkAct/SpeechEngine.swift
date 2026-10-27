@@ -207,7 +207,7 @@ final class TranscriptionSession {
         (finals + [volatileText]).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
-    func start(stream: AsyncStream<AnalyzerInput>, locale: Locale, format: AVAudioFormat) {
+    func start(stream: AsyncStream<AnalyzerInput>, locale: Locale, format: AVAudioFormat, vocabulary: [String] = []) {
         let transcriber = SpeechEngine.makeTranscriber(locale: locale)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
@@ -231,6 +231,12 @@ final class TranscriptionSession {
         }
         startTask = Task { @MainActor in
             do {
+                if !vocabulary.isEmpty {
+                    // Expected words (technical terms, what is on screen): fewer «hotspot» for «output».
+                    let context = AnalysisContext()
+                    context.contextualStrings[.general] = vocabulary
+                    try? await analyzer.setContext(context)
+                }
                 try await analyzer.prepareToAnalyze(in: format)
                 try await analyzer.start(inputSequence: stream)
             } catch {
@@ -281,6 +287,8 @@ final class SpeechEngine {
     var onSpeechStart: (() -> Void)?
 
     private(set) var isRunning = false
+    /// Words to expect in the next sentences (`SpeechVocabulary`).
+    var vocabulary: [String] = []
     private var locale: Locale?
     private var analyzerFormat: AVAudioFormat?
     private var audioEngine: AVAudioEngine?
@@ -415,7 +423,7 @@ final class SpeechEngine {
         guard let locale, let format = analyzerFormat else { return }
         let s = TranscriptionSession(forced: forced)
         s.onLive = { [weak self] text in self?.onLive?(text) }
-        s.start(stream: stream, locale: locale, format: format)
+        s.start(stream: stream, locale: locale, format: format, vocabulary: vocabulary)
         session = s
         Log.debug("Inizio frase (\(forced ? "tasto" : "voce"))")
         if !forced { onSpeechStart?() }

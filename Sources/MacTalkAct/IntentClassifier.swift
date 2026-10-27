@@ -35,7 +35,7 @@ final class RuleClassifier: IntentClassifier {
     let name = "regole"
 
     func classify(_ text: String, editable: Bool, after: String?) async -> Classification {
-        if Grammar.startsWithActionVerb(text) || RouteHeuristics.isRequestToComputer(text) {
+        if Grammar.startsWithActionVerb(text) || RouteHeuristics.isRequestToComputer(text) || RouteHeuristics.isScreenQuestion(text) {
             return Classification(kind: .command, source: name)
         }
         if RouteHeuristics.isShortChatter(text) { return Classification(kind: .chatter, source: name) }
@@ -131,6 +131,39 @@ enum RouteHeuristics {
         "mi spieghi", "spiegami", "mi dici", "dimmi", "leggimi", "mi leggi", "riassumi", "mi riassumi", "traduci",
         "mi traduci", "mostrami", "fammi vedere", "descrivimi", "cosa c'e scritto", "che cosa c'e scritto",
     ]
+
+    private static let connectives: Set<String> = ["e", "ed", "ma", "ora", "adesso", "poi", "allora", "invece", "ok", "okay", "anche"]
+
+    /// «E torna a quello di prima» → «torna a quello di prima»: the follow-up without its opening words.
+    static func withoutConnectives(_ text: String) -> String {
+        var words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        while words.count > 1, connectives.contains(Grammar.normalize(words[0])) { words.removeFirst() }
+        return words.joined(separator: " ")
+    }
+
+    private static let questionWords = ["cosa", "che cosa", "cos e", "che e", "come", "perche", "quale", "quali", "quanti", "quante", "dove", "chi"]
+    private static let screenWords: Set<String> = [
+        "schermo", "finestra", "cartella", "cartelle", "file", "comando", "comandi", "output", "terminale", "pagina",
+        "app", "applicazione", "interfaccia", "errore", "errori", "messaggio", "scritto", "scritta", "vedo", "vede",
+        "vedi", "vediamo", "vedendo", "guardando", "qui", "qua", "questo", "questa", "questi", "queste", "codice", "tabella",
+        "grafico", "pulsante", "bottone", "menu", "risultato", "risultati", "elenco", "lista", "documento", "progetto",
+    ]
+
+    /// «Cosa vedo qui?», «che cos'è questo errore?», «cosa c'è in questa cartella?»: a question about
+    /// what is on screen. «Dove hai messo le chiavi?» is not (no reference to the screen).
+    static func isScreenQuestion(_ text: String) -> Bool {
+        let n = Grammar.normalize(withoutConnectives(text)).replacingOccurrences(of: "'", with: " ")
+        guard questionWords.contains(where: { n.hasPrefix($0 + " ") || n.contains(" " + $0 + " ") }) else { return false }
+        let words = Set(n.split(separator: " ").map(String.init))
+        return !words.isDisjoint(with: screenWords)
+    }
+
+    /// A sentence of the conversation window that continues the exchange: an action verb even after
+    /// «e», «ma», «ora» («e torna a quello di prima»), a request to the computer, a question on the screen.
+    static func isFollowUpRequest(_ text: String) -> Bool {
+        let stripped = withoutConnectives(text)
+        return Grammar.startsWithActionVerb(stripped) || isRequestToComputer(stripped) || isScreenQuestion(text)
+    }
 
     /// «Mi spieghi cos'è questa app?», «dimmi cosa c'è scritto»: questions and requests to the computer
     /// about the screen, recognizable from how they start.

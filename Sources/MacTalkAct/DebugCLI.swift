@@ -285,7 +285,14 @@ enum DebugCLI {
             }
             let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
             let started = Date()
-            let analyzer = try await SpeechAnalyzer(inputAudioFile: file, modules: [transcriber], finishAfterFile: true)
+            // MTA_VOCAB="output,wincleaner": the contextual strings of the live recognizer, to compare.
+            let context = AnalysisContext()
+            if let v = ProcessInfo.processInfo.environment["MTA_VOCAB"] {
+                context.contextualStrings[.general] = v == "base" ? SpeechVocabulary.base : v.split(separator: ",").map(String.init)
+            }
+            let analyzer = ProcessInfo.processInfo.environment["MTA_VOCAB"] == nil
+                ? try await SpeechAnalyzer(inputAudioFile: file, modules: [transcriber], finishAfterFile: true)
+                : try await SpeechAnalyzer(inputAudioFile: file, modules: [transcriber], analysisContext: context, finishAfterFile: true)
             _ = analyzer
             let parts = try await collector.value
             let text = parts.joined(separator: " ")
@@ -345,6 +352,12 @@ extension DebugCLI {
             let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length))!
             try file.read(into: buf)
             let conv = AnalyzerInputConverter(analyzerFormat: format)
+            // MTA_VOCAB="base" or "a,b,c": the contextual strings the app passes to the live recognizer.
+            if let v = ProcessInfo.processInfo.environment["MTA_VOCAB"] {
+                let context = AnalysisContext()
+                context.contextualStrings[.general] = v.split(separator: ",").flatMap { $0 == "base" ? SpeechVocabulary.base : [String($0)] }
+                try await analyzer.setContext(context)
+            }
             try await analyzer.prepareToAnalyze(in: format)
             try await analyzer.start(inputSequence: stream)
             for input in try conv.convert(buf, at: nil) { cont.yield(input) }

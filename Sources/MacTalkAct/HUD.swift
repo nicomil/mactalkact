@@ -19,7 +19,7 @@ final class HUDController {
     private var hideTask: Task<Void, Never>?
 
     init() {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 660, height: 120),
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 660, height: 260),
                         styleMask: [.nonactivatingPanel, .borderless],
                         backing: .buffered, defer: true)
         panel.isOpaque = false
@@ -84,8 +84,10 @@ struct HUDView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.title.isEmpty ? "Ti ascolto…" : model.title)
                         .font(.system(size: 15, weight: .medium))
-                        .lineLimit(2)
-                        .truncationMode(.head)
+                        // Answers and explanations: several lines, read from the start.
+                        // Live text: two lines, the end visible.
+                        .lineLimit(model.phase == .success ? 7 : 2)
+                        .truncationMode(model.phase == .success ? .tail : .head)
                     if !model.detail.isEmpty {
                         Text(model.detail)
                             .font(.system(size: 12))

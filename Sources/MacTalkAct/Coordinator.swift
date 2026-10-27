@@ -44,6 +44,10 @@ final class Coordinator {
     private var busy = false
     private var cancelRequested = false
     private let escape = EscapeMonitor()
+    /// Words the recognizer should expect, refreshed when the frontmost window changes.
+    private let vocabulary = SpeechVocabulary()
+    /// Extra seconds a long answer stays on screen: the conversation window waits for it (FR-7).
+    private var answerHold: TimeInterval = 0
 
     private struct PendingPlan {
         let plan: Plan
@@ -57,6 +61,11 @@ final class Coordinator {
         engine.onLive = { [weak self] text in self?.handleLive(text) }
         engine.onUtterance = { [weak self] text in self?.handleUtterance(text, addressed: false) }
         engine.onSpeechStart = { [weak self] in self?.dictationIdle?.cancel() }
+        vocabulary.onChange = { [weak self] words in
+            self?.engine.vocabulary = words
+            Log.debug("Vocabolario del riconoscimento: \(words.count) parole")
+        }
+        vocabulary.start()
         setupAgent()
         agent.onAvailabilityChange = { [weak self] a in self?.availabilityChanged(a) }
         agent.onEngineAvailabilityChange = { [weak self] id, a in self?.engineAvailabilityChanged(id, a) }
@@ -390,6 +399,8 @@ final class Coordinator {
 
     /// A complete sentence: from push-to-talk (`addressed`) or from voice detection.
     private func handleUtterance(_ raw: String, addressed: Bool) {
+        // The screen may change after this sentence: read the window again for the next ones.
+        vocabulary.refresh(after: 2)
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if speaker.isSpeaking && !addressed { return } // our own voice
         if dictating {
@@ -543,8 +554,9 @@ final class Coordinator {
 
     /// After every response the conversation stays open for a while (FR-7).
     private func openConversation() {
-        let seconds = settings.conversationSeconds
-        guard seconds > 0 else { return }
+        let seconds = settings.conversationSeconds + max(0, answerHold)
+        answerHold = 0
+        guard settings.conversationSeconds > 0 else { return }
         conversation.openWindow(seconds: seconds)
         conversationHint?.cancel()
         conversationHint = Task { @MainActor [weak self] in
@@ -828,7 +840,10 @@ final class Coordinator {
             if cancelRequested {
                 hud.show(.info, "Interrotto", autoHide: 1.5)
             } else {
-                hud.show(.success, answer.isEmpty ? "Fatto" : answer, detail: engineNotice ?? "", autoHide: settings.hudAnswerSeconds)
+                // Long answers (explanations) stay as long as it takes to read them (~14 characters a second).
+                let reading = min(30, max(settings.hudAnswerSeconds, Double(answer.count) / 14))
+                answerHold = reading - settings.hudAnswerSeconds
+                hud.show(.success, answer.isEmpty ? "Fatto" : answer, detail: engineNotice ?? "", autoHide: reading)
                 if settings.speakReplies { await speaker.say(answer.isEmpty ? "Fatto" : answer) }
             }
         } catch {

@@ -165,8 +165,8 @@ final class IntentRouter {
             }
             if let m = macroLookup(text) { return .macro(m) }
             if RouteHeuristics.isShortChatter(text) { return .ignore(reason: "chiacchiera breve nella finestra") }
-            if RouteHeuristics.isRequestToComputer(text) {
-                return await commandRoute(text, editable: editable, state: state, why: "domanda al computer nella finestra")
+            if RouteHeuristics.isFollowUpRequest(text) {
+                return await commandRoute(text, editable: editable, state: state, why: "seguito nella finestra")
             }
             let c = await classifier.classify(text, editable: editable(), after: state.lastExchange)
             guard c.kind == .command else {
@@ -182,6 +182,10 @@ final class IntentRouter {
         // 7. Free sentence. In a text field the classifier decides; elsewhere it is a request.
         let isEditable = editable()
         if isEditable {
+            // Addressed to the computer and asking about the screen: never text to type.
+            if RouteHeuristics.isRequestToComputer(text) || RouteHeuristics.isScreenQuestion(text) {
+                return await commandRoute(text, editable: editable, state: state, why: "domanda al computer")
+            }
             if RouteHeuristics.isShortChatter(text) {
                 return state.pushToTalk
                     ? .askToType(text, reason: "chiacchiera breve con push-to-talk")

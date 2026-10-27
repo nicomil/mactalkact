@@ -156,3 +156,12 @@ Dimmi cosa c'è scritto	no	finestra	agente
 Ma dove hai messo le chiavi?	si	seguito	ignora
 Vuoi la pappa?	no	seguito	ignora
 Che bravo il mio piccolo	no	seguito	ignora
+E torna a quello di prima	si	seguito	agente	27/10 09:39, ignorata come chiacchiera
+Computer, cosa vede schermo?	si	nessuno	agente	27/10 09:38, chiesto se scrivere
+Computer, cosa sto vedendo qui?	si	nessuno	agente
+Che cos'è questo errore?	si	seguito	agente
+Cosa vuol dire questo output?	no	seguito	agente
+Ora apri l'altro	no	seguito	agente
+Dove sono le salviette?	no	seguito	ignora
+Cosa mangiamo stasera?	si	seguito	ignora
+Cosa fai con la pappa?	no	seguito	ignora
