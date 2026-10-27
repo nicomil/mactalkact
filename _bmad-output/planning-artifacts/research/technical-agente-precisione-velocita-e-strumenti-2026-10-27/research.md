@@ -502,3 +502,25 @@ Nuova pagina del Banco, `grande.html`: una lista di 1.000 messaggi e, dopo la li
 La ricerca con `query` trova ancora il messaggio 900, fuori vista. Il guadagno è piccolo perché la scansione di prima saltava già i rami fuori dalla finestra: su questa pagina la lista non esauriva il budget. Il criterio «sotto 1 s» è rispettato. La prova vera resta la webmail di prova (migliaia di elementi annidati), che manca: va fatta con `MACTALK_BENCH_WEBMAIL` prima di chiudere l'Epic 7. Electron e Chromium: alla prima osservazione l'app aspetta fino a 1 s che l'albero si popoli; non misurato, nessuna app Electron nel Banco.
 
 Dopo la review la scansione a costo fisso scende a 0,04 s. Il nuovo test della lista scorsa ha trovato un difetto: Safari dichiara «visibili» tutte le 1.000 righe, e il tetto teneva le prime 60, fuori vista, lasciando l'osservazione senza righe. Ora tra i candidati restano quelli che si vedono nella finestra.
+
+## 17. Misura finale dell'Epic 7 (Storia 7.5, 27 ottobre 2026, 22:03)
+
+Una corsa sola con tutto attivo: Sessione lunga, Livello istantaneo, osservazione a costo fisso. I compiti sono 35: 30 con azioni (pagine, canvas, pagina grande, Finder) e 5 Frasi spurie, con Claude. Calendario, Mail e webmail restano fuori: servono i permessi di macOS e l'account di prova. Il confronto è con la riga di base corretta (§14, «prima»: processo pronto, nessun livello istantaneo).
+
+| Misura (compiti con azioni) | Riga di base | Fine dell'Epic 7 | Soglia NFR-12 | Esito |
+| --- | --- | --- | --- | --- |
+| Primo strumento, mediana | 2,6 s | 2,7 s | ≤ 1,5 s | **non superata** |
+| Compito, mediana | 7,6 s | 6,0 s (−22%) | ≤ 4,5 s | **non superata** |
+| Livello istantaneo, mediana | — | 4,9 s | ≤ 2,5 s | **non superata** |
+| Riusciti | 29/29 | 28/30 | — | 2 fallimenti in più |
+| Frasi spurie, mediana | 4,6 s | 4,8 s | — | invariate (Storia 8.1) |
+
+Le fasi alla fine (mediane): scansione 0,04 s · MCP 0,08 s · primo token 1,57 s · azioni con assestamento 1,33 s · ragionamento tra le azioni 1,09 s · turno finale 1,49 s. Livelli usati: 12 istantaneo, 1 istantaneo → rapido, 9 rapido, 8 profondo. Il Livello istantaneo è rimasto senza scalata in 12 compiti su 13 (92%), con una scalata da 2,4 s di mediana. La Sessione lunga si è riavviata 5 volte, sempre per il tetto di 8 richieste.
+
+Cosa dice:
+1. **Il compito è più veloce del 22%, il primo strumento no.** La fase che domina resta il modello: primo token e turno finale valgono circa 3 s su 6. L'avvio e la lettura dello schermo non pesano più.
+2. **Le soglie di NFR-12 non sono raggiunte.** Il margine che resta sta dentro il modello e non si recupera con l'infrastruttura. Le strade possibili: risposte finali più corte (il turno finale), un livello istantaneo che non scriva una frase dopo l'azione, il primo strumento scelto prima che il modello parli. Da decidere nel prossimo ciclo; le soglie stesse vanno rilette alla luce di questi numeri.
+3. **La precisione cala un po'.** Ci sono due fallimenti dell'istantaneo: in `modulo-citta` un Invio non chiesto ha inviato il modulo, in `menu-accessori` il menu si è aperto ma la voce non è stata cliccata. Nel secondo caso la resa era nella seconda frase della risposta, che la regola non legge. Il primo è proprio l'errore che il gate dell'Epic 9 deve fermare. Il secondo suggerisce di leggere tutta la risposta per i segni di resa, salvo le domande di cortesia.
+4. **Le assunzioni rimaste aperte:** webmail di prova (costo fisso su un albero vero), Calendario e Mail con i permessi, una app Electron, e la rilettura delle versioni delle CLI entro il 1° novembre 2026.
+
+Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2203-claude.tsv`.

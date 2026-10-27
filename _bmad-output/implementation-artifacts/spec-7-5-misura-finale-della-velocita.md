@@ -2,7 +2,7 @@
 title: 'Storia 7.5 — Misura finale della velocità'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-progress'
+status: 'in-review'
 baseline_commit: '2c60c0acba24f906a821b79e91b1ebecf420a983'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -35,9 +35,9 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `Sources/MacTalkAct/DebugCLI.swift` -- soglie NFR-12 nel riepilogo e nel TSV (riga `# soglie`).
-- [ ] `README.md` -- Livello istantaneo, osservazione a costo fisso, interruttori, data delle CLI.
-- [ ] ricerca -- corsa finale e confronto con la riga di base.
+- [x] `Sources/MacTalkAct/DebugCLI.swift` -- soglie NFR-12 nel riepilogo e nel TSV (riga `# soglie`).
+- [x] `README.md` -- Livello istantaneo, osservazione a costo fisso, interruttori, data delle CLI.
+- [x] ricerca -- corsa finale e confronto con la riga di base.
 
 **Acceptance Criteria:**
 - Given `--agent-bench --engine claude`, when finisce, then stampa per ogni soglia di NFR-12 il valore e «superata» o «non superata».
@@ -52,6 +52,8 @@ context:
 ## Implementation Notes
 
 - Spec approvata in autonomia (Nico: «committa e procedi»).
+- Riepilogo del Banco con le soglie di NFR-12 e i riavvii della Sessione lunga (contati dagli avvisi «Riavvio l'Agente»); riga `# soglie` in fondo al TSV.
+- Corsa finale (ricerca §17): compito 7,6 → 6,0 s, primo strumento 2,6 → 2,7 s, tre soglie non superate, 28/30 riusciti.
 
 ## Spec Change Log
 
