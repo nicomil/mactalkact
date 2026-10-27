@@ -7,3 +7,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-7-2-sessione-lunga-e-cli-sotto-controllo.md`
   summary: Valutare un tetto della Sessione lunga sui token letti dalla cache (in media 42 mila per turno nel Banco) o un `sessionMaxRequests` più basso.
   evidence: ricerca §14; il guadagno di velocità è piccolo e la storia accumulata cresce fino al riavvio.
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-3-livello-istantaneo.md`
+  summary: Ridurre il costo della scalata del Livello istantaneo (mediana 4,7 s, obiettivo ≤ 1 s): interrompere al primo segnale, o partire in parallelo col rapido.
+  evidence: ricerca §15, giro 4.
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-3-livello-istantaneo.md`
+  summary: Test del collegamento Coordinator → `agent.run(instant:)`; verifica con la CLI vera di un interrupt arrivato dopo la fine del turno; misura della doppia lettura dello schermo sul percorso istantaneo.
+  evidence: review della Storia 7.3 (rinvii).

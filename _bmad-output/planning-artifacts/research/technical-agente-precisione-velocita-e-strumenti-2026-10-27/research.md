@@ -480,4 +480,12 @@ Cosa resta da decidere (per la Storia 7.5 o un ciclo successivo):
 2. Se escludere dal Livello istantaneo le azioni del Finder sui file (rinomina, sposta), dove un clic sbagliato apre un'altra app.
 3. Se la regola «risposta che ammette di non esserci riuscito», che legge parole italiane, sia accettabile come euristica.
 
+**Giro 4, dopo la review della storia.** Le correzioni:
+- la regola «nessun effetto» ora legge l'esito dell'azione (prima lo guardava troppo presto e non scattava mai) e giudica anche `act`;
+- i compiti «medi» non vanno più all'istantaneo;
+- la scalata non riavvia più la sessione rapida;
+- la resa si legge solo nella prima frase della risposta.
+
+I compiti istantanei sono 13: 10 senza scalata (**77%**), 12 riusciti, compito in 5,0 s di mediana. Il costo della scalata ha una mediana di **4,7 s**: obiettivo ≤ 1 s, ancora non raggiunto. L'unico fallimento è `modulo-citta`: Haiku ha scelto Torino e poi ha premuto Invio, inviando il modulo. È un'azione non chiesta, ed è proprio il tipo di errore che il gate dell'Epic 9 deve fermare. `finder-rinomina` ora resta al rapido e riesce. Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2134-claude.tsv`.
+
 Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2113-claude.tsv` (giro 1, Banco completo), `…-2117-claude.tsv` (giro 2), `…-2121-claude.tsv` (giro 3).

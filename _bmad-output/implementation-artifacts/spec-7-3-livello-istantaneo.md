@@ -2,7 +2,7 @@
 title: 'Storia 7.3 — Livello istantaneo per i comandi a un passo'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-review'
+status: 'done'
 baseline_commit: 'b294d2232d687743c798bb42607be30dcfa7a953'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -96,8 +96,36 @@ Spike del 27/10: con `{"type":"control_request","request":{"subtype":"interrupt"
 - «clicca X» resta alla grammatica (Comando rapido), che viene prima dell'Agente; il Corpus lo registra.
 - «mail»/«messaggio» rendono «complessa» una frase per la scelta del modello, ma non ne fanno più passi: `isOneStep` ha i suoi segni di più passi.
 - Regola aggiunta dopo il Banco: scalata anche se il turno istantaneo finisce senza azioni con effetti o con una risposta che ammette di non esserci riuscito. Senza, Haiku si arrendeva dentro la sua chiamata (4 fallimenti su 16).
-- Esito dei criteri (ricerca §15): 69% senza scalata; scalata da 1,8 a 6,5 s (obiettivo ≤ 1 s, non raggiunto); 1 fallimento contro 0 del rapido (non raggiunto); mediana 4,4 s contro circa 7 s.
+- Dopo la review (giro 4): 77% senza scalata, 12/13 riusciti, scalata 4,7 s di mediana (obiettivo ≤ 1 s non raggiunto), un fallimento per Invio non chiesto (tocca all'Epic 9).
+- Esito dei criteri prima della review (ricerca §15): 69% senza scalata; scalata da 1,8 a 6,5 s (obiettivo ≤ 1 s, non raggiunto); 1 fallimento contro 0 del rapido (non raggiunto); mediana 4,4 s contro circa 7 s.
 
 ## Spec Change Log
 
 ## Review Triage Log
+
+Prima review (3 revisori). Nessun rilievo di intento o di spec; patch salvo tre rinvii.
+
+| Rilievo | Verdetto | Evidenza / esito |
+|---|---|---|
+| La regola «nessun effetto» guarda il risultato prima che ci sia l'esito; `act` mai giudicato | high | `instantFailure` girava prima di `outcome()`. Patch: controllo dopo l'esito, anche per `act`; il già fatto riporta la riga `RESULT` |
+| Ogni scalata riavvia due volte la sessione rapida (generazione −1) | medium | `SessionPolicy` vedeva «memoria azzerata». Patch: istantanea vera della memoria, messaggio delta col già fatto |
+| Dopo un annullamento il rapido può partire; nessun controllo di scadenza dopo una scalata | medium | Patch: controllo di `cancelled` in tutti i rami e in cima al ciclo, insieme al tempo rimasto del turno |
+| Interrupt senza `result`: attesa fino a 240 s | medium | Patch: processo chiuso dopo 3 s se il turno non si chiude |
+| Cursore della sessione istantanea avanzato dopo un'interruzione | low | L'esito arriva dal rapido. Patch: cursore fermo, la voce viene mandata la volta dopo |
+| Ripetizione della sessione morta e ripiego senza login rieseguono l'istantaneo durante una scalata | medium | Patch: nessuna ripetizione con una scalata in corso |
+| `instant` insieme a `deep` porta Haiku su un compito «medio» | medium | Il Banco li passava insieme. Patch: `instant && !deep` |
+| Errore di Haiku (modello assente, rete) trattato come guasto di Claude | medium | Patch: scalata a Claude rapido, salvo il limite d'uso (che vale per tutto l'abbonamento) |
+| `isOneStep` su sottostringhe («ricerca», «sogni»), congiunzioni mancanti | medium | Patch: parole intere, «ed/quindi/dopo/oppure/infine/o», punteggiatura |
+| `hasKnownTarget` troppo largo: memoria con le risposte dell'Agente, verbi non esclusi | medium | Patch: dalla memoria solo le richieste, più verbi esclusi; memoria letta solo quando serve |
+| Resa letta su tutta la risposta («Fatto. Vuoi che…?»), frasi mancanti | medium | Patch: solo la prima frase, elenco ampliato, «vuoi che»/«dimmi se» tolti |
+| Istantaneo mai riscaldato con la Sessione lunga spenta | low | Patch: prewarm anche dell'istantaneo |
+| Colonna `livello_usato` con due vocabolari; livello iniziale perso; costo della scalata non calcolato | low | Patch: «istantaneo», «istantaneo→rapido», «rapido», «profondo»; `firstLevel`; mediana del costo |
+| Test che dipendono dall'Accessibilità (`menu`) e dall'impostazione dell'utente | low | Patch: `observe`, impostazione salvata e rimessa |
+| Nessun test per «nessuna azione», errore dopo l'interrupt, azione fallita, `interruptCurrent`, mappa dei livelli | gap | Patch: Motore finto in tre modi, «ASPETTA» nel claude finto, `ClaudeEngine.effective` puro |
+| Didascalia: solo con Claude | low | Patch |
+| Collegamento Coordinator → `agent.run(instant:)` senza test | gap | Rinviato: nessuna impalcatura per il Coordinator |
+| Interrupt in ritardo che colpisce il turno dopo | maybe-false | Rinviato: va provato con la CLI vera, servirebbe attendere il `control_response` |
+| Schermo letto due volte sul percorso istantaneo | low | Rinviato: va misurato prima (fase scansione) |
+| Domini detti a voce («repubblica.it») | low | Respinto: raro, resta il rapido |
+| Frasi spurie del Banco senza istantaneo | false | Voluto: le Frasi spurie misurano il Router, l'Epic 8 le filtra |
+| Interruttore spento a metà turno | low | Respinto: caso raro, il turno resta coerente |
