@@ -84,6 +84,7 @@ final class AgentTools {
         instantGuard = false
         deniedThisRequest = false
         if !keepElements {
+            lastAccessNotice = ""
             callLog = []
             readTextSeconds = []
             // The same request retried on another engine keeps what the first one asked (AD-15).
@@ -273,6 +274,9 @@ final class AgentTools {
             Log.info("Agente: \(name) bloccato, \(why)")
             return Self.privateWindowError(why)
         }
+        if cloudEngine, ["screenshot", "get_text", "read_text"].contains(name), PrivacyGuard.accessLevel().scope == .clickOnly {
+            return .error("In this app (access level «solo clic») the cloud engines get no text or images of the window: use observe, which shows the controls.")
+        }
         var result = await perform(name, args)
         if reportOutcome, Self.outcomeTools.contains(name), !result.readOnly, !cancelled,
            !result.text.hasPrefix("MacTalkAct does not have"), !result.text.hasPrefix("The frontmost app changed") {
@@ -284,6 +288,24 @@ final class AgentTools {
             }
             result.content.append(["type": "text", "text": outcome()])
         }
+        // «Solo clic» app, cloud engine: only the controls, never text of the window (FR-54). Before the
+        // call log, so the level that takes over after a scalata does not receive it either.
+        if cloudEngine, PrivacyGuard.accessLevel().scope == .clickOnly {
+            result.content = result.content.compactMap { item in
+                guard (item["type"] as? String) == "text", let t = item["text"] as? String else { return nil }
+                var copy = item
+                if name == "observe" {
+                    copy["text"] = Self.controlsOnly(t)
+                } else {
+                    // Step lines of act («2. click: ok — …» → «2. click: ok») and the first line otherwise.
+                    let lines = t.split(separator: "\n").map(String.init)
+                    let steps = lines.filter { $0.range(of: #"^\d+\. "#, options: .regularExpression) != nil }
+                        .map { $0.components(separatedBy: " — ").first ?? $0 }
+                    copy["text"] = steps.isEmpty ? (lines.first?.components(separatedBy: " «").first ?? "") : steps.joined(separator: "\n")
+                }
+                return copy
+            }
+        }
         // After the outcome: «nothing changed» is in it (FR-43). `act` is judged too: it is the call
         // the Instant level is told to use.
         let lines = result.text.split(separator: "\n").map(String.init)
@@ -291,19 +313,6 @@ final class AgentTools {
         callLog.append("- \(name) \(Self.compact(args)) → \(result.isError ? "ERROR " : "")\(lines.first?.prefix(160) ?? "")\(resultLine)")
         // After a «no» of the user nothing escalates: the fast level must not ask again (FR-51).
         if instantGuard, !deniedThisRequest, Self.effectfulTools.contains(name) || name == "act", let why = Self.instantFailure(result) { escalate(why) }
-        if cloudEngine, PrivacyGuard.accessLevel().scope == .clickOnly {
-            if ["screenshot", "get_text", "read_text"].contains(name) {
-                return .error("In this app (access level «solo clic») the cloud engines get no text or images of the window: use observe, which shows the controls.")
-            }
-            if name == "observe" || Self.outcomeTools.contains(name) {
-                result.content = result.content.compactMap { item in
-                    guard (item["type"] as? String) == "text", let t = item["text"] as? String else { return nil }
-                    var copy = item
-                    copy["text"] = name == "observe" ? Self.controlsOnly(t) : (t.split(separator: "\n").first.map(String.init) ?? "")
-                    return copy
-                }
-            }
-        }
         if cloudEngine, AppSettings.shared.hideSensitiveFromCloud {
             result.content = result.content.map { item in
                 guard let t = item["text"] as? String else { return item }
@@ -342,16 +351,25 @@ final class AgentTools {
         // Access level of the app in front (FR-54, AD-22): the same rules for every engine.
         let level = PrivacyGuard.accessLevel()
         let app = AX.frontmostApplication()?.localizedName ?? "questa app"
+        if level.scope != .full, "\(app)|\(level.scope)" != lastAccessNotice {
+            lastAccessNotice = "\(app)|\(level.scope)"
+            onAccessNotice?("🔐 \(app): \(level.scope.rawValue)")
+        }
         if level.scope == .clickOnly, Self.effectfulTools.contains(name), !Self.clickOnlyTools.contains(name) {
             Log.info("Agente: \(name) bloccato, \(app) è «solo clic»")
             return .error("In «\(app)» the agent may only click and scroll (access level set by the user). Do not type or press keys here; tell the user in one short Italian sentence.")
         }
-        if level.scope == .confirmAll, Self.effectfulTools.contains(name) {
-            guard await gate(.element(id: Self.int(args["id"]) ?? 0, action: name), label: "\(Self.toolWords[name] ?? name) in \(app)",
-                             verb: "esegua", scenario: "app con conferma per ogni azione") else { return Self.denied("\(name) in \(app)") }
-            levelConfirmed = true // the inner checks of this same call do not ask again
+        // Never write in a password field, with any tool (FR-52).
+        if Self.writingTools.contains(name), passwordTarget(name, args) {
+            return .error("That is a password field: the agent never reads or types there. Tell the user to type it themselves.")
         }
-        defer { levelConfirmed = false }
+        // «Conferma ogni azione»: one question for the action; the specific checks (Elimina, Invio in
+        // a chat) still ask on their own, with their own target.
+        if level.scope == .confirmAll, Self.effectfulTools.contains(name),
+           !(await gate(Self.levelTarget(name, args), label: "\(Self.toolWords[name] ?? "l'azione") in \(app)",
+                        verb: "faccia", scenario: "app con conferma per ogni azione")) {
+            return Self.denied("\(Self.toolWords[name] ?? name) in \(app)")
+        }
         if Self.effectfulTools.contains(name) {
             effectfulCalls += 1
             if firstEffectAt == nil { firstEffectAt = Date() }
@@ -364,20 +382,53 @@ final class AgentTools {
     }
 
     /// The tools a «solo clic» app allows.
-    private static let clickOnlyTools: Set<String> = ["click", "scroll", "hover", "open_app"]
-    private static let toolWords: [String: String] = ["click": "il clic", "type_text": "la scrittura", "press_keys": "i tasti",
-                                                     "drag": "il trascinamento", "menu": "la voce di menu", "set_value": "la modifica"]
-    /// Set while a «conferma ogni azione» app already asked for this call.
-    private var levelConfirmed = false
+    private static let clickOnlyTools: Set<String> = ["click", "click_many", "scroll", "hover", "open_app"]
+    /// Tools that write text or change a value: never in a password field.
+    private static let writingTools: Set<String> = ["type_text", "replace_text", "edit_text", "set_value", "select_text", "press_keys"]
+    private static let toolWords: [String: String] = [
+        "click": "il clic", "click_many": "i clic", "type_text": "la scrittura", "replace_text": "la modifica del testo",
+        "edit_text": "la modifica del testo", "press_keys": "i tasti", "drag": "il trascinamento", "menu": "la voce di menu",
+        "set_value": "la modifica del valore", "perform_action": "l'azione", "select_text": "la selezione", "scroll": "lo scorrimento",
+        "hover": "il passaggio del mouse", "open_app": "l'apertura dell'app", "open_url": "l'apertura dell'indirizzo",
+        "save_macro": "il salvataggio della macro", "delete_macro": "l'eliminazione della macro", "act": "la serie di azioni",
+    ]
+    /// The access level shown last in the HUD, to show a change of app once.
+    private var lastAccessNotice = ""
+    /// «🔐 Terminal: solo clic», when the app in front has a level (FR-54).
+    var onAccessNotice: ((String) -> Void)?
+
+    /// The target of the «conferma ogni azione» question, from the tool and its arguments.
+    private static func levelTarget(_ name: String, _ a: [String: Any]) -> ConfirmationTarget {
+        if let id = int(a["id"]) { return .element(id: id, action: name) }
+        if name == "press_keys", let keys = a["keys"] as? String { return .shortcut(keys: keys, window: "") }
+        return .tool(name: name)
+    }
+
+    /// The tool would write in a password field: its target, or the focused field when it has none.
+    private func passwordTarget(_ name: String, _ a: [String: Any]) -> Bool {
+        if let id = Self.int(a["id"]) {
+            guard let item = try? resolve(id) else { return false } // resolve reports its own error later
+            return AX.isSecureField(item.element)
+        }
+        guard ScreenContext.capture(includeLabels: false).isSecure else { return false }
+        // In a password field only moving away is allowed: Tab, Escape, arrows.
+        if name == "press_keys", let keys = a["keys"] as? String {
+            let moves: Set<String> = ["tab", "shift+tab", "escape", "esc", "up", "down", "left", "right"]
+            return !keys.lowercased().split(separator: " ").allSatisfy { moves.contains(String($0)) }
+        }
+        return true
+    }
 
     /// For the cloud engines in a «solo clic» app: only roles and labels of the controls, never
     /// values, text or images (FR-54).
     static func controlsOnly(_ observed: String) -> String {
         observed.split(separator: "\n").compactMap { raw -> String? in
             let line = String(raw)
-            if line.hasPrefix("APP:") || line.hasPrefix("WINDOW:") { return line.components(separatedBy: " size ").first }
+            if line.hasPrefix("APP:") { return line }
+            if line.hasPrefix("WINDOW:") { return "WINDOW: (title hidden)" }
             guard line.hasPrefix("["), line.contains("]*") else { return nil }
-            return line.replacingOccurrences(of: #" value=«[^»]*»| value=\S+"#, with: "", options: .regularExpression)
+            // Everything from « value=» to the next marker («(…)», «@x,y», « settable», « actions=») goes.
+            return line.replacingOccurrences(of: #" value=.*?(?= \(| @\d| settable| actions=|$)"#, with: "", options: .regularExpression)
         }.joined(separator: "\n") + "\n(Access level «solo clic»: only the controls are shown, no text of the window.)"
     }
 
@@ -436,10 +487,6 @@ final class AgentTools {
 
         case "type_text":
             guard let text = a["text"] as? String else { return .error("Missing text") }
-            // Never into a password field (FR-52): the target, or the focused field.
-            let secureTarget = Self.int(a["id"]).flatMap { try? resolve($0) }.map { AX.isSecureField($0.element) }
-                ?? ScreenContext.capture(includeLabels: false).isSecure
-            if secureTarget { return .error("That is a password field: the agent never types there. Tell the user to type it themselves.") }
             // A line break typed in a chat sends the message, like Enter (FR-51).
             if text.contains("\n") || text.contains("\r"), let app = Self.composerApp(),
                !(await gate(.keyInComposer(app: app), label: "Invio in \(app)", verb: "prema", scenario: "invio in un campo di composizione")) {
@@ -648,6 +695,8 @@ final class AgentTools {
         case keyInComposer(app: String)
         case drop(onto: Int?, label: String)
         case menu(path: [String])
+        /// A tool without a precise element («conferma ogni azione»): open_url, scroll, act…
+        case tool(name: String)
 
         var description: String {
             switch self {
@@ -656,6 +705,7 @@ final class AgentTools {
             case .keyInComposer(let app): return "Invio nella composizione · \(app)"
             case .drop(let id, let label): return "trascinamento su \(id.map(String.init) ?? "x/y") «\(label)»"
             case .menu(let path): return "menu \(path.joined(separator: " > "))"
+            case .tool(let name): return "strumento \(name)"
             }
         }
 
@@ -667,6 +717,7 @@ final class AgentTools {
             case .keyInComposer: return "Invio nella composizione"
             case .drop(let id, _): return "trascinamento su \(id.map(String.init) ?? "x/y")"
             case .menu(let path): return "menu (\(path.count) livelli)"
+            case .tool(let name): return "strumento \(name)"
             }
         }
     }
@@ -682,7 +733,6 @@ final class AgentTools {
     /// is used by this action and ends with it. No extra round trip to the engine.
     private func gate(_ target: ConfirmationTarget, label: String, verb: String,
                       scenario: String = "azione con effetti esterni") async -> Bool {
-        if levelConfirmed { return true }
         confirmationsAsked += 1
         let notAsked = !Self.requestMentions(currentRequest, label)
         let question = "Vuoi che \(verb) «\(label)»\(notAsked ? ", che tu non hai chiesto" : "")?"
@@ -1043,7 +1093,8 @@ final class AgentTools {
                     lastLabel = label
                     var line = "[\(id)]\(clickable ? "*" : "") \(role.replacingOccurrences(of: "AX", with: "").lowercased())"
                     if !label.isEmpty { line += " «\(label)»" }
-                    if (v[8] as? String) == "AXSecureTextField" {
+                    // The same rule as type_text and get_text (FR-52): subrole, or unreadable single-line field.
+                    if (v[8] as? String) == "AXSecureTextField" || (role == "AXTextField" && v[8] == nil && AX.isSecureField(el)) {
                         line += " (password field: content never read)"
                     } else if Self.textInputRoles.contains(role), !value.isEmpty {
                         line += " value=«\(AX.collapse(value, max: 60))»"

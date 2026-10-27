@@ -253,6 +253,13 @@ final class AgentRunner {
 
     /// Composes the message every cloud engine receives.
     private func message(_ request: String, context: ScreenContext, recent: String, elements: String) -> String {
+        // «Solo clic» (Terminal): the cloud engines get no text of the window, not even here (FR-54).
+        var context = context
+        if PrivacyGuard.accessLevel().scope == .clickOnly {
+            context.windowTitle = "(hidden: access level «solo clic»)"
+            context.selectedText = ""
+            context.textBeforeCursor = ""
+        }
         let screen = """
         <screen>
         APP: \(context.appName) (\(context.bundleID))
@@ -334,11 +341,8 @@ final class AgentRunner {
         if let privateReason, first == nil {
             throw RunError.noEngine("🔒 \(privateReason): qui non uso Claude né Codex, e il modello locale non è disponibile")
         }
-        // The access level in force, shown while the agent works (FR-54).
-        let access = PrivacyGuard.accessLevel()
-        if access.scope != .full, let app = AX.frontmostApplication()?.localizedName {
-            onNotice?("🔐 \(app): \(access.scope.rawValue)")
-        }
+        // The access level in force, shown while the agent works and when the app in front changes (FR-54).
+        tools.onAccessNotice = { [weak self] text in self?.onNotice?(text) }
         // The elements with their ids go with the request (cloud engines): one observe less per task.
         let elements = first?.engine == .local || first == nil ? "" : tools.initialObservation()
         var req = AgentRequest(message: message(request, context: context, recent: recent, elements: elements),

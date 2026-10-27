@@ -102,7 +102,10 @@ enum AX {
         let err = AXUIElementCopyAttributeValue(el, kAXSubroleAttribute as CFString, &v)
         if err == .success { return (v as? String) == "AXSecureTextField" }
         let readable: Set<AXError> = [.noValue, .attributeUnsupported]
-        return !readable.contains(err) && role(el) == "AXTextField"
+        guard !readable.contains(err) else { return false }
+        // Not readable at all: a text field, or something whose role cannot be read either, is treated as one.
+        let r = role(el)
+        return r == "AXTextField" || r.isEmpty
     }
 
     /// The label of the element under a screen point, or of its first labelled ancestor (a click by x/y).

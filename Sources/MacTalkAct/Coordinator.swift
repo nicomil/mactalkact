@@ -652,14 +652,18 @@ final class Coordinator {
     }
 
     /// One dictated sentence (not the long dictation mode).
+    /// macOS secure keyboard entry: nothing typed by an app gets through. Says which app has it on
+    /// (FR-52) and returns true, so the text is not lost in silence.
+    private func blockedBySecureInput() -> Bool {
+        guard SecureInput.isOn else { return false }
+        let owner = SecureInput.ownerName().map { "«\($0)»" } ?? "un'app"
+        fail("Non posso scrivere: \(owner) ha attivato l'inserimento sicuro della tastiera",
+             detail: "Succede con i campi password o con app come Terminal (Inserimento sicuro). Chiudilo e riprova.")
+        return true
+    }
+
     private func dictateOnce(_ text: String, context: ScreenContext) async {
-        // macOS secure keyboard entry: nothing typed by an app gets through. Say which app has it on (FR-52).
-        if SecureInput.isOn {
-            let owner = SecureInput.ownerName().map { "«\($0)»" } ?? "un'app"
-            fail("Non posso scrivere: \(owner) ha attivato l'inserimento sicuro della tastiera",
-                 detail: "Succede con i campi password o con app come Terminal (Inserimento sicuro). Chiudilo e riprova.")
-            return
-        }
+        if blockedBySecureInput() { return }
         var out = text
         if settings.cleanDictation {
             hud.show(.thinking, text, detail: "Ripulisco il testo…")
@@ -747,6 +751,7 @@ final class Coordinator {
     }
 
     private func dictate(_ raw: String) async {
+        if blockedBySecureInput() { return }
         var text = raw
         if let stripped = WakeWord.extract(text, phrases: settings.wakePhraseList) { text = stripped }
         let ending = Grammar.dictationEnding(text)
@@ -800,6 +805,7 @@ final class Coordinator {
                 let clicked = try await executor.click(label)
                 done("Cliccato «\(clicked)»")
             case .type(let text):
+                if blockedBySecureInput() { return }
                 await executor.insertDictation(text, context: ScreenContext.capture(includeLabels: false))
                 if mode != .off {
                     startDictation(announce: false) // keep typing what follows, pauses included

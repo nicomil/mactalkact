@@ -166,18 +166,30 @@ struct AccessLevel: Equatable {
     static let defaultList = """
     com.apple.Terminal = solo clic
     com.googlecode.iterm2 = solo clic
+    dev.warp.Warp-Stable = solo clic
+    com.mitchellh.ghostty = solo clic
+    net.kovidgoyal.kitty = solo clic
+    org.alacritty = solo clic
+    com.apple.keychainaccess = solo clic
+    com.1password.1password = solo clic
+    com.bitwarden.desktop = solo clic
     com.apple.systempreferences = conferma ogni azione
+    com.apple.ScriptEditor2 = conferma ogni azione
+    com.apple.Automator = conferma ogni azione
     com.apple.finder = normale
     """
 
     /// The level of an app from the list (pure, tested by `--selftest`); unknown apps are `.full`.
+    /// The last line for the app wins (a line added at the bottom overrides the default). A level
+    /// that is not recognised («solo click») fails closed: «conferma ogni azione».
     static func level(bundleID: String, name: String, list: String) -> Scope {
-        for line in list.split(separator: "\n") {
-            let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+        for line in list.split(whereSeparator: \.isNewline).reversed() {
+            let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             guard parts.count == 2, !parts[0].isEmpty, !parts[0].hasPrefix("#") else { continue }
             let key = parts[0].lowercased()
-            guard key == bundleID.lowercased() || key == name.lowercased() else { continue }
-            return Scope.allCasesList.first { $0.rawValue == parts[1].lowercased() } ?? .full
+            guard key == bundleID.lowercased() || (!name.isEmpty && key == name.lowercased()) else { continue }
+            let value = parts[1].lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            return Scope.allCasesList.first { $0.rawValue == value } ?? .confirmAll
         }
         return .full
     }
@@ -200,11 +212,20 @@ enum SecureInput {
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
         guard (try? p.run()) != nil else { return nil }
+        // Read first: the output is larger than the pipe, waiting before reading would never end.
+        let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        guard let r = text.range(of: #"kCGSSessionSecureInputPID"=(\d+)"#, options: .regularExpression) else { return nil }
-        let pid = pid_t(text[r].split(separator: "=").last.map(String.init) ?? "") ?? 0
-        return NSRunningApplication(processIdentifier: pid)?.localizedName
+        return securePID(in: String(data: data, encoding: .utf8) ?? "").flatMap { NSRunningApplication(processIdentifier: $0)?.localizedName }
+    }
+
+    /// The pid that holds secure input in the session on the console (pure, tested by `--selftest`):
+    /// with fast user switching other sessions may have their own.
+    static func securePID(in ioreg: String) -> pid_t? {
+        for session in ioreg.components(separatedBy: "kCGSSessionAuditIDKey") where session.contains("\"kCGSSessionOnConsoleKey\"=Yes") {
+            guard let r = session.range(of: #"kCGSSessionSecureInputPID"=(\d+)"#, options: .regularExpression) else { continue }
+            return pid_t(session[r].split(separator: "=").last.map(String.init) ?? "")
+        }
+        return nil
     }
 }
 
@@ -214,8 +235,11 @@ enum PrivacyGuard {
     /// The access level of the frontmost app (FR-54): reserved apps, sites and private mode keep the
     /// cloud engines out; the list in the settings says how much the agent may do.
     static func accessLevel() -> AccessLevel {
-        let front = AX.frontmostApplication()
-        let scope = AccessLevel.level(bundleID: front?.bundleIdentifier ?? "", name: front?.localizedName ?? "",
+        guard let front = AX.frontmostApplication() else {
+            // Nothing known in front: the prudent level.
+            return AccessLevel(cloudAllowed: false, scope: .confirmAll)
+        }
+        let scope = AccessLevel.level(bundleID: front.bundleIdentifier ?? "", name: front.localizedName ?? "",
                                       list: AppSettings.shared.accessLevels)
         return AccessLevel(cloudAllowed: cloudBlockReason() == nil, scope: scope)
     }

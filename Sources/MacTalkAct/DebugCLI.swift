@@ -187,6 +187,16 @@ enum DebugCLI {
         let observed = "APP: Terminal (com.apple.Terminal)\nWINDOW: nico — zsh size 800x600\n[1]* button «Chiudi» @1,1 10x10\n[2] textarea «Shell» value=«ls -la segreto»\n[3] statictext «password: 1234»"
         let reduced = AgentTools.controlsOnly(observed)
         check("solo i controlli: niente testo né valori", reduced.contains("«Chiudi»") && !reduced.contains("segreto") && !reduced.contains("1234") && !reduced.contains("size"))
+        let clickable = AgentTools.controlsOnly("WINDOW: nico@prod — ssh\n[4]* textfield «Comando» value=«rm »x» segreto» (focused) @3,3 10x10")
+        check("solo i controlli: titolo nascosto, valore tolto anche con »", !clickable.contains("prod") && !clickable.contains("segreto") && clickable.contains("(focused)"))
+        check("l'ultima riga per l'app vince", AccessLevel.level(bundleID: "com.apple.Terminal", name: "", list: AccessLevel.defaultList + "\ncom.apple.Terminal = normale") == .full)
+        check("livello sconosciuto: prudente", AccessLevel.level(bundleID: "x", name: "", list: "x = solo click") == .confirmAll)
+        check("righe con a capo di Windows e spazi doppi", AccessLevel.level(bundleID: "x", name: "", list: "y = normale\r\nx =  solo   clic ") == .clickOnly)
+        let ioreg = """
+        "kCGSSessionAuditIDKey"=100 "kCGSSessionOnConsoleKey"=No "kCGSSessionSecureInputPID"=11
+        "kCGSSessionAuditIDKey"=200 "kCGSSessionOnConsoleKey"=Yes "kCGSSessionSecureInputPID"=22
+        """
+        check("inserimento sicuro: il pid della sessione sulla console", SecureInput.securePID(in: ioreg) == 22)
         print("Bersagli della conferma (Storia 9.2):")
         check("Invio in una sequenza", AgentTools.containsSendKey("tab return") && !AgentTools.containsSendKey("cmd+return"))
         check("chat: app e pagine web", AgentTools.needsComposerGate(bundleID: "com.apple.MobileSMS", windowTitle: "")
@@ -1648,16 +1658,55 @@ extension DebugCLI {
         check("nessun campo normale del Banco preso per password", falseSecure.isEmpty, falseSecure.joined(separator: ", "))
         // Safari as «solo clic», for the test only: no typing; to the cloud engines only the controls.
         let levelsWas = AppSettings.shared.accessLevels
+        defer { AppSettings.shared.accessLevels = levelsWas }
         AppSettings.shared.accessLevels = "com.apple.Safari = solo clic"
         await open("modulo.html")
         let blocked = await tools.call("type_text", ["text": "x"])
         check("«solo clic»: niente scrittura", blocked.isError && blocked.text.contains("only click"))
         tools.cloudEngine = true
         let controls = text(await tools.call("observe", [:]))
+        let initial = tools.initialObservation()
         let cloudShot = await tools.call("screenshot", [:])
+        let cloudText = await tools.call("get_text", [:])
+        let cloudRead = await tools.call("read_text", [:])
+        let news = id(controls, "«Iscriviti alla newsletter»") ?? id(controls, "newsletter")
+        let clickResult = news.map { _ in "" } ?? ""
+        _ = clickResult
         tools.cloudEngine = false
         check("«solo clic», Motori cloud: solo i controlli, nessuna immagine", controls.contains("solo clic") && !controls.contains("value=") && cloudShot.isError)
+        check("«solo clic», Motori cloud: osservazione iniziale ridotta, get_text e read_text rifiutati",
+              initial.contains("solo clic") && !initial.contains("value=") && cloudText.isError && cloudRead.isError)
+        // «Conferma ogni azione»: one question for the action, and the specific one (Invia) on top.
+        AppSettings.shared.accessLevels = "com.apple.Safari = conferma ogni azione"
+        await open("modulo.html")
+        let page = text(await tools.call("observe", [:]))
+        var levelQuestions: [String] = []
+        if let box = id(page, "«Iscriviti alla newsletter»") {
+            tools.askUser = { q, c in levelQuestions.append(q); return c ? nil : nil }
+            let noAnswer = await tools.call("click", ["id": box])
+            try? await Task.sleep(for: .seconds(0.4))
+            check("«conferma ogni azione»: senza risposta il clic non parte", noAnswer.text.contains("NOT done") && title().contains("newsletter=no") && levelQuestions.count == 1)
+            tools.askUser = { q, c in levelQuestions.append(q); return c ? "sì" : nil }
+            let yes = await tools.call("click", ["id": box])
+            try? await Task.sleep(for: .seconds(0.6))
+            check("«conferma ogni azione»: con «sì» il clic parte", title().contains("newsletter=sì") && levelQuestions.count == 2,
+                  "\(levelQuestions.count) domande · \(yes.text.prefix(100)) · \(title())")
+            if let send = id(page, "«Invia»") {
+                _ = await tools.call("click", ["id": send])
+                check("conferma specifica ancora chiesta (Invia)", levelQuestions.count == 4 && levelQuestions.last?.contains("«Invia»") == true, levelQuestions.last ?? "")
+            }
+        } else { check("casella della newsletter trovata", false) }
+        tools.askUser = { _, c in c ? "sì" : nil }
         AppSettings.shared.accessLevels = levelsWas
+        // The journal never keeps what was typed in a password field, not even in RAM.
+        await open("password.html")
+        let loginView = text(await tools.call("observe", [:]))
+        if let pw = id(loginView, "(password field") {
+            _ = await tools.call("click", ["id": pw, "method": "mouse"])
+            try? await Task.sleep(for: .seconds(0.3))
+            await ex.journal.record(text: "x", before: ScreenContext.capture(includeLabels: false))
+            check("giornale: niente nel campo password", ex.journal.last == nil)
+        }
 
         print("Conferma per il pulsante Invia (Storia 9.2):")
         await open("modulo.html")
