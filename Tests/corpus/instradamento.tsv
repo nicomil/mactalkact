@@ -195,3 +195,7 @@ the end of the story	no	finestra	chiedi|ignora	parole non italiane
 basta così amore	no	sessione	chiedi|ignora
 apri Safari	no	sessione	rapido	un comando resta un comando
 clicca Salva	no	sessione	rapido	la grammatica lo conosce
+apri il preventivo cucina	no	sessione-schermo	agente|locale	frase breve con un bersaglio visibile: non è spuria
+archivia questa	no	sessione-schermo	agente|locale	«Archivia» è sullo schermo
+computer statico	no	sessione	agente|chiedi	con la parola di attivazione il filtro non vale
+fai uno screenshot	no	sessione	chiedi	compromesso di AD-23: a mani libere, senza parola di attivazione, una frase breve senza bersaglio chiede

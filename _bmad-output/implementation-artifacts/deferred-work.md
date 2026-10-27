@@ -16,3 +16,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-7-4-osservazione-a-costo-fisso.md`
   summary: Verificare l'attesa dell'albero su Chromium/Electron con un browser Chromium nel Banco, e misurare il costo fisso sulla webmail di prova (`MACTALK_BENCH_WEBMAIL`).
   evidence: review della Storia 7.4; la pagina sintetica non riproduce il costo di una webmail vera.
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-1-frasi-spurie.md`
+  summary: Test del Coordinator per `.askIntent` (HUD, niente finestra, niente riavvio della sessione) e conteggio delle parole con apostrofo nella regola delle tre parole.
+  evidence: review della Storia 8.1 (rinvii).

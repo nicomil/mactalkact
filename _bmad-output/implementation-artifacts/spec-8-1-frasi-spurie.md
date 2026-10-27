@@ -2,7 +2,7 @@
 title: 'Storia 8.1 — Le Frasi spurie non arrivano all''Agente'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-review'
+status: 'done'
 baseline_commit: '088e7bbdf47f640173845dfc8acb68377db4a12f'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -70,3 +70,26 @@ context: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+Prima review (3 revisori). Nessun rilievo di intento o di spec; patch salvo due rinvii e un compromesso dichiarato.
+
+| Rilievo | Verdetto | Evidenza / esito |
+|---|---|---|
+| La Corsia locale viene prima del filtro: una frase sentita male può fare un clic senza chiedere | high | Il controllo stava dopo il `return .local`. Patch: filtro prima della Corsia locale |
+| `--route-test` passa anche se una Frase spuria arriva all'Agente, o se una richiesta valida viene solo chiesta | high | Contava solo le scritture indebite. Patch: entrambi i casi sono errori critici |
+| Campo di testo in sessione a mani libere: il ramo `.command` salta il filtro | medium | Patch: filtro anche lì (il campo conta come bersaglio, resta la regola della lingua) |
+| Seguiti nella finestra senza alcun filtro | medium | Un seguito può essere breve per natura. Patch: solo la regola della lingua |
+| Lingua giudicata su frasi brevi, su testo senza accenti, anche con un bersaglio noto | medium | Patch: solo da 3 parole in su, senza bersaglio noto, sul testo originale |
+| Avviso che suona a ogni frase e tiene viva la sessione a mani libere; frase nel log | medium | Patch: un solo suono finché la domanda è su, nessun riavvio del timer della sessione, `logsText` falso come per `.ignore` |
+| Parola di attivazione scritta a mano, durata letterale | low | Patch: prima frase configurata, costante `askIntentSeconds` |
+| Schermo letto due volte per frase; `editable()` rivalutato | low | Patch: etichette lette una volta per frase, `editable()` una volta |
+| Banco: lettura delle etichette dentro il tempo misurato | low | Patch: prima dell'orologio |
+| Frase vuota dopo la normalizzazione | low | Patch: considerata spuria |
+| Timeout del classificatore senza test | gap | Patch: classificatore finto in `--fallback-test` (sessione, finestra, campo con parola di attivazione) |
+| Bersaglio noto non provato in sessione | gap | Patch: stato «sessione-schermo» nel Corpus |
+| `import AppKit` inutile | low | Patch: tolto |
+| Comandi brevi validi senza bersaglio («fai uno screenshot») a mani libere chiedono | maybe-false | Non è un difetto: è la regola di AD-23 per le frasi senza parola di attivazione. Registrato come compromesso nel Corpus e nella ricerca |
+| Domanda sì/no a cui un «sì» non risponde | false | Il testo è quello della storia; il dettaglio dice di usare la parola di attivazione |
+| Errore del modello segnalato come «timeout» | low | Respinto: l'esito (chiedere) è quello prudente |
+| Collegamento del Coordinator non provato | gap | Rinviato: nessuna impalcatura per il Coordinator |
+| Parole con apostrofo che gonfiano il conteggio | low | Rinviato: raro, la regola della lingua copre il resto |

@@ -666,6 +666,12 @@ extension DebugCLI {
             case "conferma": state.pendingConfirmation = true
             case "numeri": state.numbersVisible = true
             case "pausa": state.agentAvailability = .paused(until: Date().addingTimeInterval(3600))
+            case "sessione-schermo":
+                // Hands-free without the wake word, with a few elements on screen (Story 8.1).
+                state.listening = .session
+                let labels = ["Salva", "Invia", "Preventivo cucina", "Nuova nota", "Archivia"]
+                state.knownTarget = { t in RouteHeuristics.hasKnownTarget(t, knownApp: { w in apps.contains { Grammar.normalize($0) == w } },
+                                                                         labels: labels, memory: []) }
             case "schermo":
                 // Push-to-talk with the Instant level on and a few elements on screen (Story 7.3).
                 state.listening = .pushToTalk; state.pushToTalk = true
@@ -687,7 +693,14 @@ extension DebugCLI {
             total += 1
             let ok = expected.contains(d.label)
             if ok { correct += 1 } else { errorsByKind["\(f[3]) → \(d.label)", default: 0] += 1 }
-            let isCritical = d.label == "scrivi" && !expected.contains("scrivi")
+            // Critical: typing what was not dictated, a Frase spuria that starts the agent, or a valid
+            // request that only gets «Vuoi che faccia qualcosa?» (FR-48, SM-C7).
+            var askedIntent = false
+            if case .askIntent = d { askedIntent = true }
+            let spuriousRow = expected.isSubset(of: ["chiedi", "ignora"])
+            let isCritical = (d.label == "scrivi" && !expected.contains("scrivi"))
+                || (spuriousRow && ["agente", "istantaneo", "locale"].contains(d.label))
+                || (askedIntent && !spuriousRow && !expected.contains("chiedi"))
             if isCritical { critical += 1 }
             let mark = ok ? "✓" : (isCritical ? "‼︎" : "✗")
             print(String(format: "%@ %5.0f ms  %-22@ %@  [%@, %@]", mark, ms, d.label as NSString, sentence, editable ? "campo" : "-", stateName))
@@ -696,7 +709,7 @@ extension DebugCLI {
         let sorted = times.sorted()
         let p90 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.9))]
         let accuracy = total == 0 ? 0 : Double(correct) / Double(total) * 100
-        print(String(format: "\nAccuratezza: %d/%d (%.1f%%) · scritture indebite: %d · 90° percentile: %.0f ms", correct, total, accuracy, critical, p90))
+        print(String(format: "\nAccuratezza: %d/%d (%.1f%%) · errori critici (scritture indebite, Frasi spurie all'Agente, richieste valide solo chieste): %d · 90° percentile: %.0f ms", correct, total, accuracy, critical, p90))
         for (k, n) in errorsByKind.sorted(by: { $0.value > $1.value }) { print("  \(n)× \(k)") }
         if critical > 0 { print("FALLITO: almeno una frase sarebbe stata scritta per errore.") }
         return critical == 0
@@ -1107,6 +1120,33 @@ extension DebugCLI {
             _ = try? await agent2.run("clicca Salva", context: ScreenContext(), deep: false, instant: true)
             check("Codex: niente istantaneo, livello rapido", codex.levels == [.fast] && agent2.lastEscalation == nil)
             agent2.shutdown()
+        }
+
+        print("Classificatore oltre il tempo (Storia 8.1):")
+        do {
+            final class SlowClassifier: IntentClassifier {
+                var name: String { "finto lento" }
+                func classify(_ text: String, editable: Bool, after: String?) async -> Classification { Classification(kind: .uncertain, source: "timeout") }
+                func prewarm() {}
+            }
+            let validator = LocalActionValidator { _ in nil }
+            let router = IntentRouter(classifier: SlowClassifier(), proposer: nil, validator: validator)
+            router.macroLookup = { _ in nil }
+            var session = RouterState()
+            session.listening = .session
+            let a = await router.decide("rispondi a Marco che arrivo alle nove", editable: { false }, state: session)
+            var window = RouterState()
+            window.listening = .wakeWord
+            window.windowOpen = true
+            // Not a follow-up (those start with a verb and skip the classifier): the classifier decides.
+            let b = await router.decide("il treno di Marco arriva alle nove domani", editable: { false }, state: window)
+            var wake = RouterState()
+            wake.wakePhrases = ["computer"]
+            let c = await router.decide("computer rispondi a Marco che arrivo alle nove", editable: { true }, state: wake)
+            func isAsk(_ d: RouteDecision) -> Bool { if case .askIntent = d { return true } else { return false } }
+            check("sessione, oltre il tempo → chiede", isAsk(a))
+            check("finestra, oltre il tempo → chiede", isAsk(b))
+            check("con parola di attivazione in un campo → chiedi di scriverlo (AD-2)", c.label == "chiedi" && !isAsk(c))
         }
 
         print("Conferme e azioni bloccate (Storia 7.1):")
@@ -1527,6 +1567,8 @@ extension DebugCLI {
                 let labels = ScreenContext.capture(includeLabels: true).visibleLabels
                 instant = RouteHeuristics.hasKnownTarget(task.request, knownApp: { ex.findApp($0) != nil }, labels: labels, memory: [])
             }
+            // The labels of the screen for the Router, read before the clock (the app reads them only on demand).
+            let phraseLabels = kind.isPhrase ? ScreenContext.capture(includeLabels: true).visibleLabels : []
             let started = Date()
             var note = ""
             var ranAgent = true
@@ -1539,8 +1581,7 @@ extension DebugCLI {
                 var state = RouterState()
                 state.listening = .session
                 state.windowOpen = true
-                let labels = ScreenContext.capture(includeLabels: true).visibleLabels
-                state.knownTarget = { t in RouteHeuristics.hasKnownTarget(t, knownApp: { ex.findApp($0) != nil }, labels: labels, memory: []) }
+                state.knownTarget = { t in RouteHeuristics.hasKnownTarget(t, knownApp: { ex.findApp($0) != nil }, labels: phraseLabels, memory: []) }
                 let decision = await router.decide(task.request, editable: { false }, state: state)
                 routerTime = Date().timeIntervalSince(started)
                 switch decision {

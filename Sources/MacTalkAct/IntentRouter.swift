@@ -116,7 +116,7 @@ enum RouteDecision {
     /// Whether the log may contain the sentence (AD-9: never for ignored talk).
     var logsText: Bool {
         switch self {
-        case .ignore, .arm: return false
+        case .ignore, .arm, .askIntent: return false
         default: return true
         }
     }
@@ -179,6 +179,9 @@ final class IntentRouter {
             if let m = macroLookup(text) { return .macro(m) }
             if RouteHeuristics.isShortChatter(text) { return .ignore(reason: "chiacchiera breve nella finestra") }
             if RouteHeuristics.isFollowUpRequest(text) {
+                // A follow-up refers to the last exchange, so it may be short: only a sentence in
+                // another language is taken as heard by chance.
+                if RouteHeuristics.mostlyForeign(text) { return .askIntent(text, reason: "seguito nella finestra, ma in un'altra lingua") }
                 return await commandRoute(text, editable: editable, state: state, why: "seguito nella finestra")
             }
             // The last exchange is not given to the model: with it, Apple's model takes questions to
@@ -213,7 +216,9 @@ final class IntentRouter {
             case .dictation:
                 return .dictate(text, reason: "dettatura (\(c.source))")
             case .command:
-                return await commandRoute(text, editable: editable, state: state, why: "comando (\(c.source))")
+                let handsFree = state.listening == .session && !state.pushToTalk && wakeRest == nil && !state.armed
+                return await commandRoute(text, editable: editable, state: state, why: "comando (\(c.source))",
+                                          checkSpurious: handsFree)
             case .chatter:
                 if state.listening == .session && !state.pushToTalk {
                     return .ignore(reason: "chiacchiera (\(c.source))")
@@ -247,16 +252,20 @@ final class IntentRouter {
     /// `checkSpurious`: no wake word (hands-free or the window): a Frase spuria asks instead (FR-48).
     private func commandRoute(_ text: String, editable: () -> Bool, state: RouterState, why: String,
                               checkSpurious: Bool = false) async -> RouteDecision {
+        // Before the local lane too: a chance sentence must not click anything without asking (FR-48).
+        // In a text field the field itself is the target («modifica la domanda»).
+        if checkSpurious {
+            let inField = editable()
+            if let spurious = RouteHeuristics.spuriousReason(text, knownTarget: { inField || state.knownTarget($0) }) {
+                return .askIntent(text, reason: "\(why), ma \(spurious)")
+            }
+        }
         // Only outside text fields: there, edits are about meaning and belong to the agent.
         // Long sentences are never one step: skip the model and save ~1 s for the agent.
         if state.localLane, Grammar.normalize(text).split(separator: " ").count <= state.localLaneMaxWords, !editable(),
            let proposer, let proposal = await proposer.propose(text),
            let action = validator.validate(proposal, sentence: text) {
             return .local(action, text: text)
-        }
-        // In a text field the field itself is the target («modifica la domanda»).
-        if checkSpurious, let spurious = RouteHeuristics.spuriousReason(text, knownTarget: { editable() || state.knownTarget($0) }) {
-            return .askIntent(text, reason: "\(why), ma \(spurious)")
         }
         guard state.aiAvailable else {
             return .askToType(text, reason: "\(why), ma Claude non è configurato")

@@ -542,3 +542,5 @@ Per la lingua il dizionario italiano di `NSSpellChecker` non serve: accetta «th
 | Agente avviato | 5 su 5 | 0 su 5 |
 
 Il Corpus del Router ha 17 Frasi spurie nuove, tra cui le tre del log del 27/10 («Spegni invia», «Statico», «Selling counseling gesta»). Il risultato è 160/160, nessuna frase valida decisa `.askIntent`, e «apri Safari» e «clicca Salva» restano Comandi rapidi.
+
+Compromesso dichiarato (dopo la review): a mani libere, senza Parola di attivazione, anche un comando valido di due o tre parole che non nomina niente di visibile o di noto chiede invece di agire («fai uno screenshot»). È la regola di AD-23, e il Corpus la registra. Con «computer» davanti, o in push-to-talk, il comando va come prima. Il filtro ora viene anche prima della Corsia locale: una frase sentita male non può più fare un clic senza chiedere.

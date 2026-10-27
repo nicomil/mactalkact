@@ -189,11 +189,13 @@ final class Coordinator {
         do {
             let executor = self.executor
             let log = conversation.log
+            // The screen is read only when a rule asks, and once per sentence (Frasi spurie and
+            // the Instant level share it). From the memory only Nico's requests: the agent's answers
+            // are long sentences where almost any word appears.
+            let labels = Box<[String]?>(nil)
             s.knownTarget = { text in
-                // Read only here, when the sentence could be one step. From the memory only Nico's
-                // requests: the agent's answers are long sentences where almost any word appears.
-                let labels = ScreenContext.capture(includeLabels: true).visibleLabels
-                return RouteHeuristics.hasKnownTarget(text, knownApp: { executor.findApp($0) != nil }, labels: labels,
+                if labels.value == nil { labels.value = ScreenContext.capture(includeLabels: true).visibleLabels }
+                return RouteHeuristics.hasKnownTarget(text, knownApp: { executor.findApp($0) != nil }, labels: labels.value ?? [],
                                                       memory: log.entries.map(\.request))
             }
         }
@@ -516,6 +518,10 @@ final class Coordinator {
         }
     }
 
+    /// How long «Vuoi che faccia qualcosa?» stays up (FR-48).
+    static let askIntentSeconds = 8.0
+    private var askIntentShownAt = Date.distantPast
+
     private func perform(_ decision: RouteDecision, screen: () -> ScreenContext) async {
         switch decision {
         case .ignore:
@@ -528,6 +534,16 @@ final class Coordinator {
             return
         case .number(let n, let method):
             await clickNumber(n, method: method)
+            return
+        case .askIntent(let text, _):
+            // Asks, without arming nor opening the window, and without keeping the hands-free session
+            // alive: the next sentence is judged as if the question was not there (FR-48). While the
+            // question is still up, another chance sentence only updates it, without a new beep.
+            if Date().timeIntervalSince(askIntentShownAt) > Self.askIntentSeconds { Sound.confirm() }
+            askIntentShownAt = Date()
+            let wake = settings.wakePhraseList.first ?? "computer"
+            hud.show(.confirm, "Vuoi che faccia qualcosa?", detail: "Ho sentito «\(text.prefix(60))» · di' «\(wake)» e la richiesta",
+                     autoHide: Self.askIntentSeconds)
             return
         default:
             break
@@ -570,13 +586,8 @@ final class Coordinator {
             let detail = reason.contains("non è configurato") ? "Claude non è configurato · di' «scrivilo» per inserirlo"
                                                                : "Di' «scrivilo» per inserirlo"
             hud.show(.confirm, text, detail: detail, autoHide: settings.proposalSeconds)
-        case .askIntent(let text, _):
-            // Asks, without arming nor opening the window: the next sentence is judged as if the
-            // question was not there; with no answer it is simply forgotten (FR-48).
-            reopen = false
-            Sound.confirm()
-            hud.show(.confirm, "Vuoi che faccia qualcosa?", detail: "Ho sentito «\(text.prefix(60))» · di' «computer» e la richiesta",
-                     autoHide: 8)
+        case .askIntent:
+            break // handled before: it never arms nor reopens anything
         case .typeProposed(let text):
             conversation.proposedText = nil
             await dictateOnce(text, context: ScreenContext.capture(includeLabels: false))

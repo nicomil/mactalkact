@@ -1,5 +1,4 @@
 import NaturalLanguage
-import AppKit
 import Foundation
 import FoundationModels
 
@@ -274,19 +273,21 @@ enum RouteHeuristics {
     /// at most three words and no known target, or mostly words that are not Italian.
     @MainActor static func spuriousReason(_ text: String, knownTarget: (String) -> Bool) -> String? {
         let words = Grammar.normalize(text).split(separator: " ").map(String.init)
-        guard !words.isEmpty else { return nil }
-        if words.count <= 3, !knownTarget(text) { return "frase breve senza un bersaglio noto" }
-        if mostlyForeign(words) { return "parole che non sono italiane" }
+        guard !words.isEmpty else { return "frase vuota dopo la normalizzazione" }
+        let known = knownTarget(text)
+        if words.count <= 3, !known { return "frase breve senza un bersaglio noto" }
+        // The language of a short sentence, or of one that names something known, is not reliable.
+        if !known, words.count >= 3, mostlyForeign(text) { return "parole che non sono italiane" }
         return nil
     }
 
     /// The sentence is in another language: the Italian dictionary accepts many English words
     /// («the», «story»), the language of the whole sentence does not (`NLLanguageRecognizer`).
-    static func mostlyForeign(_ words: [String]) -> Bool {
-        guard words.count >= 2 else { return false }
+    /// The original text, with its accents and apostrophes, helps the recognizer.
+    static func mostlyForeign(_ text: String) -> Bool {
         let r = NLLanguageRecognizer()
         r.languageConstraints = [.italian, .english, .spanish, .french, .german, .portuguese]
-        r.processString(words.joined(separator: " "))
+        r.processString(text)
         let it = r.languageHypotheses(withMaximum: 6)[.italian] ?? 0
         return it < 0.2
     }
