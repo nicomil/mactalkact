@@ -144,6 +144,22 @@ if let path = argument(after: "--transcribe") {
     dispatchMain()
 }
 
+if let path = argument(after: "--ptt-restart-test") {
+    // Debug: push-to-talk right after the microphone restarted, without and with the fix.
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        for clear in [false, true] {
+            let engine = SpeechEngine()
+            do {
+                let text = try await engine.debugRestartTest(URL(fileURLWithPath: path), clear: clear)
+                print("\(clear ? "con correzione" : "senza correzione"): «\(text)»")
+            } catch { print("Errore: \(error.localizedDescription)") }
+        }
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if let path = argument(after: "--listen-file") {
     // Debug: an audio file through the whole listening chain of the app (detector + recognizer),
     // in real time: which sentences come out and when.

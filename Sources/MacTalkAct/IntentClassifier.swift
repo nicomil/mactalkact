@@ -81,8 +81,11 @@ final class OnDeviceClassifier: IntentClassifier {
     }
 
     /// Loads the model in memory so the next sentence answers in ~0.6 s instead of ~2 s.
+    /// Called again when the user starts speaking: after some idle time macOS unloads the model,
+    /// and a cold model misses the timeout.
     func prewarm() {
-        guard Self.isAvailable, ready == nil else { return }
+        guard Self.isAvailable else { return }
+        if let ready { ready.prewarm(); return }
         let s = makeSession()
         s.prewarm()
         ready = s

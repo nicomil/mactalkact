@@ -306,7 +306,8 @@ final class AgentRunner {
             } catch let error as AgentEngineError {
                 lastEngine = engine.id
                 lastModel = model
-                Log.info(String(format: "Agente (%@/%@): errore dopo %.1fs, %d azioni con effetti: %@", engine.id.rawValue, model,
+                Log.info(String(format: "Agente (%@/%@): %@ dopo %.1fs, %d azioni con effetti: %@", engine.id.rawValue, model,
+                                tools.cancelled ? "interrotto dall'utente" : "errore",
                                 Date().timeIntervalSince(started), tools.effectfulCalls, error.localizedDescription))
                 let f = DateFormatter()
                 f.dateFormat = "HH:mm"

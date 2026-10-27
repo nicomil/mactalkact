@@ -106,6 +106,13 @@ final class AudioRouter: @unchecked Sendable {
         return ended
     }
 
+    /// Forgets the audio kept before speech. Needed when the microphone starts again: those
+    /// chunks carry the times of the previous engine, and a sentence that begins with them makes
+    /// the recognizer fail («Audio input timestamp overlaps or precedes prior audio input»).
+    func clearPreroll() {
+        lock.withLock { preroll.removeAll() }
+    }
+
     /// Closes whatever segment is open (used when stopping the microphone).
     func closeAny() {
         let wasForced: Bool? = lock.withLock {
@@ -439,6 +446,36 @@ final class SpeechEngine {
         router.closeAny()
     }
 
+    /// Debug (`--ptt-restart-test`): push-to-talk right after the microphone was switched off
+    /// and on again, as when the key is pressed twice in a row. The first engine leaves audio
+    /// before speech; `clear` is what `startAudio` does now.
+    func debugRestartTest(_ url: URL, clear: Bool) async throws -> String {
+        if analyzerFormat == nil { try await prepare() }
+        guard let format = analyzerFormat else { throw SpeechError.noAudioFormat }
+        let file = try AVAudioFile(forReading: url)
+        let size: AVAudioFrameCount = 1024
+        func feed(_ tap: AVAudioNodeTapBlock, frames: AVAudioFramePosition) throws {
+            while file.framePosition < min(file.length, frames) {
+                guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: size) else { break }
+                try file.read(into: buf, frameCount: size)
+                guard buf.frameLength > 0 else { break }
+                tap(buf, AVAudioTime(sampleTime: file.framePosition, atRate: file.processingFormat.sampleRate))
+            }
+        }
+        router.setVAD(false)
+        // First engine: half a second of audio, no sentence open (it stays as audio before speech).
+        let first = Self.makeTap(converter: AnalyzerInputConverter(analyzerFormat: format), router: router, level: nil)
+        try feed(first, frames: AVAudioFramePosition(file.processingFormat.sampleRate * 0.5))
+        // The microphone starts again: a new converter, then the key goes down.
+        if clear { router.clearPreroll() }
+        file.framePosition = 0
+        let second = Self.makeTap(converter: AnalyzerInputConverter(analyzerFormat: format), router: router, level: nil)
+        router.beginForced()
+        try await Task.sleep(for: .milliseconds(100))
+        try feed(second, frames: file.length)
+        return await endPushToTalk()
+    }
+
     // MARK: Microphone
 
     /// Starts the microphone. With `vad` on, sentences are detected automatically.
@@ -453,6 +490,8 @@ final class SpeechEngine {
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
+        // A new converter counts time from zero: the audio of the previous engine must go.
+        router.clearPreroll()
         let converter = AnalyzerInputConverter(analyzerFormat: format)
         input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0),
                          block: Self.makeTap(converter: converter, router: router, level: onLevel))
@@ -539,6 +578,7 @@ final class SpeechEngine {
         audioEngine = nil
         isRunning = false
         router.closeAny()
+        router.clearPreroll()
         onLevel?(0)
         Log.info("Microfono spento")
     }

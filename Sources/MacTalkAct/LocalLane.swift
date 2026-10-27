@@ -60,7 +60,8 @@ final class LocalActionProposer {
     static var isAvailable: Bool { OnDeviceClassifier.isAvailable }
 
     func prewarm() {
-        guard Self.isAvailable, ready == nil else { return }
+        guard Self.isAvailable else { return }
+        if let ready { ready.prewarm(); return }
         let s = LanguageModelSession(instructions: Self.instructions)
         s.prewarm()
         ready = s

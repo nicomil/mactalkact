@@ -62,7 +62,10 @@ final class Coordinator {
         self.settings = settings
         engine.onLive = { [weak self] text in self?.handleLive(text) }
         engine.onUtterance = { [weak self] text in self?.handleUtterance(text, addressed: false) }
-        engine.onSpeechStart = { [weak self] in self?.dictationIdle?.cancel() }
+        engine.onSpeechStart = { [weak self] in
+            self?.dictationIdle?.cancel()
+            self?.wakeModels()
+        }
         vocabulary.onChange = { [weak self] words in
             self?.engine.vocabulary = words
             Log.debug("Vocabolario del riconoscimento: \(words.count) parole")
@@ -134,6 +137,16 @@ final class Coordinator {
         routerCache = (key, r)
         Log.info("Router: classificatore \(classifier.name)\(proposer == nil ? "" : " + corsia locale")")
         return r
+    }
+
+    private var modelsWokenAt = Date.distantPast
+
+    /// The user started speaking: load Apple's model now, while they talk, so it answers
+    /// within the timeout when the sentence ends. At most every 5 s.
+    private func wakeModels() {
+        guard Date().timeIntervalSince(modelsWokenAt) > 5 else { return }
+        modelsWokenAt = Date()
+        prewarmRouter()
     }
 
     private func prewarmRouter() {
@@ -345,6 +358,7 @@ final class Coordinator {
         pttHeld = true
         Sound.listen()
         hud.show(.listening, "Ti ascolto…")
+        wakeModels()
         let continuous = mode != .off
         pttStart = Task {
             do { try await engine.beginPushToTalk(continuous: continuous) } catch {
