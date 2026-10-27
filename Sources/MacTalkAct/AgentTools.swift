@@ -165,6 +165,12 @@ final class AgentTools {
         if firstCallAt == nil { firstCallAt = Date() }
         if callCount > maxCalls { return .error("Step limit reached. Stop and tell the user what is left to do.") }
         Log.debug("Agente → \(name) \(Self.compact(args))")
+        if Self.actingTools.contains(name), !AXIsProcessTrusted() {
+            // Without the Accessibility permission macOS drops synthetic keys and clicks
+            // silently: say so instead of reporting an action that never happened.
+            Log.info("Agente: azione bloccata, manca il permesso di Accessibilità")
+            return .error("MacTalkAct does not have the Accessibility permission, so keys and clicks are ignored by macOS. Stop and tell the user to enable MacTalkAct in System Settings › Privacy & Security › Accessibility.")
+        }
         if Self.actingTools.contains(name), let problem = frontmostChanged() {
             Log.info("Agente: azione bloccata, app in primo piano cambiata")
             return .error(problem)
