@@ -86,12 +86,11 @@ final class ClaudeEngine: AgentEngine {
         case .deep: effort = settings.deepEffort
         }
         return ClaudeCLI.Config(
-            env: [MCPServer.tokenVariable: access.mcpToken],
+            env: Self.mcpEnvironment(access),
             model: model(for: level),
             systemPrompt: AgentRunner.systemPrompt,
             effort: effort,
-            extraArgs: [
-                "--mcp-config", access.mcpConfigPath,
+            extraArgs: Self.mcpArguments(access) + [
                 "--permission-mode", "dontAsk",
                 "--permission-prompts", "none",
                 "--max-turns", "\(settings.agentMaxTurns)",
@@ -99,6 +98,16 @@ final class ClaudeEngine: AgentEngine {
                 "--disallowedTools", "Agent", "TaskStop",
             ]
         )
+    }
+
+    /// The token travels only in the child's environment (AD-16, FR-50).
+    nonisolated static func mcpEnvironment(_ access: AgentToolAccess) -> [String: String] {
+        [MCPServer.tokenVariable: access.mcpToken]
+    }
+
+    /// The arguments for the tools: the PATH of the config file, never its content nor the token.
+    nonisolated static func mcpArguments(_ access: AgentToolAccess) -> [String] {
+        ["--mcp-config", access.mcpConfigPath]
     }
 
     private func cli(_ level: AgentLevel) -> ClaudeCLI {

@@ -22,3 +22,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-8-3-lettura-locale-del-testo.md`
   summary: Valutare `read_text` per il Motore locale (modalità piano) e un controllo automatico delle posizioni di `read_text` contro quelle di `observe`.
   evidence: review della Storia 8.3 (rinvii).
+- source_spec: `_bmad-output/implementation-artifacts/spec-9-1-server-degli-strumenti-chiuso.md`
+  summary: Prova NFR-14 con un `AGENTS.md` di stile ostile per Codex, in un `CODEX_HOME` separato con il login (senza toccare quello di Nico).
+  evidence: `~/.codex/AGENTS.md` di Nico esiste (vuoto); la prova con il file reale non dimostra nulla sulle istruzioni di stile.

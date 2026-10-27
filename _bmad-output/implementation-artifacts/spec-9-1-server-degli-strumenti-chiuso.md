@@ -2,7 +2,7 @@
 title: 'Storia 9.1 — Server degli strumenti chiuso'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-review'
+status: 'done'
 baseline_commit: '14547f2f368d7d7aeaa940c61565eb0531935085'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -52,3 +52,20 @@ context: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+| Rilievo | Verdetto | Evidenza / esito |
+|---|---|---|
+| Nessun test che il figlio riceva il token nell'ambiente e solo il percorso negli argomenti | gap | Patch: il `claude` finto controlla ambiente, file e argomenti; `ClaudeEngine.mcpEnvironment/mcpArguments` usati dal Motore e dal test |
+| Listener lasciato acceso se la scrittura del file fallisce; `createFile` non controllato | medium | Patch: file scritto prima di annunciare il server, `stop()` in caso di errore, esito di `createFile` controllato |
+| Stesso nome di file per due server dello stesso processo | low | Patch: `mcp-config-<pid>-<porta>.json` |
+| File orfani dopo un crash | low | Patch: pulizia all'avvio dei file con pid non più vivo |
+| Una CLI futura che non espande `${…}` fallirebbe in silenzio | medium | Patch: il 401 va nel log, con la diagnosi del riferimento non espanso |
+| Log delle intestazioni di un estraneo senza limiti e con a capo | medium | Patch: valori ripuliti (niente caratteri di controllo, 80 caratteri), un solo log per Origin e Host, al massimo 50 |
+| Versione del protocollo registrata a ogni alternanza tra Motori | low | Patch: insieme delle versioni viste |
+| `Origin` ricevuto registrato solo nei rifiuti (la storia lo chiede sempre) | low | Patch: registrato a ogni valore nuovo |
+| Test di `Host` via URLSession, che può riscriverlo | gap | Patch: richiesta HTTP grezza su `NWConnection` |
+| Casi mancanti per `allowed` (localhost, maiuscole, porta sbagliata, https, barra finale) | gap | Patch: aggiunti in `--selftest` |
+| Controllo della cancellazione che passava senza server | gap | Patch: percorso preso prima della chiusura |
+| Versione negoziata calcolata due volte | low | Patch: una sola volta |
+| Prova con un `AGENTS.md` di stile per Codex non fatta | gap | Rinviato in deferred-work: serve un `CODEX_HOME` separato con il login |
+| Elenco `127.0.0.1`/`localhost` non regolabile (NFR-15) | false | NFR-15 rende regolabili gli elenchi delle app e dei siti; FR-50 non ha interruttore (Consistency Conventions) |

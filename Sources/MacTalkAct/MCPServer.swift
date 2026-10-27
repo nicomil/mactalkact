@@ -10,7 +10,15 @@ final class MCPServer: @unchecked Sendable {
     let token = UUID().uuidString + UUID().uuidString
     private(set) var port: UInt16 = 0
     /// The last `MCP-Protocol-Version` seen, logged once per change.
-    fileprivate var loggedVersion = ""
+    fileprivate var loggedVersions = Set<String>()
+    fileprivate var loggedOrigins = Set<String>()
+    fileprivate var loggedRejections = Set<String>()
+
+    /// A header value for the log: no line breaks, at most 80 characters (it comes from outside).
+    static func clean(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "—" }
+        return String(value.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(80).map(Character.init))
+    }
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "local.mactalkact.mcp")
     private let tools: [[String: Any]]
@@ -45,11 +53,26 @@ final class MCPServer: @unchecked Sendable {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MacTalkAct", isDirectory: true)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let file = base.appendingPathComponent("mcp-config-\(getpid()).json")
-        FileManager.default.createFile(atPath: file.path, contents: Data(Self.configJSON(url: url).utf8),
-                                       attributes: [.posixPermissions: 0o600])
+        Self.removeStaleConfigs(in: base)
+        // One file per server (process and port): two servers never share or delete each other's file.
+        let file = base.appendingPathComponent("mcp-config-\(getpid())-\(port).json")
+        try? FileManager.default.removeItem(at: file)
+        guard FileManager.default.createFile(atPath: file.path, contents: Data(Self.configJSON(url: url).utf8),
+                                             attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: file.path])
+        }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         configPath = file.path
+    }
+
+    /// Files left by a process that crashed: their pid is no longer alive.
+    private static func removeStaleConfigs(in folder: URL) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        for name in names where name.hasPrefix("mcp-config-") && name.hasSuffix(".json") {
+            let parts = name.dropFirst("mcp-config-".count).dropLast(".json".count).split(separator: "-")
+            guard let pid = parts.first.flatMap({ pid_t($0) }), pid != getpid(), kill(pid, 0) != 0 else { continue }
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+        }
     }
 
     /// Removes the config file (the app is quitting).
@@ -92,8 +115,14 @@ final class MCPServer: @unchecked Sendable {
             }
             l.start(queue: queue)
         }
+        do {
+            try writeConfig()
+        } catch {
+            // Without the file no CLI can connect: no server left listening with nobody to stop it.
+            stop()
+            throw error
+        }
         Log.info("Server strumenti agente su \(url)")
-        try writeConfig()
     }
 
     func stop() {
@@ -120,9 +149,10 @@ final class MCPServer: @unchecked Sendable {
             let supported = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
             let requested = params["protocolVersion"] as? String ?? "2025-06-18"
             let client = (params["clientInfo"] as? [String: Any])?["name"] as? String ?? "?"
-            Log.info("Server strumenti: \(client) chiede la revisione \(requested), negoziata \(supported.contains(requested) ? requested : "2025-06-18")")
+            let negotiated = supported.contains(requested) ? requested : "2025-06-18"
+            Log.info("Server strumenti: \(MCPServer.clean(client)) chiede la revisione \(MCPServer.clean(requested)), negoziata \(negotiated)")
             return reply([
-                "protocolVersion": supported.contains(requested) ? requested : "2025-06-18",
+                "protocolVersion": negotiated,
                 "capabilities": ["tools": ["listChanged": false]],
                 "serverInfo": ["name": "MacTalkAct", "version": "0.2.0"],
                 "instructions": "Tools that see and control the user's Mac on their behalf.",
@@ -205,18 +235,26 @@ private final class HTTPConnection: @unchecked Sendable {
         let path = requestLine.count > 1 ? String(requestLine[1]) : ""
 
         // FR-50: a web page (DNS rebinding, a local page) never reaches the tools.
+        let origin = MCPServer.clean(headers["origin"])
+        if server.loggedOrigins.insert(origin).inserted { Log.info("Server strumenti: Origin ricevuto \(origin)") }
         if !MCPServer.allowed(origin: headers["origin"], host: headers["host"], port: server.port) {
-            Log.info("Server strumenti: rifiutata una richiesta da Origin \(headers["origin"] ?? "—"), Host \(headers["host"] ?? "—")")
+            let key = "\(origin) · \(MCPServer.clean(headers["host"]))"
+            // Once per origin and host: a page that insists does not fill the log.
+            if server.loggedRejections.count < 50, server.loggedRejections.insert(key).inserted {
+                Log.info("Server strumenti: rifiutata (403) una richiesta da Origin \(key)")
+            }
             send(status: "403 Forbidden", body: nil)
             return
         }
         guard headers["authorization"] == "Bearer \(server.token)" else {
+            let literal = headers["authorization"]?.contains("${") == true
+            Log.info("Server strumenti: richiesta senza il token giusto (401)"
+                     + (literal ? ": la CLI non ha espanso ${\(MCPServer.tokenVariable)}, controlla la sua versione" : ""))
             send(status: "401 Unauthorized", body: nil)
             return
         }
-        if let version = headers["mcp-protocol-version"], version != server.loggedVersion {
-            server.loggedVersion = version
-            Log.info("Server strumenti: MCP-Protocol-Version \(version)")
+        if let version = headers["mcp-protocol-version"], server.loggedVersions.insert(MCPServer.clean(version)).inserted {
+            Log.info("Server strumenti: MCP-Protocol-Version \(MCPServer.clean(version))")
         }
         guard path.hasPrefix("/mcp") else {
             send(status: "404 Not Found", body: nil)

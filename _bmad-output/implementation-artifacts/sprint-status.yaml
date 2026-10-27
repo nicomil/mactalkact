@@ -7,7 +7,7 @@
 # Stati: backlog · ready-for-dev · in-progress · review · done
 
 generated: 10-26-2026 23:10
-last_updated: 10-27-2026 23:16
+last_updated: 10-27-2026 23:25
 project: mactalkact
 project_key: NOKEY
 tracking_system: file-system
@@ -83,7 +83,7 @@ development_status:
   epic-8-retrospective: optional
 
   epic-9: in-progress
-  9-1-server-degli-strumenti-chiuso: in-progress
+  9-1-server-degli-strumenti-chiuso: review
   9-2-conferma-legata-alla-singola-azione-e-un-solo-orologio-del-t: backlog
   9-3-campi-sicuri-e-livelli-di-accesso-per-app: backlog
   9-4-suite-di-sicurezza-e-copertura-del-riconoscimento: backlog

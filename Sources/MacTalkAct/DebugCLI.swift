@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import Network
 import FoundationModels
 import Speech
 
@@ -151,6 +152,10 @@ enum DebugCLI {
         check("Origin di una pagina web", !MCPServer.allowed(origin: "https://evil.example", host: "127.0.0.1:5000", port: 5000))
         check("Host sbagliato", !MCPServer.allowed(origin: nil, host: "evil.example", port: 5000) && !MCPServer.allowed(origin: nil, host: nil, port: 5000))
         check("Origin «null» (file:// o iframe): rifiutato", !MCPServer.allowed(origin: "null", host: "127.0.0.1:5000", port: 5000))
+        check("Host localhost e maiuscole", MCPServer.allowed(origin: nil, host: "localhost:5000", port: 5000) && MCPServer.allowed(origin: "HTTP://127.0.0.1:5000", host: "127.0.0.1:5000", port: 5000))
+        check("porta sbagliata", !MCPServer.allowed(origin: nil, host: "127.0.0.1:5001", port: 5000) && !MCPServer.allowed(origin: "http://127.0.0.1:5001", host: "127.0.0.1:5000", port: 5000))
+        check("https o barra finale nell'Origin: rifiutati", !MCPServer.allowed(origin: "https://127.0.0.1:5000", host: "127.0.0.1:5000", port: 5000) && !MCPServer.allowed(origin: "http://127.0.0.1:5000/", host: "127.0.0.1:5000", port: 5000))
+        check("intestazione ripulita per il log", MCPServer.clean("evil\nRiga falsa") == "evilRiga falsa" && MCPServer.clean(String(repeating: "x", count: 300)).count == 80)
         print("Frasi spurie (Storia 8.1):")
         do {
             let none: (String) -> Bool = { _ in false }
@@ -1179,26 +1184,51 @@ extension DebugCLI {
                 let perms = (try? FileManager.default.attributesOfItem(atPath: access.mcpConfigPath)[.posixPermissions] as? Int) ?? 0
                 check("file di configurazione 0600 con il riferimento, senza il token", perms == 0o600
                       && config.contains("${MACTALK_MCP_TOKEN}") && !config.contains(access.mcpToken))
+                // Raw bytes on a socket: URLSession may rewrite Host, the test must control it.
                 func post(origin: String?, host: String?) async -> Int {
-                    guard let url = URL(string: access.mcpURL) else { return -1 }
-                    var r = URLRequest(url: url)
-                    r.httpMethod = "POST"
-                    r.setValue("Bearer \(access.mcpToken)", forHTTPHeaderField: "Authorization")
-                    r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    if let origin { r.setValue(origin, forHTTPHeaderField: "Origin") }
-                    if let host { r.setValue(host, forHTTPHeaderField: "Host") }
-                    r.httpBody = Data(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.utf8)
-                    let response = try? await URLSession.shared.data(for: r)
-                    return (response?.1 as? HTTPURLResponse)?.statusCode ?? -1
+                    guard let port = URL(string: access.mcpURL)?.port else { return -1 }
+                    let body = #"{"jsonrpc":"2.0","id":1,"method":"ping"}"#
+                    var head = "POST /mcp HTTP/1.1\r\nHost: \(host ?? "127.0.0.1:\(port)")\r\nAuthorization: Bearer \(access.mcpToken)\r\n"
+                    if let origin { head += "Origin: \(origin)\r\n" }
+                    head += "Content-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
+                    let reply: String = await withCheckedContinuation { cont in
+                        let c = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: UInt16(port))!, using: .tcp)
+                        let done = Box(false)
+                        func finish(_ s: String) { if !done.value { done.value = true; c.cancel(); cont.resume(returning: s) } }
+                        c.stateUpdateHandler = { state in
+                            if case .ready = state {
+                                c.send(content: Data(head.utf8), completion: .contentProcessed { _ in
+                                    c.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, _, _ in
+                                        finish(data.flatMap { String(data: $0, encoding: .utf8) } ?? "")
+                                    }
+                                })
+                            } else if case .failed = state { finish("") }
+                        }
+                        c.start(queue: .global())
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 3) { finish("") }
+                    }
+                    return reply.split(separator: " ").dropFirst().first.flatMap { Int($0) } ?? -1
                 }
+                let port = URL(string: access.mcpURL)?.port ?? 0
                 check("client senza Origin (le CLI): risponde", await post(origin: nil, host: nil) == 200)
+                check("Host localhost: risponde", await post(origin: nil, host: "localhost:\(port)") == 200)
                 check("pagina web con Origin estraneo: 403", await post(origin: "http://evil.example", host: nil) == 403)
                 check("Host di un altro dominio (DNS rebinding): 403", await post(origin: nil, host: "evil.example:80") == 403)
+                // The real Claude configuration, as ClaudeEngine builds it, on the fake claude.
+                let fake = FileManager.default.currentDirectoryPath + "/Tests/fixtures/claude/finto-claude"
+                let cli = ClaudeCLI()
+                cli.executablePath = { fake }
+                let claudeConfig = ClaudeCLI.Config(env: ClaudeEngine.mcpEnvironment(access), model: "finto", systemPrompt: "prova",
+                                                    extraArgs: ClaudeEngine.mcpArguments(access))
+                let seen = (try? await cli.run(claudeConfig, message: "CONTROLLA", timeout: 10)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                check("claude riceve il token nell'ambiente e il file della configurazione (\(seen))", seen == "env=sì config=sì token_negli_argomenti=no")
+                cli.shutdown()
             } else {
                 check("server avviato", false)
             }
+            let configPath = agent.debugToolAccess?.mcpConfigPath ?? ""
             agent.shutdown()
-            check("file di configurazione cancellato alla chiusura", agent.debugToolAccess.map { !FileManager.default.fileExists(atPath: $0.mcpConfigPath) } ?? true)
+            check("file di configurazione cancellato alla chiusura", !configPath.isEmpty && !FileManager.default.fileExists(atPath: configPath))
         }
 
         print("Classificatore oltre il tempo (Storia 8.1):")
