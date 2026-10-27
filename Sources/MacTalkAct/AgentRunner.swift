@@ -91,6 +91,8 @@ final class AgentRunner {
 
     /// Called when the engine in use changes (fallback or return to the chosen one).
     var onEngineSwitch: ((EngineSwitch) -> Void)?
+    /// A short status of the engine that is not a change of engine («Riavvio l'Agente»).
+    var onNotice: ((String) -> Void)?
     /// Phases, total and model turns of the last request, for the Bench (FR-41).
     private(set) var lastPhases: [BenchPhase: Double] = [:]
     private(set) var lastTotal: Double = 0
@@ -112,9 +114,7 @@ final class AgentRunner {
         self.tools = AgentTools(executor: executor)
         self.settings = settings
         let claude = ClaudeEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess })
-        claude.onNotice = { [weak self] text in
-            self?.onEngineSwitch?(EngineSwitch(from: .claude, to: .claude, message: text))
-        }
+        claude.onNotice = { [weak self] text in self?.onNotice?(text) }
         register(claude)
         register(CodexEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess }))
         let local = LocalEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess })

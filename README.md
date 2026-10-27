@@ -317,7 +317,8 @@ say -v Alice -o /tmp/t.aiff "Scorri giù"
 tail -f ~/Library/Logs/MacTalkAct.log              # cosa sente e decide l'app, in tempo reale
 .build/debug/MacTalkAct --agent-test "apri la Calcolatrice"   # un compito completo dell'agente (agisce davvero!)
 .build/debug/MacTalkAct --agent-test "…" --engine codex       # lo stesso con un motore preciso (claude, codex, local), senza riserva
-.build/debug/MacTalkAct --fallback-test            # catena di riserva con motori finti: nessuna azione ripetuta dopo un limite
+.build/debug/MacTalkAct --fallback-test            # catena di riserva con motori finti: nessuna azione ripetuta dopo un limite; fasi; Sessione lunga con un claude finto
+.build/debug/MacTalkAct --session-test             # Sessione lunga con il claude vero: due risposte brevi (usa l'abbonamento)
 .build/debug/MacTalkAct --mcp-serve                # solo il server degli strumenti, per provare a mano altri client MCP
 .build/debug/MacTalkAct --observe-stats com.microsoft.edgemac # quanto vede l'agente di un'app (senza contenuti)
 .build/debug/MacTalkAct --activate-test Calculator # porta un'app in primo piano e torna indietro

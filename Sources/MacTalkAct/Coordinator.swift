@@ -75,6 +75,11 @@ final class Coordinator {
         agent.onAvailabilityChange = { [weak self] a in self?.availabilityChanged(a) }
         agent.onEngineAvailabilityChange = { [weak self] id, a in self?.engineAvailabilityChanged(id, a) }
         agent.onEngineSwitch = { [weak self] change in self?.engineSwitched(change) }
+        agent.onNotice = { [weak self] text in
+            // Only while the agent works, never spoken: the restart is not news for the user.
+            guard let self, self.agent.running else { return }
+            self.hud.show(.thinking, text, detail: self.engineNotice ?? "🤖 Agente · di' «stop» per fermarlo")
+        }
         // Don't listen to our own voice.
         speaker.onSpeakingChange = { [weak self] speaking in
             guard let self else { return }
@@ -567,7 +572,7 @@ final class Coordinator {
         case .forgetConversation:
             reopen = false
             conversation.log.clear()
-            agent.endSessions(reason: "conversazione dimenticata")
+            agent.endSessions(reason: "memoria azzerata")
             conversation.closeWindow()
             done("Conversazione dimenticata")
         case .privateMode(let on):
@@ -981,7 +986,7 @@ final class Coordinator {
         let was = settings.privateModeActive
         settings.setPrivateMode(on)
         conversation.log.clear()
-        agent.endSessions(reason: on ? "modalità privata" : "fine della modalità privata")
+        agent.endSessions(reason: "memoria azzerata")
         privateModeEnd?.cancel()
         privateModeEnd = nil
         onPrivateModeChange?(on)

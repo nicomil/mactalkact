@@ -38,17 +38,18 @@ final class CodexEngine: AgentEngine {
             return
         }
         Task.detached(priority: .utility) {
-            let status = CodexCLI.status(executable: path)
-            await MainActor.run { [weak self] in
-                guard let self, self.cliStatus != status else { return }
-                self.cliStatus = status
-                Log.info("Motore Codex: \(status)")
-            }
             let logged = CodexCLI.isLoggedIn(executable: path)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if case .paused(let until) = self.availability, Date() < until { return }
                 self.setAvailability(logged ? .available : .loginNeeded)
+            }
+            // After the login check, so availability is never delayed by it (read with a time limit).
+            let status = CLIStatus.from(versionOutput: ClaudeCLI.versionOutput(path), minimum: CodexCLI.minimumVersion)
+            await MainActor.run { [weak self] in
+                guard let self, self.cliStatus != status else { return }
+                self.cliStatus = status
+                Log.info("Motore Codex: \(status)")
             }
         }
     }
@@ -84,7 +85,7 @@ final class CodexEngine: AgentEngine {
                                      mcpURL: access.mcpURL, mcpToken: access.mcpToken)
         let outcome: CodexCLI.Outcome
         do {
-            outcome = try await cli.run(config, message: request.message, timeout: settings.agentTimeout, onPhase: onPhase)
+            outcome = try await cli.run(config, message: request.message, timeout: request.clock.remaining, onPhase: onPhase)
         } catch let error as AgentEngineError {
             if case .notFound = error { setAvailability(.missing) }
             throw error

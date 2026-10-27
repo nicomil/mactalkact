@@ -1,0 +1,23 @@
+#!/usr/bin/python3 -I
+# A fake `claude -p --input-format stream-json` for --fallback-test: one `result` per message,
+# echoing the text it received. «MUORI» ends the process mid-message, «DORMI» never answers.
+import json, sys, time
+if "--version" in sys.argv:
+    print("2.1.311 (Claude Code)")
+    sys.exit(0)
+first = True
+for line in sys.stdin:
+    try:
+        text = json.loads(line)["message"]["content"]
+    except Exception:
+        continue
+    if first:
+        print(json.dumps({"type": "system", "subtype": "init", "mcp_servers": [{"name": "mactalk", "status": "connected"}]}), flush=True)
+        first = False
+    if "MUORI" in text:
+        sys.exit(3)
+    if "DORMI" in text:
+        time.sleep(60)
+    print(json.dumps({"type": "stream_event", "event": {"type": "content_block_delta"}}), flush=True)
+    print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "num_turns": 1,
+                      "result": "ricevuto: " + text, "usage": {"cache_read_input_tokens": 100}}), flush=True)

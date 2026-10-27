@@ -213,7 +213,7 @@ final class LocalEngine: AgentEngine {
         let tools = mode == .tools ? makeTools(access, budget: budget) : []
         let session = LanguageModelSession(model: model, tools: tools, instructions: Self.instructions)
         let prompt = request.localMessage
-        let timeout = settings.agentTimeout
+        let timeout = request.clock.remaining // the one turn clock (AD-24)
         let stepAgent = LocalStepAgent(model: model, tools: access.tools, maxSteps: settings.localMaxSteps)
         let userRequest = request.userRequest
         let task = Task<String, Error> { @MainActor in

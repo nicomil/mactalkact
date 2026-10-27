@@ -88,7 +88,10 @@ struct MemorySnapshot: Equatable {
 /// arrives with Story 9.2.
 struct TurnClock {
     let deadline: ContinuousClock.Instant
-    init(seconds: Double) { deadline = ContinuousClock.now + .milliseconds(Int(max(1, seconds) * 1000)) }
+    init(seconds: Double) {
+        let s = seconds.isFinite ? min(max(1, seconds), 86_400) : 240
+        deadline = ContinuousClock.now + .milliseconds(Int(s * 1000))
+    }
     var remaining: TimeInterval {
         let d = deadline - ContinuousClock.now
         return max(0, Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18)
@@ -107,7 +110,10 @@ enum CLIStatus: Equatable, CustomStringConvertible {
         guard let out = versionOutput,
               let r = out.range(of: #"\d+\.\d+\.\d+"#, options: .regularExpression) else { return .unverified(nil) }
         let v = String(out[r])
-        return compare(v, minimum) >= 0 ? .verified(v) : .belowMinimum(v)
+        let c = compare(v, minimum)
+        // A pre-release of the minimum itself («2.1.299-beta.1») comes before it.
+        let prerelease = out[r.upperBound...].hasPrefix("-")
+        return c > 0 || (c == 0 && !prerelease) ? .verified(v) : .belowMinimum(v)
     }
 
     /// -1, 0, 1 like a comparator, on dotted numbers.
@@ -121,6 +127,14 @@ enum CLIStatus: Equatable, CustomStringConvertible {
     }
 
     var isVerified: Bool { if case .verified = self { return true } else { return false } }
+
+    /// The same version, no longer verified: `claude` started without the subscription login.
+    var unverifiedForLogin: CLIStatus {
+        switch self {
+        case .verified(let v), .belowMinimum(let v): return .unverified(v)
+        case .unverified: return self
+        }
+    }
 
     var description: String {
         switch self {
@@ -136,8 +150,8 @@ enum SessionPolicy {
     static let maxIdle: TimeInterval = 10 * 60
 
     static func restartReason(requests: Int, maxRequests: Int, idle: TimeInterval,
-                              configChanged: Bool, memoryChanged: Bool) -> String? {
-        if configChanged { return "modello o effort cambiati" }
+                              configChanged: Bool, modelOrEffortChanged: Bool = true, memoryChanged: Bool) -> String? {
+        if configChanged { return modelOrEffortChanged ? "modello o effort cambiati" : "configurazione cambiata" }
         if memoryChanged { return "memoria azzerata" }
         if requests >= maxRequests { return "\(maxRequests) richieste" }
         if idle >= maxIdle { return "inattiva da 10 minuti" }

@@ -55,6 +55,8 @@ enum DebugCLI {
             check("codex 0.131.0 verificata", CLIStatus.from(versionOutput: "codex-cli 0.131.0", minimum: "0.131.0").isVerified)
             check("codex alpha successiva: intervallo", CLIStatus.from(versionOutput: "codex-cli 0.133.0-alpha.2", minimum: "0.131.0").isVerified)
             check("codex 0.130.9 sotto la minima", CLIStatus.from(versionOutput: "codex-cli 0.130.9", minimum: "0.131.0") == .belowMinimum("0.130.9"))
+            check("pre-release della minima: sotto", CLIStatus.from(versionOutput: "2.1.299-beta.1", minimum: "2.1.299") == .belowMinimum("2.1.299"))
+            check("login mancante: stessa versione, non verificata", CLIStatus.verified("2.1.311").unverifiedForLogin == .unverified("2.1.311"))
             func reason(_ r: Int, _ idle: TimeInterval, config: Bool = false, memory: Bool = false) -> String? {
                 SessionPolicy.restartReason(requests: r, maxRequests: 8, idle: idle, configChanged: config, memoryChanged: memory)
             }
@@ -65,6 +67,7 @@ enum DebugCLI {
             check("memoria azzerata → riavvio", reason(1, 1, memory: true) == "memoria azzerata")
             let log = ConversationLog()
             let g0 = log.generation
+            if AppSettings.shared.privateModeActive { print("  —    memoria delta: saltata, modalità privata attiva") }
             log.add(request: "apri la mail", outcome: "fatto", app: "Mail")
             let first = log.snapshot.lastSeq
             log.add(request: "rispondi", outcome: "scritta", app: "Mail")
@@ -905,6 +908,60 @@ extension DebugCLI {
             check("somma = totale del runner", abs(p.values.reduce(0, +) - agent.lastTotal) < 0.01)
             check("turni dal Motore", agent.lastTurns == 2)
             agent.shutdown()
+        }
+
+        print("Sessione lunga con un claude finto (Storia 7.2):")
+        do {
+            let fake = FileManager.default.currentDirectoryPath + "/Tests/fixtures/claude/finto-claude"
+            let cli = ClaudeCLI()
+            cli.executablePath = { fake }
+            check("versione letta dal finto", cli.status(force: true) == .verified("2.1.311"))
+            let base = ClaudeCLI.Config(model: "finto", systemPrompt: "prova", effort: "low")
+            var restarts: [String] = []
+            var sentWith: [Int?] = []
+            func ask(_ text: String, _ config: ClaudeCLI.Config, memory: MemorySnapshot, max: Int = 8, timeout: TimeInterval = 10) async -> Result<String, Error> {
+                do {
+                    let data = try await cli.runInSession(config, memory: memory, maxRequests: max, timeout: timeout,
+                                                          message: { seq in sentWith.append(seq); return seq.map { "dopo \($0): \(text)" } ?? "tutto: \(text)" },
+                                                          onPhase: nil, onRestart: { restarts.append($0) })
+                    return .success(String(data: data, encoding: .utf8) ?? "")
+                } catch { return .failure(error) }
+            }
+            let m0 = MemorySnapshot(generation: 0, lastSeq: 4)
+            let r1 = await ask("uno", base, memory: m0)
+            check("prima: sessione nuova, messaggio completo", (try? r1.get()) == "ricevuto: tutto: uno" && sentWith == [nil])
+            // The Coordinator adds entry 5 for «uno»; another path adds entry 6.
+            let r2 = await ask("due", base, memory: MemorySnapshot(generation: 0, lastSeq: 6))
+            check("seconda: sessione riusata, solo la memoria dopo la voce 5", (try? r2.get()) == "ricevuto: dopo 5: due" && cli.lastAttemptReused)
+            check("cursore = ultima voce + 1", ClaudeCLI.cursor(after: m0) == 5 && cli.liveCursor(memory: MemorySnapshot(generation: 0, lastSeq: 6)) == 7)
+            check("cursore di un'altra generazione: nessuno", cli.liveCursor(memory: MemorySnapshot(generation: 1, lastSeq: 6)) == nil)
+            var other = base
+            other.effort = "medium"
+            _ = await ask("tre", other, memory: MemorySnapshot(generation: 0, lastSeq: 7))
+            check("effort cambiato → riavvio", restarts == ["modello o effort cambiati"])
+            _ = await ask("quattro", other, memory: MemorySnapshot(generation: 0, lastSeq: 8), max: 1)
+            check("tetto di richieste → riavvio", restarts.last == "1 richieste")
+            var extra = other
+            extra.extraArgs = ["--max-turns", "3"]
+            _ = await ask("cinque", extra, memory: MemorySnapshot(generation: 0, lastSeq: 9))
+            check("altro argomento → «configurazione cambiata»", restarts.last == "configurazione cambiata")
+            let started = Date()
+            let slow = await ask("DORMI", extra, memory: MemorySnapshot(generation: 0, lastSeq: 10), timeout: 1)
+            var timedOut = false
+            if case .failure(ClaudeCLIError.timeout) = slow { timedOut = true }
+            check("turno scaduto: errore entro 3 s", timedOut && Date().timeIntervalSince(started) < 3)
+            _ = await ask("sei", extra, memory: MemorySnapshot(generation: 0, lastSeq: 11))
+            check("dopo la scadenza: sessione nuova", !cli.lastAttemptReused)
+            let dead = await ask("MUORI", extra, memory: MemorySnapshot(generation: 0, lastSeq: 12))
+            var died = false
+            if case .failure(ClaudeCLIError.sessionDied) = dead { died = true }
+            check("processo uscito a metà → sessione morta, era riusata", died && cli.lastAttemptReused)
+            check("ripete solo una sessione riusata, senza azioni, non annullata",
+                  ClaudeEngine.retriesDeadSession(reused: true, effectfulCalls: 0, cancelled: false)
+                  && !ClaudeEngine.retriesDeadSession(reused: true, effectfulCalls: 1, cancelled: false)
+                  && !ClaudeEngine.retriesDeadSession(reused: false, effectfulCalls: 0, cancelled: false)
+                  && !ClaudeEngine.retriesDeadSession(reused: true, effectfulCalls: 0, cancelled: true))
+            cli.shutdown()
         }
 
         print("Conferme e azioni bloccate (Storia 7.1):")

@@ -2,7 +2,7 @@
 title: 'Storia 7.2 — Sessione lunga sorvegliata e CLI sotto controllo'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-review'
+status: 'done'
 baseline_commit: '25298a8795ea80ce2f2cc4e158d1dcd201abd200'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -108,3 +108,33 @@ La memoria delta evita di ripetere alla sessione ciò che ha già visto nei prop
 ## Spec Change Log
 
 ## Review Triage Log
+
+Prima review (3 revisori). Nessun rilievo di intento o di spec; patch salvo due rinvii.
+
+| Rilievo | Verdetto | Evidenza / esito |
+|---|---|---|
+| Timeout del turno mai applicato: il lettore dello stdout non si ferma con la cancellazione e il gruppo lo aspetta | high | Vale anche per il processo per richiesta, che c'era già. Patch: il task del timeout chiude il processo; test con «DORMI» sul claude finto (< 3 s) |
+| Login mancante: nessuna ripetizione col processo per richiesta; `markUnverified` senza effetto sul livello rapido; `status()` sincrono sul main | high | Lo stato era in cache solo su `cliDeep`. Patch: flag `loginFailed` nel Motore, stato `.unverified(v)`, la stessa richiesta riparte senza sessione se non ha fatto azioni; nessun processo lanciato sul main |
+| Stato `.unverified` permanente, versione mai riletta dopo un aggiornamento | medium | Cache per percorso senza scadenza. Patch: `status(force:)` da «Ricontrolla i motori» / `refreshAvailability`, che azzera anche il flag di login |
+| `claude --version` / `codex --version` senza tempo massimo; quello di Codex prima del login e senza cache | medium | Patch: `versionOutput` con limite di 5 s; Codex dopo il controllo del login |
+| Closure `@MainActor` (memoria, avviso) chiamate dal task della CLI | medium | `messageSince` legge `ConversationLog` e `AgentRunner`. Patch: messaggi composti sul main actor prima della chiamata (`liveCursor`), avviso con `Task { @MainActor }` |
+| Risposta senza testo trattata come processo morto | medium | `noOutput` sia per stream finito sia per risultato vuoto. Patch: `streamEnded` separato; la sessione resta col risultato vuoto |
+| Ripetizione anche quando muore una sessione appena avviata | medium | Un errore di avvio si ripeterebbe uguale. Patch: ripete solo una sessione riusata (`lastAttemptReused`); regola pura testata |
+| Interruttore spento lascia vivo il processo | medium | Nessun osservatore. Patch: `settings.$longSession` chiude le sessioni |
+| Inattività controllata solo alla richiesta dopo | medium | Il processo restava in memoria per ore. Patch: chiusura programmata dopo 10 minuti senza uso |
+| La sessione ricorda più turni della memoria di conversazione impostata | medium | Patch: tetto = min(`sessionMaxRequests`, `conversationMemoryCount`) |
+| Avviso «Riavvio l'Agente» passato come cambio di Motore (🔀 fisso, detto a voce) | medium | Patch: `AgentRunner.onNotice` separato, mostrato solo mentre l'Agente lavora, mai a voce |
+| Dimentica e modalità privata: motivo diverso da «memoria azzerata» | low | Patch: stesso motivo nel log |
+| Codex e Motore locale con timeout proprio dopo un ripiego | medium | Patch: `request.clock.remaining` anche lì |
+| SIGPIPE se il processo esce mentre gli si scrive | medium | Nessun `signal(SIGPIPE, SIG_IGN)` nell'app. Patch in `main.swift` |
+| Motivo «modello o effort cambiati» anche quando cambia solo un altro argomento | low | Patch: «configurazione cambiata» |
+| `TurnClock` con valore non finito o enorme | low | Patch: limiti 1 s…24 h |
+| Pre-release della versione minima contata come verificata | low | Patch e test |
+| Stato della sessione letto e scritto fuori dal lock | low | Patch: contatori e cursore sotto lock |
+| Nessun test di ripetizione, cursore, regole al punto d'uso, timeout | gap | Patch: `Tests/fixtures/claude/finto-claude` e blocco in `--fallback-test` |
+| `expire()` che fa crescere la generazione senza test | gap | Rinviato: serve un orologio iniettabile in `ConversationLog` (Storia 9.2) |
+| Selftest della memoria falsato dalla modalità privata attiva | low | Patch: avviso e salto |
+| Contesto della sessione senza tetto di token | low | Rinviato: il tetto di richieste lo limita già; si valuta con i numeri della ricerca (§14) |
+| Cursore sbagliato se la voce della richiesta non viene aggiunta | false | La sola esclusione (modalità privata) azzera la memoria e cambia generazione |
+| `.unverified(nil)` rilancia `--version` a ogni prewarm | false | Lo stato resta in cache per percorso anche quando non è leggibile |
+| Documentazione: `--session-test`, `CLAUDE_CODE_SIMPLE` | low | Patch: README e commento |

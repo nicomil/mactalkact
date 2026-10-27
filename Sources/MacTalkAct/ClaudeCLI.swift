@@ -7,6 +7,8 @@ enum ClaudeCLIError: LocalizedError {
     case noOutput(String)
     /// A Long session ended in the middle of a message (the process exited).
     case sessionDied(String)
+    /// The output stream ended before a `result` (the process is gone).
+    case streamEnded(String)
 
     var errorDescription: String? {
         switch self {
@@ -15,6 +17,7 @@ enum ClaudeCLIError: LocalizedError {
         case .failed(let m): return "Claude: \(m)"
         case .noOutput(let m): return "Nessuna risposta da Claude \(m)"
         case .sessionDied(let m): return "La sessione di Claude si è chiusa \(m)"
+        case .streamEnded(let m): return "Nessuna risposta da Claude \(m)"
         }
     }
 }
@@ -140,9 +143,15 @@ final class ClaudeCLI: @unchecked Sendable {
         try proc.stdin.close()
 
         return try await withThrowingTaskGroup(of: Data.self) { group in
-            group.addTask { try await Self.readResult(proc, onPhase: onPhase) }
+            group.addTask {
+                do { return try await Self.readResult(proc, onPhase: onPhase) } catch ClaudeCLIError.streamEnded(let m) {
+                    throw ClaudeCLIError.noOutput(m)
+                }
+            }
             group.addTask {
                 try await Task.sleep(for: .seconds(timeout))
+                // The reader does not stop on cancellation: ending the process ends its stream.
+                proc.terminate()
                 throw ClaudeCLIError.timeout
             }
             defer { group.cancelAll() }
@@ -187,6 +196,26 @@ final class ClaudeCLI: @unchecked Sendable {
     }
 
     private var session: Session?
+    /// Whether the last `runInSession` reused a live session (a fresh one failing is not retried).
+    private(set) var lastAttemptReused = false
+
+    /// The entry of this request is added right after it returns: the session has seen it.
+    static func cursor(after memory: MemorySnapshot) -> Int { memory.lastSeq + 1 }
+
+    /// The cursor of the live session, if any: the engine composes the short message on its own actor.
+    func liveCursor(memory: MemorySnapshot) -> Int? {
+        lock.withLock { session.flatMap { $0.generation == memory.generation && $0.process.process.isRunning ? $0.cursor : nil } }
+    }
+
+    /// Ends a session that stays idle for `SessionPolicy.maxIdle`: no process waits for hours.
+    private func scheduleIdleEnd(_ s: Session) {
+        let used = lock.withLock { s.lastUsed }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + SessionPolicy.maxIdle) { [weak self] in
+            guard let self else { return }
+            let idle = self.lock.withLock { self.session === s && s.lastUsed == used }
+            if idle { self.endSession(reason: "inattiva da 10 minuti") }
+        }
+    }
     /// Prompt tokens read from the cache in the last Long-session turn (log and `--session-test`).
     private(set) var lastCacheRead = 0
 
@@ -207,10 +236,13 @@ final class ClaudeCLI: @unchecked Sendable {
         lock.withLock { spare?.terminate(); spare = nil }
         var live = lock.withLock { session }
         if let s = live {
+            let (requests, lastUsed) = lock.withLock { (s.requests, s.lastUsed) }
+            let old = s.process.config
             let reason = !s.process.process.isRunning ? "processo chiuso"
-                : SessionPolicy.restartReason(requests: s.requests, maxRequests: maxRequests,
-                                              idle: Date().timeIntervalSince(s.lastUsed),
-                                              configChanged: s.process.config != config,
+                : SessionPolicy.restartReason(requests: requests, maxRequests: maxRequests,
+                                              idle: Date().timeIntervalSince(lastUsed),
+                                              configChanged: old != config,
+                                              modelOrEffortChanged: old.model != config.model || old.effort != config.effort,
                                               memoryChanged: s.generation != memory.generation)
             if let reason {
                 endSession(reason: reason)
@@ -222,7 +254,7 @@ final class ClaudeCLI: @unchecked Sendable {
         let text: String
         if let live {
             s = live
-            text = message(live.cursor)
+            text = message(lock.withLock { live.cursor })
             onPhase?(.sessionReused)
         } else {
             s = Session(process: try spawn(config), generation: memory.generation)
@@ -230,6 +262,7 @@ final class ClaudeCLI: @unchecked Sendable {
             text = message(nil)
             onPhase?(.sessionStarted)
         }
+        lock.withLock { lastAttemptReused = live != nil }
         lock.withLock { current = s.process }
         defer { lock.withLock { current = nil } }
 
@@ -250,24 +283,32 @@ final class ClaudeCLI: @unchecked Sendable {
                 }
                 group.addTask {
                     try await Task.sleep(for: .seconds(timeout))
+                    s.process.terminate() // the reader stops only when the stream ends
                     throw ClaudeCLIError.timeout
                 }
                 defer { group.cancelAll() }
                 guard let result = try await group.next() else { throw ClaudeCLIError.timeout }
                 return result
             }
-            s.requests += 1
-            s.lastUsed = Date()
-            // The entry of this request is added right after it: the session has seen it.
-            s.cursor = memory.lastSeq + 1
+            lock.withLock {
+                s.requests += 1
+                s.lastUsed = Date()
+                s.cursor = Self.cursor(after: memory)
+            }
+            scheduleIdleEnd(s)
             return result
         } catch ClaudeCLIError.timeout {
             endSession(reason: "turno scaduto")
             throw ClaudeCLIError.timeout
-        } catch ClaudeCLIError.noOutput(let m) {
+        } catch ClaudeCLIError.streamEnded(let m) {
             // The stream ended without a result: the process is gone.
             endSession(reason: "processo uscito")
             throw ClaudeCLIError.sessionDied(m)
+        } catch ClaudeCLIError.noOutput(let m) {
+            // A result without text: the process is fine, the session stays.
+            lock.withLock { s.requests += 1; s.lastUsed = Date(); s.cursor = Self.cursor(after: memory) }
+            scheduleIdleEnd(s)
+            throw ClaudeCLIError.noOutput(m)
         } catch {
             // An error result (limit, login) leaves the process usable, but a fresh one is safer.
             endSession(reason: "errore: \(error.localizedDescription.prefix(60))")
@@ -280,31 +321,28 @@ final class ClaudeCLI: @unchecked Sendable {
     /// `claude --version`, read once per executable path; minimum for the Long session.
     static let minimumForSession = "2.1.299"
 
-    func status() -> CLIStatus {
+    /// Blocking: call it off the main thread. `force` reads the version again (after an upgrade).
+    func status(force: Bool = false) -> CLIStatus {
         guard let path = executablePath() else { return .unverified(nil) }
-        if let cached = lock.withLock({ statusCache }), cached.path == path { return cached.status }
+        if !force, let cached = lock.withLock({ statusCache }), cached.path == path { return cached.status }
+        let status = CLIStatus.from(versionOutput: Self.versionOutput(path), minimum: Self.minimumForSession)
+        lock.withLock { statusCache = (path, status) }
+        return status
+    }
+
+    /// `<path> --version`, at most `limit` seconds: a stuck binary never blocks the check.
+    static func versionOutput(_ path: String, limit: TimeInterval = 5) -> String? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
         p.arguments = ["--version"]
         let out = Pipe()
         p.standardOutput = out
         p.standardError = Pipe()
-        var status = CLIStatus.unverified(nil)
-        if (try? p.run()) != nil {
-            p.waitUntilExit()
-            status = CLIStatus.from(versionOutput: String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8),
-                                    minimum: Self.minimumForSession)
-        }
-        lock.withLock { statusCache = (path, status) }
-        return status
-    }
-
-    /// A start without the subscription login: the version stays, the status becomes unverified.
-    func markUnverified() {
-        lock.withLock {
-            guard let c = statusCache else { return }
-            if case .verified(let v) = c.status { statusCache = (c.path, .unverified(v)) }
-        }
+        guard (try? p.run()) != nil else { return nil }
+        let deadline = Date().addingTimeInterval(limit)
+        while p.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        if p.isRunning { p.terminate(); return nil }
+        return String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
     }
 
     private var statusCache: (path: String, status: CLIStatus)?
@@ -360,6 +398,7 @@ final class ClaudeCLI: @unchecked Sendable {
         let home = NSHomeDirectory()
         env["PATH"] = "\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         // Use the subscription login, and don't look like a nested Claude Code session.
+        // CLAUDE_CODE_SIMPLE would start the «bare» mode without the subscription login (AD-14).
         for key in ["ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SIMPLE"] { env.removeValue(forKey: key) }
         p.environment = env
 
@@ -433,6 +472,6 @@ final class ClaudeCLI: @unchecked Sendable {
             throw ClaudeCLIError.noOutput("")
         }
         let err = String(data: stderr.value, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        throw ClaudeCLIError.noOutput(err.isEmpty ? "" : "(\(err.prefix(300)))")
+        throw ClaudeCLIError.streamEnded(err.isEmpty ? "" : "(\(err.prefix(300)))")
     }
 }

@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 
+// A child process that exits while we write to its stdin must give an error, not end the app.
+signal(SIGPIPE, SIG_IGN)
+
 let arguments = CommandLine.arguments
 // Debug commands (benchmarks, tests) keep the detailed log: they work on test pages, not on the user's data.
 if arguments.dropFirst().contains(where: { $0.hasPrefix("--") }) { Log.forceDetail = true }
