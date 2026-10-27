@@ -65,8 +65,8 @@ struct AgentToolAccess {
 /// One request, already composed by AgentRunner (screen, memory, <recent>, request).
 struct AgentRequest {
     let message: String
-    /// Only the user's words, for engines with a short prompt (local).
-    let userRequest: String
+    /// The same request in a compact Italian form, for the local engine's small context.
+    let localMessage: String
     let level: AgentLevel
 }
 

@@ -83,6 +83,11 @@ final class AgentRunner {
         self.settings = settings
         register(ClaudeEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess }))
         register(CodexEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess }))
+        let local = LocalEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess })
+        local.onNotice = { [weak self] text in
+            self?.onEngineSwitch?(EngineSwitch(from: .local, to: .local, message: text))
+        }
+        register(local)
         aggregate = computeAvailability()
     }
 
@@ -205,6 +210,26 @@ final class AgentRunner {
         """
     }
 
+    /// The compact message of the local engine: a few hundred tokens instead of thousands.
+    private func localMessage(_ request: String, context: ScreenContext, recent: String) -> String {
+        var lines = ["App in primo piano: \(context.appName)"]
+        if !context.windowTitle.isEmpty { lines.append("Finestra: \(context.windowTitle)") }
+        if context.isEditable { lines.append("Il cursore è in un campo di testo.") }
+        if !context.selectedText.isEmpty { lines.append("Testo selezionato: «\(context.selectedText.prefix(200))»") }
+        let facts = Memory.shared.relevantFacts(for: request, limit: 5)
+        if !facts.isEmpty { lines.append("Cose da sapere: " + facts.joined(separator: "; ")) }
+        // The last interaction only, with its text changes («rimetti com'era»).
+        let recentLines = recent.split(separator: "\n").map(String.init)
+        if let i = recentLines.lastIndex(where: { $0.hasPrefix("- ") }) {
+            lines.append("Prima: " + recentLines[i].dropFirst(2).prefix(220))
+            if i + 1 < recentLines.count, recentLines[i + 1].hasPrefix("  changes:") {
+                lines.append("Modifiche di prima: " + recentLines[i + 1].dropFirst(11).prefix(300))
+            }
+        }
+        lines.append("Richiesta: \(request)")
+        return lines.joined(separator: "\n")
+    }
+
     /// Runs one request to completion and returns the agent's final sentence.
     /// Only one request at a time (AD-6).
     func run(_ request: String, context: ScreenContext, recent: String = "", deep: Bool = true) async throws -> String {
@@ -214,7 +239,8 @@ final class AgentRunner {
         running = true
         defer { running = false }
         let level: AgentLevel = deep ? .deep : .fast
-        let req = AgentRequest(message: message(request, context: context, recent: recent), userRequest: request, level: level)
+        let req = AgentRequest(message: message(request, context: context, recent: recent),
+                               localMessage: localMessage(request, context: context, recent: recent), level: level)
         var tried: Set<EngineID> = []
 
         while true {

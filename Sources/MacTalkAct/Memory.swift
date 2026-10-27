@@ -153,6 +153,17 @@ final class Memory {
 
     // MARK: Prompt
 
+    /// Facts sharing at least one meaningful word with the request (local engine: small context).
+    func relevantFacts(for request: String, limit: Int) -> [String] {
+        reload()
+        let words = Set(Grammar.normalize(request).split(separator: " ").map(String.init).filter { $0.count > 3 })
+        guard !words.isEmpty else { return [] }
+        return facts.filter { fact in
+            let f = Set(Grammar.normalize(fact).split(separator: " ").map(String.init))
+            return !f.isDisjoint(with: words)
+        }.prefix(limit).map { $0 }
+    }
+
     /// What the agent receives with every request.
     var promptText: String {
         reload()
