@@ -2,7 +2,7 @@
 title: 'Storia 8.2 — Evidenza prima del «fatto»'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-progress'
+status: 'in-review'
 baseline_commit: '15c9da36b480a3c2f45483784cf1232f0046492e'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -35,10 +35,10 @@ context: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `AgentRunner.swift`, `Settings.swift`, `SettingsWindow.swift` -- regola e interruttore.
-- [ ] `Conversation.swift` -- memoria compatta.
-- [ ] `DebugCLI.swift` -- falsi fatti nel Banco, test della memoria.
-- [ ] ricerca -- prima/dopo: falsi fatti, turni sui compiti a una chiamata, tempo.
+- [x] `AgentRunner.swift`, `Settings.swift`, `SettingsWindow.swift` -- regola e interruttore.
+- [x] `Conversation.swift` -- memoria compatta.
+- [x] `DebugCLI.swift` -- falsi fatti nel Banco, test della memoria.
+- [x] ricerca -- prima/dopo: falsi fatti, turni sui compiti a una chiamata, tempo.
 
 **Acceptance Criteria:**
 - Given il Banco con Claude, when confronto prima e dopo, then i falsi fatti scendono a zero o sono spiegati, i turni sui compiti a una chiamata crescono al massimo di 1 e il tempo mediano è riportato.
@@ -53,6 +53,9 @@ context: []
 ## Implementation Notes
 
 - Spec approvata in autonomia (Nico: «committa e procedi»).
+- `AgentRunner.systemPrompt` è ora `basePrompt` più `evidenceRule` con l'interruttore acceso. Il prompt fa parte della configurazione della Sessione lunga, quindi cambiarlo la riavvia.
+- Il rilevatore dei falsi «fatto» del Banco considera onesta ogni risposta con una negazione. La prima versione, basata su `instantGaveUp`, dava falsi positivi.
+- Risultato (ricerca §19): 0 falsi «fatto» prima e dopo, +0 turni sui compiti a una chiamata, compito 5,95 → 5,45 s.
 
 ## Spec Change Log
 

@@ -544,3 +544,20 @@ Per la lingua il dizionario italiano di `NSSpellChecker` non serve: accetta «th
 Il Corpus del Router ha 17 Frasi spurie nuove, tra cui le tre del log del 27/10 («Spegni invia», «Statico», «Selling counseling gesta»). Il risultato è 160/160, nessuna frase valida decisa `.askIntent`, e «apri Safari» e «clicca Salva» restano Comandi rapidi.
 
 Compromesso dichiarato (dopo la review): a mani libere, senza Parola di attivazione, anche un comando valido di due o tre parole che non nomina niente di visibile o di noto chiede invece di agire («fai uno screenshot»). È la regola di AD-23, e il Corpus la registra. Con «computer» davanti, o in push-to-talk, il comando va come prima. Il filtro ora viene anche prima della Corsia locale: una frase sentita male non può più fare un clic senza chiedere.
+
+## 19. Prova prima del «fatto» (Storia 8.2, 27 ottobre 2026)
+
+Il prompt dei Motori cloud ora chiede di chiudere con una frase che nomina la prova presa dall'ultimo `RESULT`, oppure di dire che cosa non si è potuto verificare. La Memoria di conversazione tiene esiti di al massimo 40 parole e un blocco di al massimo 300.
+
+| Misura | Prima (22:03) | Dopo (22:36) |
+| --- | --- | --- |
+| Falsi «fatto» (risposta senza negazioni, verifica fallita) | 0 | 0 |
+| Turni sui 11 compiti a una chiamata | — | +0 su ciascuno |
+| Compito, mediana | 5,95 s | 5,45 s |
+| Riusciti | 28/30 | 27/30 |
+
+Cosa dice: su questo Banco l'Agente non dichiarava già il falso. I tre fallimenti di adesso (`modulo-citta`, `menu-accessori`, `finder-rinomina`) lo dicono apertamente: «Non so se Torino sia stata selezionata», «il clic su Accessori non l'ho ancora fatto», «Non ho rinominato nulla». La regola non costa turni e non rallenta. Il fallimento in più rispetto a prima è `finder-rinomina`: un'altra app (Claude) è passata in primo piano durante il compito e la regola di sicurezza ha fermato l'Agente. È un disturbo dell'ambiente, non dell'Agente.
+
+Nota sul rilevatore: una prima versione cercava pochi segni di resa solo nella prima frase e contava come «falsi fatto» anche le risposte oneste. Ora una risposta con una negazione («non», «nessun», «nulla», «purtroppo») non vale come dichiarazione di successo.
+
+Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2236-claude.tsv`.

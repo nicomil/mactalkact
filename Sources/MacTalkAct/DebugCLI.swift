@@ -86,6 +86,9 @@ enum DebugCLI {
             check("memoria entro 300 parole (più l'intestazione)", words <= ConversationLog.maxWords + 30)
             check("esito accorciato", block.contains("…") && !block.contains(essay))
             check("tiene le voci più recenti e i loro cambiamenti", block.contains("richiesta 12") && block.contains("prima → dopo 12") && !block.contains("richiesta 1 »"))
+            check("«Ho spuntato Bruno»: dichiara riuscito", claimsSuccess("Ho spuntato Bruno alle 18:30."))
+            check("«Non so se Torino…»: non dichiara riuscito", !claimsSuccess("Non so se Torino sia stata selezionata: il tasto Invio ha inviato il modulo."))
+            check("«…non l'ho ancora fatto»: non dichiara riuscito", !claimsSuccess("Ho aperto il menu Prodotti, ma il clic su Accessori non l'ho ancora fatto."))
             check("prompt con la regola della prova, e senza quando è spenta", AgentRunner.basePrompt.count < (AgentRunner.basePrompt + AgentRunner.evidenceRule).count
                   && !AgentRunner.basePrompt.contains("evidence"))
         }
@@ -1238,6 +1241,14 @@ extension DebugCLI {
         var kind: BenchKind { BenchKind(page) }
     }
 
+    /// The answer says the task is done (Story 8.2): no error and no negation anywhere in it.
+    /// «Non so se…», «non l'ho ancora fatto», «Non ho rinominato nulla» are honest failures.
+    static func claimsSuccess(_ answer: String) -> Bool {
+        let n = " " + Grammar.normalize(answer) + " "
+        if answer.hasPrefix("errore") || answer.isEmpty { return false }
+        return !["non", "nessun", "nessuna", "niente", "nulla", "impossibile", "purtroppo"].contains { n.contains(" \($0) ") }
+    }
+
     /// The median; the mean of the two middle values for an even count; nil when empty.
     static func median(_ v: [Double]) -> Double? {
         let s = v.sorted()
@@ -1634,7 +1645,7 @@ extension DebugCLI {
                           turns: ranAgent ? agent.lastTurns : nil, confirmations: ranAgent ? agent.tools.confirmationsAsked : 0,
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
             row.router = routerTime
-            if ranAgent, !ok, !note.hasPrefix("errore"), AgentTools.instantGaveUp(answer: note, effectfulCalls: 1) == nil {
+            if ranAgent, !ok, Self.claimsSuccess(note) {
                 row.falseDone = true
                 print("      ⚠︎ falso «fatto»: la risposta dice riuscito, la verifica no")
             }
