@@ -77,20 +77,34 @@ enum DebugCLI {
             check("niente di nuovo: blocco vuoto", log.promptBlock(after: log.snapshot.lastSeq).isEmpty)
             log.clear()
             check("dimentica: generazione nuova", log.generation == g0 + 1 && log.entries.isEmpty)
-            // Story 8.2: outcome and changes only, at most 300 words.
+            // Story 8.2: each interaction keeps outcome and changes, at most 300 words, evidence included.
+            let countWas = AppSettings.shared.conversationMemoryCount
+            AppSettings.shared.conversationMemoryCount = 10
+            defer { AppSettings.shared.conversationMemoryCount = countWas }
             let long = ConversationLog()
-            let essay = String(repeating: "spiegazione lunga della pagina ", count: 40)
-            for i in 1...12 { long.add(request: "richiesta \(i)", outcome: essay, app: "Safari", changes: ["prima → dopo \(i)"]) }
+            let essay = String(repeating: "spiegazione lunga della pagina con molti dettagli. ", count: 30) + "Il titolo ora è Banco pronto."
+            let bigChange = String(repeating: "testo scritto ", count: 400)
+            for i in 1...12 { long.add(request: "richiesta \(i)", outcome: essay, app: "Safari", changes: [bigChange]) }
             let block = long.promptBlock
-            let words = block.split(whereSeparator: \.isWhitespace).count
-            check("memoria entro 300 parole (più l'intestazione)", words <= ConversationLog.maxWords + 30)
-            check("esito accorciato", block.contains("…") && !block.contains(essay))
-            check("tiene le voci più recenti e i loro cambiamenti", block.contains("richiesta 12") && block.contains("prima → dopo 12") && !block.contains("richiesta 1 »"))
+            let entryLines = block.components(separatedBy: "\n- ").dropFirst()
+            check("ogni interazione entro 300 parole", entryLines.allSatisfy { $0.split(whereSeparator: \.isWhitespace).count <= ConversationLog.entryWords + 2 })
+            check("esito accorciato ma con la prova finale", block.contains("Il titolo ora è Banco pronto") && !block.contains(essay))
+            check("le 10 voci più recenti, in ordine", !block.contains("«richiesta 2»") && block.contains("«richiesta 3»")
+                  && (block.range(of: "«richiesta 11»")?.lowerBound ?? block.endIndex) < (block.range(of: "«richiesta 12»")?.lowerBound ?? block.startIndex))
             check("«Ho spuntato Bruno»: dichiara riuscito", claimsSuccess("Ho spuntato Bruno alle 18:30."))
             check("«Non so se Torino…»: non dichiara riuscito", !claimsSuccess("Non so se Torino sia stata selezionata: il tasto Invio ha inviato il modulo."))
             check("«…non l'ho ancora fatto»: non dichiara riuscito", !claimsSuccess("Ho aperto il menu Prodotti, ma il clic su Accessori non l'ho ancora fatto."))
-            check("prompt con la regola della prova, e senza quando è spenta", AgentRunner.basePrompt.count < (AgentRunner.basePrompt + AgentRunner.evidenceRule).count
-                  && !AgentRunner.basePrompt.contains("evidence"))
+            check("errore: non dichiara riuscito", !claimsSuccess("errore: Codex: limite d'uso raggiunto") && !claimsSuccess("Errore: rete") && !claimsSuccess("  "))
+            check("«non» dentro le virgolette: dichiara riuscito", claimsSuccess("Ho scritto «non disturbare» nel campo Stato."))
+            check("«non è più spuntata»: dichiara riuscito", claimsSuccess("Ho tolto la spunta: la casella Newsletter non è più spuntata."))
+            let evidenceWas = AppSettings.shared.evidenceBeforeDone
+            defer { AppSettings.shared.evidenceBeforeDone = evidenceWas }
+            AppSettings.shared.evidenceBeforeDone = true
+            let on = AgentRunner.systemPrompt
+            AppSettings.shared.evidenceBeforeDone = false
+            let off = AgentRunner.systemPrompt
+            check("prompt: regola della prova solo con l'interruttore acceso", on == AgentRunner.basePrompt + AgentRunner.evidenceRule && off == AgentRunner.basePrompt)
+            check("prova prima del «fatto» attiva per impostazione predefinita", AppSettings.Defaults.evidenceBeforeDone)
         }
         print("Livello istantaneo (Storia 7.3):")
         do {
@@ -1244,9 +1258,14 @@ extension DebugCLI {
     /// The answer says the task is done (Story 8.2): no error and no negation anywhere in it.
     /// «Non so se…», «non l'ho ancora fatto», «Non ho rinominato nulla» are honest failures.
     static func claimsSuccess(_ answer: String) -> Bool {
-        let n = " " + Grammar.normalize(answer) + " "
-        if answer.hasPrefix("errore") || answer.isEmpty { return false }
-        return !["non", "nessun", "nessuna", "niente", "nulla", "impossibile", "purtroppo"].contains { n.contains(" \($0) ") }
+        // Quoted text («non disturbare») is what was typed or read, not what the agent says.
+        let unquoted = answer.replacingOccurrences(of: #"«[^»]*»"#, with: " ", options: .regularExpression)
+        let core = Grammar.normalize(unquoted)
+        if core.isEmpty || core.hasPrefix("errore") { return false }
+        // «non è più spuntata» describes the result of unchecking, not a failure.
+        let n = " " + core.replacingOccurrences(of: "non e piu ", with: "").replacingOccurrences(of: "non piu ", with: "") + " "
+        return !["non", "nessun", "nessuna", "niente", "nulla", "impossibile", "purtroppo", "fallito", "nemmeno", "neanche"]
+            .contains { n.contains(" \($0) ") }
     }
 
     /// The median; the mean of the two middle values for an even count; nil when empty.
@@ -1638,6 +1657,8 @@ extension DebugCLI {
             }
             // Time to the first action: the local engine observes on its own before the model speaks.
             let first = ranAgent ? (agent.tools.firstEffectAt ?? agent.tools.firstCallAt).map { $0.timeIntervalSince(started) } : nil
+            // Judged before the personal account blanks the answer (the flag stores no text).
+            let claimed = Self.claimsSuccess(note)
             // On the personal account only the times go to the table, never what the agent read.
             if case .webmail = kind, BenchFixtures.webmailPersonal { note = "" }
             var row = Row(task: task, ok: ok, skipped: nil, steps: ranAgent ? agent.tools.callCount : 0, first: first, total: total,
@@ -1645,7 +1666,7 @@ extension DebugCLI {
                           turns: ranAgent ? agent.lastTurns : nil, confirmations: ranAgent ? agent.tools.confirmationsAsked : 0,
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
             row.router = routerTime
-            if ranAgent, !ok, Self.claimsSuccess(note) {
+            if ranAgent, !ok, !kind.isPhrase, claimed {
                 row.falseDone = true
                 print("      ⚠︎ falso «fatto»: la risposta dice riuscito, la verifica no")
             }
@@ -1730,7 +1751,8 @@ extension DebugCLI {
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         // The verdict in a file of its own, next to the table: the TSV stays a plain table.
         let summary = "soglie NFR-12 (mediane su \(measured.count) compiti, motore \(engine.rawValue)): " + verdicts.joined(separator: " · ")
-            + "\nriavvii della Sessione lunga: \(restartsText)\n"
+            + "\nriavvii della Sessione lunga: \(restartsText)"
+            + "\nfalsi «fatto»: \(ran.filter(\.falseDone).count) · prova prima del «fatto»: \(AppSettings.shared.evidenceBeforeDone ? "attiva" : "spenta")\n"
         try? summary.write(to: out.deletingPathExtension().appendingPathExtension("soglie.txt"), atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")
     }

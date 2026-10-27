@@ -71,14 +71,6 @@ final class ConversationLog {
     }
 
     /// The `<recent>` block sent to the agent. Empty when there is nothing recent.
-    static let outcomeWords = 40
-    static let maxWords = 300
-
-    static func shorten(_ text: String, words: Int) -> String {
-        let w = text.split(whereSeparator: \.isWhitespace)
-        return w.count <= words ? text : w.prefix(words).joined(separator: " ") + " …"
-    }
-
     var promptBlock: String { promptBlock(after: 0) }
 
     /// The block with only the entries after `seq`: what a Long session has not seen yet.
@@ -88,18 +80,38 @@ final class ConversationLog {
         guard !entries.isEmpty else { return "" }
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
-        // Outcome and changed text, never the whole observation: at most `outcomeWords` per outcome
-        // and `maxWords` for the block, dropping the oldest entries first (FR-47).
-        var body: [String] = []
-        for e in entries.reversed() {
-            var line = "- \(f.string(from: e.time)) in \(e.app): «\(e.request)» → \(Self.shorten(e.outcome, words: Self.outcomeWords))"
-            if !e.changes.isEmpty { line += "\n  changes: " + e.changes.joined(separator: " | ") }
-            let count = (body + [line]).joined(separator: " ").split(whereSeparator: \.isWhitespace).count
-            if count > Self.maxWords, !body.isEmpty { break }
-            body.insert(line, at: 0)
-        }
-        return (["<recent>", "Most recent last. Use it to resolve references like «di prima», «anche l'altra», «rimetti com'era»."]
-                + body + ["</recent>"]).joined(separator: "\n")
+        var lines = ["<recent>", "Most recent last. Use it to resolve references like «di prima», «anche l'altra», «rimetti com'era»."]
+        for e in entries { lines.append(Self.line(for: e, time: f.string(from: e.time))) }
+        lines.append("</recent>")
+        return lines.joined(separator: "\n")
+    }
+
+    /// One interaction: outcome and changed text, never the whole observation, at most
+    /// `entryWords` words (FR-46). The outcome keeps its last sentence, where the agent names
+    /// the evidence of the result.
+    static let entryWords = 300
+    static let outcomeWords = 40
+
+    static func line(for e: Entry, time: String) -> String {
+        var line = "- \(time) in \(e.app): «\(shorten(e.request, words: outcomeWords))» → \(keepEvidence(e.outcome, words: outcomeWords))"
+        if !e.changes.isEmpty { line += "\n  changes: " + e.changes.map { shorten($0, words: 30) }.joined(separator: " | ") }
+        return shorten(line, words: entryWords)
+    }
+
+    /// The first `words` words, with «…» when something was cut.
+    static func shorten(_ text: String, words: Int) -> String {
+        let w = text.split(whereSeparator: \.isWhitespace)
+        return w.count <= words ? text : w.prefix(words).joined(separator: " ") + " …"
+    }
+
+    /// At most `words` words that keep the last sentence (the evidence) and the start.
+    static func keepEvidence(_ text: String, words: Int) -> String {
+        let all = text.split(whereSeparator: \.isWhitespace)
+        guard all.count > words else { return text }
+        let sentences = text.split(whereSeparator: { ".!?".contains($0) }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let last = sentences.last.map { $0.split(whereSeparator: \.isWhitespace) } ?? []
+        guard !last.isEmpty, last.count < words else { return shorten(text, words: words) }
+        return all.prefix(words - last.count).joined(separator: " ") + " … " + last.joined(separator: " ") + "."
     }
 }
 

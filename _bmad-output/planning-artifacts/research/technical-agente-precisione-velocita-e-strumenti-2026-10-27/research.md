@@ -547,7 +547,7 @@ Compromesso dichiarato (dopo la review): a mani libere, senza Parola di attivazi
 
 ## 19. Prova prima del «fatto» (Storia 8.2, 27 ottobre 2026)
 
-Il prompt dei Motori cloud ora chiede di chiudere con una frase che nomina la prova presa dall'ultimo `RESULT`, oppure di dire che cosa non si è potuto verificare. La Memoria di conversazione tiene esiti di al massimo 40 parole e un blocco di al massimo 300.
+Il prompt dei Motori cloud ora chiede di chiudere con una frase che nomina la prova presa dall'ultimo `RESULT`, oppure di dire che cosa non si è potuto verificare. La Memoria di conversazione tiene di ogni interazione al massimo 300 parole: esito di al massimo 40 parole, con l'ultima frase (dove l'Agente nomina la prova), e testo cambiato accorciato.
 
 | Misura | Prima (22:03) | Dopo (22:36) |
 | --- | --- | --- |
