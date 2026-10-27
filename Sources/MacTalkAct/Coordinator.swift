@@ -95,6 +95,7 @@ final class Coordinator {
             }
             prewarmAI()
             prewarmRouter()
+            if settings.cleanDictation { LocalText.prewarm() }
         } catch {
             hud.show(.error, "Riconoscimento vocale non disponibile", detail: error.localizedDescription, autoHide: 8)
             Log.error("prepare: \(error)")
@@ -559,10 +560,17 @@ final class Coordinator {
     /// One dictated sentence (not the long dictation mode).
     private func dictateOnce(_ text: String, context: ScreenContext) async {
         var out = text
-        if settings.cleanDictation, settings.aiAvailable {
+        if settings.cleanDictation {
             hud.show(.thinking, text, detail: "Ripulisco il testo…")
-            out = (try? await planner.cleanDictation(text, appName: context.appName, model: settings.model,
-                                                     backend: settings.backend, apiKey: settings.apiKey)) ?? text
+            // Claude when it is the engine in use (as before); otherwise Apple's model, on the Mac (FR-33).
+            let claudeInUse = settings.backend == .apiKey ? settings.apiKey != nil
+                : (settings.useAI && agent.currentChoice()?.engine == .claude)
+            if claudeInUse, let c = try? await planner.cleanDictation(text, appName: context.appName, model: settings.model,
+                                                                     backend: settings.backend, apiKey: settings.apiKey) {
+                out = c
+            } else if let c = await LocalText.cleanDictation(text) {
+                out = c
+            }
         }
         await executor.insertDictation(out, context: context)
         done(out, detail: "✍️ Scritto · «cancella quello che hai scritto» per toglierlo")

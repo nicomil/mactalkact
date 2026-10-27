@@ -1,0 +1,22 @@
+# Banco di prova dell'Agente (FR-32, AD-18).
+# id	pagina	livello	richiesta (come detta a voce)	verifica sul titolo della finestra: +testo deve esserci, -testo non deve esserci, separati da ;
+posta-apri	posta.html	breve	apri la mail di Marco Rossi sul preventivo	+aperta: Preventivo cucina
+posta-riunione	posta.html	breve	apri la mail che parla della riunione di lunedì	+aperta: Riunione di lunedì
+posta-cerca	posta.html	breve	cerca nella posta le mail di Giulia	+cerca: giulia
+posta-letta	posta.html	medio	apri la mail di Laura e segnala come letta	+lette: Cena sabato
+posta-elimina	posta.html	medio	elimina la mail della newsletter	+eliminate: Newsletter ottobre;-eliminate: Preventivo
+tabella-una	tabella.html	breve	spunta Bruno alle 18:30	+Bruno 18:30;-Bruno 21:30
+tabella-togli	tabella.html	breve	togli la spunta ad Anna alle 21:30	-Anna 21:30
+tabella-tutti	tabella.html	medio	spunta le 18:30 per tutti quelli che hanno già le 21:30	+Anna 18:30;+Carla 18:30;+Dario 18:30;+Ilaria 18:30;-Bruno 18:30;-Elena 18:30
+notebook-domanda	notebook.html	breve	nella cella modifica la domanda in che cos'è Internet	+domanda = "Che cos'è Internet?";-cloud computing
+notebook-punti	notebook.html	breve	nella cella cambia i punti da 3 a 5	+punti = 5;-punti = 3
+notebook-risposta	notebook.html	breve	cancella tutto il testo della risposta attesa	+risposta=(vuota)
+modulo-nome	modulo.html	breve	scrivi Mario Bianchi nel campo nome	+nome=Mario Bianchi
+modulo-news	modulo.html	breve	spunta la casella della newsletter	+newsletter=sì
+modulo-citta	modulo.html	breve	scegli Torino come città	+città=Torino
+modulo-compila	modulo.html	medio	compila il modulo con nome Mario Bianchi ed email mario@esempio.it	+nome=Mario Bianchi;+email=mario@esempio.it
+modulo-invia	modulo.html	medio	compila il nome con Anna Verdi e invia il modulo	+nome=Anna Verdi;+inviato
+elenco-articolo	elenco.html	breve	apri l'articolo 137	+scelto: Articolo 137
+elenco-fondo	elenco.html	breve	scorri fino in fondo alla pagina	+fondo=sì
+sito-prezzi	sito.html	breve	vai alla pagina dei prezzi	+pagina: Prezzi
+sito-contatti	sito.html	breve	apri i contatti	+pagina: Contatti

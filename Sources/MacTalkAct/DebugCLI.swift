@@ -214,6 +214,20 @@ enum DebugCLI {
         check("strumenti approvati senza chiedere", args.contains("mcp_servers.mactalk.default_tools_approval_mode=\"approve\""))
         check("shim di altre app saltati", CodexCLI.isShim("/Users/x/.cmuxterm/cmux-cli-shims/A/codex") && !CodexCLI.isShim("/Users/x/.local/bin/codex"))
 
+        print("Motore locale:")
+        let stepSchema = (try? ServerModelExecutor.jsonSchema(LocalStep.generationSchema)) ?? [:]
+        let schemaText = (try? JSONSerialization.data(withJSONObject: stepSchema, options: [.sortedKeys])).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        if ProcessInfo.processInfo.environment["MTA_DEBUG"] != nil { print(schemaText) }
+        check("schema del passo in JSON Schema", schemaText.contains("\"properties\"") && schemaText.contains("clicca_tutti"))
+        let toolSchema = try? LocalTool.schema(name: "click", from: (AgentTools.definitions.first { $0["name"] as? String == "click" }?["inputSchema"] as? [String: Any]) ?? [:])
+        check("schema degli strumenti", toolSchema != nil)
+        let parsedObs = LocalStepAgent.parse("APP: Safari (com.apple.Safari)\nWINDOW: Banco sito size 1440x869\n[3]* link «Prezzi» @10,20 50x16\n[4] checkbox «Anna 18:30» (checked) @1,2 3x4\n(list truncated: …)")
+        check("elenco compatto", parsedObs.elements.map(\.line) == ["[3] link «Prezzi»", "[4] checkbox «Anna 18:30» (checked)"] && parsedObs.truncated)
+        check("parole chiave", LocalStepAgent.keywords("apri l'articolo 137") == ["articolo", "137"])
+        check("solo server locali senza conferma", OpenAICompatibleModel.isLocal(baseURL: "http://127.0.0.1:11434/v1")
+              && !OpenAICompatibleModel.isAllowed(baseURL: "http://192.168.1.5:11434/v1", allowRemote: false))
+        check("JSON dentro il testo", ServerModelExecutor.jsonPart(of: "<think>…</think> ecco {\"a\":1} fine") == "{\"a\":1}")
+
         print("Impostazioni:")
         typealias Df = AppSettings.Defaults
         check("predefiniti = comportamento di prima",
@@ -665,5 +679,121 @@ extension DebugCLI {
             agent.shutdown()
         }
         return failures == 0
+    }
+}
+
+// MARK: - Banco di prova dell'Agente (Story 5.1)
+
+extension DebugCLI {
+    struct BenchTask {
+        let id, page, level, request: String
+        let checks: [(mustContain: Bool, text: String)]
+    }
+
+    static func loadBench(_ path: String) -> [BenchTask] {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { line in
+            guard !line.hasPrefix("#") else { return nil }
+            let f = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard f.count >= 5 else { return nil }
+            let checks = f[4].split(separator: ";").map { c -> (Bool, String) in
+                let s = c.trimmingCharacters(in: .whitespaces)
+                return (!s.hasPrefix("-"), String(s.dropFirst()))
+            }
+            return BenchTask(id: f[0], page: f[1], level: f[2], request: f[3], checks: checks)
+        }
+    }
+
+    /// `--agent-bench [file] --engine claude|codex|local [--only id,id] [--server URL --model NAME]`:
+    /// runs every task on a local page in Safari with one engine and checks the page state.
+    /// It acts on the screen: run it only when the Mac is idle.
+    static func agentBench(path: String, engine: EngineID, only: Set<String>, server: (url: String, model: String)?,
+                           mode: LocalEngine.Mode? = nil) async {
+        let tasks = loadBench(path).filter { only.isEmpty || only.contains($0.id) }
+        guard !tasks.isEmpty else { print("Nessun compito in \(path)"); return }
+        guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else { print("Safari assente"); return }
+        let previous = AX.frontmostApplication()
+        let ex = Executor()
+        let agent = AgentRunner(executor: ex, settings: AppSettings.shared)
+        agent.forcedEngine = engine
+        if let local = agent.engines[.local] as? LocalEngine, server != nil || mode != nil {
+            local.override = LocalEngine.Override(provider: server == nil ? .apple : .server, url: server?.url ?? "",
+                                                  model: server?.model ?? "", mode: mode)
+        }
+        agent.tools.askUser = { q, confirmation in
+            print("      ? \(q) → \(confirmation ? "sì (banco)" : "nessuna risposta")")
+            return confirmation ? "sì" : nil
+        }
+        do { try await agent.start() } catch { print("Server strumenti: \(error)"); return }
+        agent.refreshAvailability()
+        try? await Task.sleep(for: .seconds(2))
+        print("Banco di prova · motore \(engine.rawValue)\(engine == .local ? " (\((mode ?? LocalEngine.defaultMode).rawValue))" : "") · \(tasks.count) compiti · \(agent.availability(of: engine))")
+
+        struct Row { let task: BenchTask; let ok: Bool; let steps: Int; let first: Double?; let total: Double; let model: String; let note: String }
+        var rows: [Row] = []
+        let base = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("pages")
+        for task in tasks {
+            let url = base.appendingPathComponent(task.page)
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            _ = try? await NSWorkspace.shared.open([url], withApplicationAt: safari, configuration: config)
+            try? await Task.sleep(for: .seconds(2.5))
+            if let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").first {
+                await ex.bringToFront(app)
+            }
+            try? await Task.sleep(for: .seconds(0.5))
+            let ctx = ScreenContext.capture(includeLabels: false)
+            guard ctx.bundleID == "com.apple.Safari", ctx.windowTitle.hasPrefix("Banco") else {
+                print("✗ \(task.id): pagina non in primo piano (\(ctx.appName) · \(ctx.windowTitle))")
+                rows.append(Row(task: task, ok: false, steps: 0, first: nil, total: 0, model: "", note: "pagina non aperta"))
+                continue
+            }
+            let started = Date()
+            var note = ""
+            do {
+                note = try await agent.run(task.request, context: ctx, deep: task.level == "medio")
+            } catch {
+                note = "errore: \(error.localizedDescription)"
+            }
+            let total = Date().timeIntervalSince(started)
+            try? await Task.sleep(for: .seconds(1.2))
+            let title = ScreenContext.capture(includeLabels: false).windowTitle
+            let ok = task.checks.allSatisfy { $0.mustContain == title.contains($0.text) }
+            let first = agent.tools.firstCallAt.map { $0.timeIntervalSince(started) }
+            rows.append(Row(task: task, ok: ok, steps: agent.tools.callCount, first: first, total: total, model: agent.lastModel, note: note))
+            print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, agent.tools.callCount,
+                         first.map { String(format: "%4.1f s", $0) } ?? "  — ", total, String(note.prefix(70))))
+            if !ok { print("      titolo: \(title.prefix(160))") }
+            // Close the tab only if Safari is still in front (never press keys elsewhere).
+            if AX.frontmostApplication()?.bundleIdentifier == "com.apple.Safari" { try? ex.press("cmd+w") }
+            try? await Task.sleep(for: .seconds(0.5))
+        }
+        agent.shutdown()
+        if let previous { await ex.bringToFront(previous) }
+
+        func median(_ v: [Double]) -> Double { let s = v.sorted(); return s.isEmpty ? 0 : s[s.count / 2] }
+        func p90(_ v: [Double]) -> Double { let s = v.sorted(); return s.isEmpty ? 0 : s[min(s.count - 1, Int(Double(s.count) * 0.9))] }
+        let firsts = rows.compactMap(\.first)
+        let totals = rows.map(\.total)
+        print("\nRisultato (\(engine.rawValue)\(rows.first.map { "/" + $0.model } ?? "")):")
+        for level in ["breve", "medio"] {
+            let r = rows.filter { $0.task.level == level }
+            guard !r.isEmpty else { continue }
+            print(String(format: "  %@: %d/%d riusciti", level, r.filter(\.ok).count, r.count))
+        }
+        print(String(format: "  totale: %d/%d (%.0f%%) · passi medi %.1f · primo strumento mediana %.1f s, 90° %.1f s · tempo mediana %.1f s, 90° %.1f s",
+                     rows.filter(\.ok).count, rows.count, Double(rows.filter(\.ok).count) / Double(rows.count) * 100,
+                     Double(rows.map(\.steps).reduce(0, +)) / Double(rows.count), median(firsts), p90(firsts), median(totals), p90(totals)))
+
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd-HHmm"
+        let out = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\tmodello\trisposta\n"
+        for r in rows {
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(r.ok ? "ok" : "no")\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(r.model)\t\(r.note.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " "))\n"
+        }
+        try? tsv.write(to: out, atomically: true, encoding: .utf8)
+        print("Tabella: \(out.path)")
     }
 }

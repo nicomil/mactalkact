@@ -19,6 +19,24 @@ final class LocalEngine: AgentEngine {
     private(set) var availability: AgentAvailability = .available
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
 
+    /// Debug commands only (`--agent-bench --model`): provider, server and model without touching the settings.
+    struct Override {
+        var provider: LocalProvider
+        var url: String
+        var model: String
+        var mode: Mode? = nil
+    }
+
+    /// How the local model works (Story 5.4): steps chosen with guided generation in a loop
+    /// driven by the app, or free tool calling. Chosen with the bench.
+    enum Mode: String { case steps, tools }
+    static let defaultMode = Mode.steps
+    private var mode: Mode { override?.mode ?? Self.defaultMode }
+    var override: Override?
+    private var provider: LocalProvider { override?.provider ?? settings.localProvider }
+    private var serverURL: String { override?.url ?? settings.localServerURL }
+    private var serverModel: String { override?.model ?? settings.localServerModel }
+
     init(settings: AppSettings, toolAccess: @escaping () -> AgentToolAccess?) {
         self.settings = settings
         self.toolAccess = toolAccess
@@ -55,13 +73,13 @@ final class LocalEngine: AgentEngine {
 
     func refreshAvailability() {
         let apple = Self.appleAvailability()
-        guard settings.localProvider == .server else {
+        guard provider == .server else {
             setAvailability(apple)
             return
         }
         // With a server the engine works if the server answers, or with Apple's model.
         Task { @MainActor in
-            let ok = await OpenAICompatibleModel.ping(baseURL: settings.localServerURL)
+            let ok = await OpenAICompatibleModel.ping(baseURL: serverURL)
             serverReachable = ok
             setAvailability(ok ? .available : apple)
         }
@@ -70,25 +88,25 @@ final class LocalEngine: AgentEngine {
     // MARK: Model
 
     func model(for level: AgentLevel) -> String {
-        if settings.localProvider == .server, serverReachable != false, !settings.localServerModel.isEmpty {
-            return settings.localServerModel
+        if provider == .server, serverReachable != false, !serverModel.isEmpty {
+            return serverModel
         }
         return "apple-on-device"
     }
 
     /// The model of the next request: the server when chosen and allowed, otherwise Apple's.
     private func languageModel() -> (any LanguageModel, String) {
-        if settings.localProvider == .server, !settings.localServerModel.isEmpty, serverReachable != false,
-           OpenAICompatibleModel.isAllowed(baseURL: settings.localServerURL, allowRemote: settings.localServerAllowRemote),
-           let m = OpenAICompatibleModel.make(baseURL: settings.localServerURL, model: settings.localServerModel,
+        if provider == .server, !serverModel.isEmpty, serverReachable != false,
+           OpenAICompatibleModel.isAllowed(baseURL: serverURL, allowRemote: settings.localServerAllowRemote),
+           let m = OpenAICompatibleModel.make(baseURL: serverURL, model: serverModel,
                                               keepAliveMinutes: settings.localKeepAliveMinutes) {
-            return (m, settings.localServerModel)
+            return (m, serverModel)
         }
         return (SystemLanguageModel.default, "apple-on-device")
     }
 
     func prewarm() {
-        guard settings.localProvider == .apple || serverReachable == false, Self.appleModelAvailable else { return }
+        guard provider == .apple || serverReachable == false, Self.appleModelAvailable else { return }
         LanguageModelSession(instructions: Self.instructions).prewarm()
     }
 
@@ -159,7 +177,7 @@ final class LocalEngine: AgentEngine {
     func run(_ request: AgentRequest) async throws -> String {
         guard let access = toolAccess() else { throw AgentEngineError.failed("strumenti non pronti") }
         var (model, name) = languageModel()
-        if settings.localProvider == .server, name == "apple-on-device" {
+        if provider == .server, name == "apple-on-device" {
             onNotice?("Server locale non raggiungibile · uso il modello Apple")
         }
         guard name != "apple-on-device" || Self.appleModelAvailable else {
@@ -183,14 +201,20 @@ final class LocalEngine: AgentEngine {
 
     private func attempt(_ request: AgentRequest, model: any LanguageModel, access: AgentToolAccess) async throws -> String {
         let budget = StepBudget(limit: settings.localMaxSteps)
-        let tools = makeTools(access, budget: budget)
+        let mode = self.mode
+        let tools = mode == .tools ? makeTools(access, budget: budget) : []
         let session = LanguageModelSession(model: model, tools: tools, instructions: Self.instructions)
         let prompt = request.localMessage
         let timeout = settings.agentTimeout
+        let stepAgent = LocalStepAgent(model: model, tools: access.tools, maxSteps: settings.localMaxSteps)
+        let userRequest = request.userRequest
         let task = Task<String, Error> { @MainActor in
             try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask { @MainActor in
-                    try await session.respond(to: prompt).content
+                    if mode == .steps {
+                        return try await stepAgent.run(request: userRequest, context: prompt).answer
+                    }
+                    return try await session.respond(to: prompt).content
                 }
                 group.addTask {
                     try await Task.sleep(for: .seconds(timeout))

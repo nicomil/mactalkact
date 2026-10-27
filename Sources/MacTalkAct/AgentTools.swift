@@ -556,6 +556,9 @@ final class AgentTools {
                     if ["AXTextField", "AXTextArea", "AXSearchField"].contains(role), !value.isEmpty {
                         line += " value=«\(AX.collapse(value, max: 60))»"
                     }
+                    if ["AXCheckBox", "AXRadioButton", "AXSwitch"].contains(role), let on = v[3] as? NSNumber {
+                        line += on.intValue == 0 ? " (unchecked)" : " (checked)"
+                    }
                     if focused { line += " (focused)" }
                     if let f = frame, let wf = windowFrame {
                         line += " @\(Int(f.minX - wf.minX)),\(Int(f.minY - wf.minY)) \(Int(f.width))x\(Int(f.height))"

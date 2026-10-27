@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco modulo</title>
+<style>body{font:15px -apple-system;margin:24px}label{display:block;margin:10px 0}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Iscrizione al corso</h1>
+<form id="f" onsubmit="return invia()">
+  <label>Nome <input id="nome" aria-label="Nome"></label>
+  <label>Email <input id="email" type="email" aria-label="Email"></label>
+  <label>Città <select id="citta" aria-label="Città"><option>Scegli…</option><option>Bari</option><option>Milano</option><option>Roma</option><option>Torino</option></select></label>
+  <label><input id="news" type="checkbox" aria-label="Iscriviti alla newsletter"> Iscriviti alla newsletter</label>
+  <button type="submit">Invia</button>
+</form>
+<script>
+let inviato = false;
+function aggiorna() {
+  const v = id => document.getElementById(id).value.trim();
+  banco("modulo", ["nome=" + v("nome"), "email=" + v("email"),
+                   "città=" + (document.getElementById("citta").selectedIndex ? v("citta") : ""),
+                   "newsletter=" + (document.getElementById("news").checked ? "sì" : "no"), inviato && "inviato"]);
+}
+function invia() { inviato = true; aggiorna(); return false; }
+document.querySelectorAll("input,select").forEach(e => { e.addEventListener("input", aggiorna); e.addEventListener("change", aggiorna); });
+setInterval(aggiorna, 500);
+aggiorna();
+</script>
+</body></html>

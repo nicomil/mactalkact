@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco posta</title>
+<style>body{font:15px -apple-system;margin:0;display:flex;height:100vh}#lista{width:42%;border-right:1px solid #ccc;overflow:auto}
+.mail{padding:10px 14px;border-bottom:1px solid #eee;cursor:pointer}.mail b{display:block}.letta{color:#888}
+#lettura{flex:1;padding:18px}#cerca{margin:10px 14px;width:80%}button{margin-right:8px}</style>
+<script src="banco.js"></script></head>
+<body>
+<div id="lista">
+  <input id="cerca" type="search" aria-label="Cerca nella posta" placeholder="Cerca nella posta">
+  <div id="mails"></div>
+</div>
+<div id="lettura"><p>Seleziona una mail.</p></div>
+<script>
+const mails = [
+  {da:"Marco Rossi", oggetto:"Preventivo cucina", testo:"Ciao, ti mando il preventivo per la cucina."},
+  {da:"Giulia Neri", oggetto:"Foto della gita", testo:"Ecco le foto della gita al lago."},
+  {da:"Ufficio personale", oggetto:"Riunione di lunedì", testo:"La riunione di lunedì è spostata alle 10."},
+  {da:"Negozio Bio", oggetto:"Newsletter ottobre", testo:"Le offerte di ottobre."},
+  {da:"Laura Bianchi", oggetto:"Cena sabato", testo:"Sabato cena da noi alle 20?"},
+  {da:"Giulia Neri", oggetto:"Compleanno di Sara", testo:"Ci vediamo domenica per il compleanno."},
+  {da:"Banca", oggetto:"Estratto conto", testo:"Il tuo estratto conto è disponibile."},
+  {da:"Marco Rossi", oggetto:"Re: sopralluogo", testo:"Va bene giovedì per il sopralluogo."},
+];
+let aperta = "", eliminate = [], lette = [], cerca = "";
+function aggiorna() {
+  banco("posta", [aperta && "aperta: " + aperta, eliminate.length && "eliminate: " + eliminate.join(", "),
+                  lette.length && "lette: " + lette.join(", "), cerca && "cerca: " + cerca]);
+}
+function disegna() {
+  const box = document.getElementById("mails");
+  box.innerHTML = "";
+  mails.filter(m => !eliminate.includes(m.oggetto))
+       .filter(m => !cerca || (m.da + " " + m.oggetto).toLowerCase().includes(cerca))
+       .forEach(m => {
+    const d = document.createElement("div");
+    d.className = "mail" + (lette.includes(m.oggetto) ? " letta" : "");
+    d.setAttribute("role", "button");
+    d.tabIndex = 0;
+    d.innerHTML = "<b>" + m.da + "</b>" + m.oggetto;
+    d.onclick = () => apri(m);
+    box.appendChild(d);
+  });
+}
+function apri(m) {
+  aperta = m.oggetto;
+  const l = document.getElementById("lettura");
+  l.innerHTML = "<h2>" + m.oggetto + "</h2><p>Da: " + m.da + "</p><p>" + m.testo + "</p>";
+  const b1 = document.createElement("button"); b1.textContent = "Segna come letta";
+  b1.onclick = () => { if (!lette.includes(m.oggetto)) lette.push(m.oggetto); disegna(); aggiorna(); };
+  const b2 = document.createElement("button"); b2.textContent = "Elimina";
+  b2.onclick = () => { eliminate.push(m.oggetto); aperta = ""; l.innerHTML = "<p>Mail eliminata.</p>"; disegna(); aggiorna(); };
+  l.appendChild(b1); l.appendChild(b2);
+  aggiorna();
+}
+document.getElementById("cerca").addEventListener("input", e => { cerca = e.target.value.trim().toLowerCase(); disegna(); aggiorna(); });
+disegna(); aggiorna();
+</script>
+</body></html>

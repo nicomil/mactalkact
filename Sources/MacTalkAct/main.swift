@@ -12,6 +12,31 @@ if arguments.contains("--selftest") {
     exit(ok ? 0 : 1)
 }
 
+if arguments.contains("--agent-bench") {
+    let path = argument(after: "--agent-bench").flatMap { $0.hasPrefix("-") ? nil : $0 } ?? "Tests/bench/agente.tsv"
+    let engine = argument(after: "--engine").flatMap(EngineID.init(rawValue:)) ?? .local
+    let only = Set((argument(after: "--only") ?? "").split(separator: ",").map(String.init))
+    let server = argument(after: "--model").map { (argument(after: "--server") ?? AppSettings.Defaults.localServerURL, $0) }
+    let mode = argument(after: "--local-mode").flatMap(LocalEngine.Mode.init(rawValue:))
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        await DebugCLI.agentBench(path: path, engine: engine, only: only, server: server, mode: mode)
+        exit(0)
+    }
+    dispatchMain()
+}
+
+if let text = argument(after: "--clean") {
+    // Debug: dictation cleanup with Apple's model (FR-33).
+    Task { @MainActor in
+        let started = Date()
+        let out = await LocalText.cleanDictation(text, timeout: .seconds(5))
+        print(String(format: "%.2fs → %@", Date().timeIntervalSince(started), out ?? "(nessuna ripulitura)"))
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--fallback-test") {
     Task { @MainActor in
         let ok = await DebugCLI.fallbackTest()

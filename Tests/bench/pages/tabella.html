@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco tabella</title>
+<style>body{font:15px -apple-system;margin:24px}td,th{padding:4px 14px}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Presenze del corso</h1>
+<table id="t"><tr><th>Studente</th><th>18:30</th><th>21:30</th></tr></table>
+<script>
+const nomi = ["Anna","Bruno","Carla","Dario","Elena","Franco","Gianni","Ilaria","Luca","Marta"];
+const gia = ["Anna","Carla","Dario","Ilaria"];
+const t = document.getElementById("t");
+nomi.forEach(n => {
+  const r = t.insertRow();
+  r.insertCell().textContent = n;
+  ["18:30","21:30"].forEach(h => {
+    const c = document.createElement("input");
+    c.type = "checkbox"; c.setAttribute("aria-label", n + " " + h);
+    c.checked = h === "21:30" && gia.includes(n);
+    c.addEventListener("change", aggiorna);
+    r.insertCell().appendChild(c);
+  });
+});
+function aggiorna() {
+  const s = [...document.querySelectorAll("input:checked")].map(c => c.getAttribute("aria-label"));
+  banco("tabella", ["spuntate: " + s.join(", ")]);
+}
+aggiorna();
+</script>
+</body></html>

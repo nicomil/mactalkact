@@ -247,7 +247,8 @@ final class AgentRunner {
         defer { running = false }
         let level: AgentLevel = deep ? .deep : .fast
         let req = AgentRequest(message: message(request, context: context, recent: recent),
-                               localMessage: localMessage(request, context: context, recent: recent), level: level)
+                               localMessage: localMessage(request, context: context, recent: recent),
+                               userRequest: request, level: level)
         var tried: Set<EngineID> = []
 
         while true {

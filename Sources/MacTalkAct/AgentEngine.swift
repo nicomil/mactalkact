@@ -67,6 +67,8 @@ struct AgentRequest {
     let message: String
     /// The same request in a compact Italian form, for the local engine's small context.
     let localMessage: String
+    /// Only the user's words.
+    let userRequest: String
     let level: AgentLevel
 }
 

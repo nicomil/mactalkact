@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco elenco</title>
+<style>body{font:15px -apple-system;margin:24px}li{margin:6px 0}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Articoli del blog</h1>
+<ol id="l"></ol>
+<script>
+let scelto = "";
+const l = document.getElementById("l");
+for (let i = 1; i <= 150; i++) {
+  const li = document.createElement("li");
+  const a = document.createElement("a");
+  a.href = "#"; a.textContent = "Articolo " + i;
+  a.onclick = e => { e.preventDefault(); scelto = a.textContent; aggiorna(); };
+  li.appendChild(a); l.appendChild(li);
+}
+function aggiorna() {
+  const fondo = window.scrollY + window.innerHeight >= document.body.scrollHeight - 40;
+  banco("elenco", [scelto && "scelto: " + scelto, "fondo=" + (fondo ? "sì" : "no")]);
+}
+window.addEventListener("scroll", aggiorna);
+aggiorna();
+</script>
+</body></html>
