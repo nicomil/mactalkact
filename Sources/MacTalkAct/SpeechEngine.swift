@@ -135,11 +135,16 @@ final class AudioRouter: @unchecked Sendable {
     }
 
     /// Called from the tap for every audio buffer.
+    /// When audio last arrived: a running engine that stops delivering audio has died silently.
+    var lastInputAt: Date { lock.withLock { lastInput } }
+    private var lastInput = Date()
+
     func process(_ inputs: [AnalyzerInput], rms: Float, duration: TimeInterval) {
         var started: AsyncStream<AnalyzerInput>?
         var ended = false
 
         lock.lock()
+        lastInput = Date()
         if let active {
             for input in inputs { active.yield(input) }
         } else {
@@ -365,11 +370,63 @@ final class SpeechEngine {
         try engine.start()
         audioEngine = engine
         isRunning = true
+        vadOn = vad
         Log.info("Microfono acceso (rilevamento voce: \(vad ? "sì" : "no"))")
+        watchAudio(engine)
+    }
+
+    // MARK: Audio that stops by itself
+
+    private var vadOn = false
+    private var configObserver: NSObjectProtocol?
+    private var watchdog: Task<Void, Never>?
+
+    /// macOS stops the audio engine without telling when the input device changes (headphones,
+    /// AirPods, another app taking the microphone): restart it, or the app stops listening for good.
+    private func watchAudio(_ engine: AVAudioEngine) {
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { Task { await self?.restartAudio(reason: "cambio del dispositivo audio") } }
+        }
+        watchdog?.cancel()
+        watchdog = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, self.isRunning, !Task.isCancelled else { return }
+                if Date().timeIntervalSince(self.router.lastInputAt) > 3 {
+                    await self.restartAudio(reason: "nessun audio da 3 s")
+                }
+            }
+        }
+    }
+
+    private var lastRestart = Date.distantPast
+
+    private func restartAudio(reason: String) async {
+        // At most one restart every 8 s: a microphone that is really gone must not loop.
+        guard isRunning, Date().timeIntervalSince(lastRestart) > 8 else { return }
+        lastRestart = Date()
+        Log.info("Microfono: riavvio (\(reason))")
+        let vad = vadOn
+        audioEngine?.stop()
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine = nil
+        isRunning = false
+        router.closeAny()
+        do {
+            try await startAudio(vad: vad)
+        } catch {
+            Log.error("Microfono: riavvio non riuscito: \(error.localizedDescription)")
+            try? await Task.sleep(for: .seconds(2))
+            if !isRunning { try? await startAudio(vad: vad) }
+        }
     }
 
     func setVAD(_ on: Bool) {
         router.setVAD(on)
+        vadOn = on
     }
 
     func setEndSilence(_ seconds: TimeInterval) {
@@ -383,6 +440,10 @@ final class SpeechEngine {
     func stopAudio() async {
         router.setVAD(false)
         guard isRunning else { return }
+        watchdog?.cancel()
+        watchdog = nil
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = nil
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine = nil
