@@ -30,8 +30,8 @@ etichetta-ordine	etichetta.html	medio	scrivi il numero d'ordine che si vede sull
 finder-apri	app:Finder	breve	apri la cartella Banco MacTalkAct sulla scrivania	+Banco MacTalkAct
 finder-rinomina	app:Finder:banco	breve	rinomina il file bozza.txt in finale.txt	+file:finale.txt;-file:bozza.txt
 finder-cartella	app:Finder:banco	breve	crea una nuova cartella chiamata Archivio	+file:Archivio
-calendario-evento	app:Calendar	medio	crea un evento domani alle 15 chiamato Banco riunione	+evento:Banco riunione
-mail-bozza	app:Mail	medio	scrivi una nuova mail a prova@example.invalid con oggetto Banco prova e testo ciao, ma non inviarla	+Banco prova
+calendario-evento	app:Calendar	medio	crea un evento domani alle 15 chiamato Banco MacTalkAct riunione	+evento:Banco MacTalkAct riunione
+mail-bozza	app:Mail	medio	scrivi una nuova mail a prova@example.invalid con oggetto Banco MacTalkAct prova e testo ciao, ma non inviarla	+Banco MacTalkAct prova
 # Webmail di prova (Gmail con login già fatto in Safari): MACTALK_BENCH_WEBMAIL=https://mail.google.com/mail/u/0/
 # Senza la variabile i compiti risultano «saltato»; con MACTALK_BENCH_WEBMAIL_PERSONAL=1 girano solo quelli «osserva».
 webmail-cerca	webmail:	breve	cerca nella posta le mail con la parola banco	+url:search

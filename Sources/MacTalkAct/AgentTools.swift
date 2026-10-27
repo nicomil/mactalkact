@@ -42,7 +42,11 @@ final class AgentTools {
     private(set) var firstEffectAt: Date?
     /// Bench counters (FR-41): confirmations asked, and actions stopped without a «sì».
     private(set) var confirmationsAsked = 0
-    private(set) var blockedCalls = 0
+    /// Confirmations denied, plus one when the last risky action was refused and never confirmed.
+    var blockedCalls: Int { deniedConfirmations + (unconfirmedRisky ? 1 : 0) }
+    private var deniedConfirmations = 0
+    /// A risky action got «call confirm first» and no confirmation has answered it yet.
+    private var unconfirmedRisky = false
     /// Start (`true`) and end (`false`) of every tool call, settling included: the phases of the Bench.
     var onCall: ((Bool) -> Void)?
     /// Text changes made during the current task, for the conversation memory (FR-8).
@@ -74,8 +78,12 @@ final class AgentTools {
         lastShot = nil
         confirmedUntil = .distantPast
         callCount = 0
-        confirmationsAsked = 0
-        blockedCalls = 0
+        if !keepElements {
+            // The same request retried on another engine keeps what the first one asked (AD-15).
+            confirmationsAsked = 0
+            deniedConfirmations = 0
+            unconfirmedRisky = false
+        }
         effectfulCalls = 0
         firstCallAt = nil
         firstEffectAt = nil
@@ -251,7 +259,7 @@ final class AgentTools {
             return Self.privateWindowError(why)
         }
         var result = await perform(name, args)
-        if result.isError, result.text.hasSuffix("call confirm first.") { blockedCalls += 1 }
+        if result.isError, result.text.hasSuffix(Self.confirmFirst) { unconfirmedRisky = true }
         if reportOutcome, Self.outcomeTools.contains(name), !result.readOnly, !cancelled,
            !result.text.hasPrefix("MacTalkAct does not have"), !result.text.hasPrefix("The frontmost app changed") {
             await settle()
@@ -416,7 +424,7 @@ final class AgentTools {
         case "press_keys":
             guard let keys = a["keys"] as? String else { return .error("Missing keys") }
             if Safety.isRiskyKeys(keys), !confirmed {
-                return .error("«\(keys)» can close or delete things: call confirm first.")
+                return .error("«\(keys)» can close or delete things: \(Self.confirmFirst)")
             }
             onProgress?("Premo \(keys)")
             try await executor.pressSequence(keys)
@@ -542,11 +550,12 @@ final class AgentTools {
             guard let action = a["action"] as? String else { return .error("Missing action") }
             confirmationsAsked += 1
             let answer = await askUser?(action, true)
+            unconfirmedRisky = false // this answer settles the action that asked for it
             if let answer, Grammar.isYes(answer) {
                 confirmedUntil = Date().addingTimeInterval(AppSettings.shared.confirmValiditySeconds)
                 return .text("approved")
             }
-            blockedCalls += 1
+            deniedConfirmations += 1
             return .text("denied — do not perform the action. Tell the user it was cancelled.")
 
         default:
@@ -555,6 +564,10 @@ final class AgentTools {
     }
 
     private var confirmed: Bool { Date() < confirmedUntil }
+
+    /// The end of every «needs a confirmation» error: the Bench counts blocked actions by it.
+    static let confirmFirst = "call confirm first."
+
 
     // MARK: Elements
 
@@ -1003,7 +1016,7 @@ final class AgentTools {
             let item = try resolve(id)
             label = item.label
             if Safety.isRiskyLabel(label), !confirmed {
-                return .error("Clicking «\(label)» may send or delete something: call confirm first.")
+                return .error("Clicking «\(label)» may send or delete something: \(Self.confirmFirst)")
             }
             if !quiet { onProgress?("Clicco «\(label)»") }
             if method == "auto" {
@@ -1158,7 +1171,7 @@ final class AgentTools {
             return .error("[\(id)] «\(item.label)» has no action «\(wanted)». Its actions: \(actions.map(Self.actionName).joined(separator: ", ")).")
         }
         if Safety.isRiskyLabel(Self.actionName(raw)) || Safety.isRiskyLabel(item.label), !confirmed {
-            return .error("«\(Self.actionName(raw))» on «\(item.label)» may send or delete something: call confirm first.")
+            return .error("«\(Self.actionName(raw))» on «\(item.label)» may send or delete something: \(Self.confirmFirst)")
         }
         onProgress?("\(Self.actionName(raw)) «\(item.label)»")
         let err = AXUIElementPerformAction(item.element, raw as CFString)
@@ -1171,7 +1184,7 @@ final class AgentTools {
         let (from, fromLabel) = try target(a, id: "from_id", x: "from_x", y: "from_y")
         let (to, toLabel) = try target(a, id: "to_id", x: "to_x", y: "to_y")
         if Safety.isRiskyLabel(toLabel), !confirmed {
-            return .error("Dropping on «\(toLabel)» may delete something: call confirm first.")
+            return .error("Dropping on «\(toLabel)» may delete something: \(Self.confirmFirst)")
         }
         onProgress?("Trascino «\(fromLabel)» su «\(toLabel)»")
         let flags = KeyCombo.modifiers([(a["modifiers"] as? String) ?? ""])
@@ -1203,7 +1216,7 @@ final class AgentTools {
                 return r
             }
             if Safety.isRiskyLabel(item.title), !confirmed {
-                return .error("«\(item.title)» may delete, send or close something: call confirm first.")
+                return .error("«\(item.title)» may delete, send or close something: \(Self.confirmFirst)")
             }
             onProgress?("Menu \(walked.joined(separator: " › "))")
             guard AX.press(item.element) else { return .error("The app did not accept «\(walked.joined(separator: " > "))».") }

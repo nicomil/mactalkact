@@ -265,13 +265,17 @@ final class AgentRunner {
     /// Runs one request to completion and returns the agent's final sentence.
     /// Only one request at a time (AD-6).
     func run(_ request: String, context: ScreenContext, recent: String = "", deep: Bool = true) async throws -> String {
+        // A request refused below must not leave the previous request's phases for the Bench.
+        lastPhases = [:]
+        lastTotal = 0
+        lastTurns = nil
         guard server != nil else { throw AgentEngineError.failed("server strumenti non avviato") }
         guard !running else { throw AgentEngineError.failed("sto già lavorando a un'altra richiesta") }
         tools.reset()
         running = true
         // One monotonic clock for the whole request, split into contiguous phases (FR-41, AD-18).
         let timer = PhaseTimer()
-        tools.onCall = { start in timer.mark(start ? .actions : .reasoning) }
+        tools.onCall = { start in timer.tool(start) }
         defer {
             running = false
             tools.onCall = nil
@@ -323,6 +327,7 @@ final class AgentRunner {
                                 Log.isDetailed ? answer : "risposta di \(answer.count) caratteri"))
                 return answer
             } catch let error as AgentEngineError {
+                engine.onPhase = nil // a late event of this engine must not move the next attempt's phases
                 lastEngine = engine.id
                 lastModel = model
                 Log.info(String(format: "Agente (%@/%@): %@ dopo %.1fs, %d azioni con effetti: %@", engine.id.rawValue, model,

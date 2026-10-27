@@ -165,12 +165,10 @@ final class CodexCLI: @unchecked Sendable {
         return try await withThrowingTaskGroup(of: Outcome.self) { group in
             group.addTask {
                 var parser = CodexEventParser()
-                var sawToken = false
                 for try await line in stdout.bytes.lines {
-                    if line.contains("\"turn.started\"") { onPhase?(.serverConnected) }
-                    if !sawToken, line.contains("\"item.") { sawToken = true; onPhase?(.firstToken) }
+                    if let phase = parser.phase(line) { onPhase?(phase) }
                     if let outcome = parser.feed(line) {
-                        onPhase?(.turnFinished(turns: nil))
+                        onPhase?(.turnFinished(turns: parser.turns))
                         if !parser.usage.isEmpty { Log.info("Codex: token \(parser.usage)") }
                         return outcome
                     }
@@ -217,6 +215,26 @@ struct CodexEventParser {
     private(set) var toolCalls = 0
     /// Token use of the turn («12000 in (8000 cached), 300 out»), for the log.
     private(set) var usage = ""
+    /// Turns started in this run, for the Bench.
+    private(set) var turns = 0
+    private var sawItem = false
+
+    /// The phase event of one line, read from its `type` (the end of the turn comes with `feed`).
+    mutating func phase(_ line: String) -> EnginePhase? {
+        guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+              let type = obj["type"] as? String else { return nil }
+        switch type {
+        case "turn.started":
+            turns += 1
+            return turns == 1 ? .serverConnected : nil
+        case "item.started", "item.completed":
+            guard !sawItem else { return nil }
+            sawItem = true
+            return .firstToken
+        default:
+            return nil
+        }
+    }
 
     /// Returns an outcome when the turn is over, or when an error makes waiting useless
     /// (usage limit, missing login: Codex would retry for ~20 s).

@@ -2,7 +2,7 @@
 title: 'Storia 7.1 — Riga di base: il Banco misura fase per fase, anche fuori dal browser'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-progress'
+status: 'done'
 baseline_commit: '2fe1b7b5e9d579e3dc13f16e72b1a6eeb36ccc9e'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -70,7 +70,7 @@ context:
 - [x] `Tests/bench/pages/lavagna.html` -- canvas con tre forme disegnate; un clic dentro una forma mette il suo nome nel titolo (`Banco lavagna · cliccato=cerchio rosso`).
 - [x] `Tests/bench/agente.tsv` -- 3 Finder (apri la cartella, rinomina `bozza.txt` in `finale.txt`, crea cartella `Archivio`), 1 Calendario (evento «Banco riunione» domani alle 15), 1 Mail (bozza a `prova@example.invalid` oggetto «Banco prova», non inviare), 2 webmail (cerca, apri cartella inviata), 1 canvas, 5 Frasi spurie.
 - [x] `Sources/MacTalkAct/DebugCLI.swift` (`--selftest`) -- test di `PhaseTimer` (somma = totale, fase errore) e di `loadBench` sui nuovi tipi.
-- [ ] `_bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md` -- sezione «Riga di base» con mediane di primo strumento, compito e fasi dalla corsa con Claude.
+- [x] `_bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md` -- sezione «Riga di base» con mediane di primo strumento, compito e fasi dalla corsa con Claude.
 
 **Acceptance Criteria:**
 - Given `--agent-bench` con Claude, when finisce, then la tabella ha una colonna per fase e `somma_ok` vero su ogni compito, più turni, conferme e bloccate.
@@ -104,3 +104,35 @@ La webmail di prova dipende da un account che solo Nico può aprire: la variabil
 ## Spec Change Log
 
 ## Review Triage Log
+
+Prima review (3 revisori: blind, edge case, verification gap). Nessun rilievo di intento o di spec; tutti patch salvo un rinvio.
+
+| Rilievo | Verdetto | Evidenza / esito |
+|---|---|---|
+| Pulizia del Banco su «Banco…» può cancellare eventi, bozze o una cartella dell'utente | high | Il prefisso «Banco» prende anche titoli veri come «Banco alimentare». Patch: marcatore «Banco MacTalkAct», cartella rimossa solo se contiene il file sentinella, rifiuto se c'è già una cartella dell'utente |
+| Eventi del Motore fuori ordine riportano indietro le fasi (primo token dopo l'avvio di uno strumento, secondo `turn.started`, `onCall` dopo la chiusura) | medium | Fonti concorrenti (stdout e MCP). Patch: eventi solo in avanti, strumenti ignorati dopo la chiusura |
+| Chiamate di strumenti in parallelo: la prima che finisce segna ragionamento | medium | MCPServer serve ogni richiesta in un Task. Patch: contatore delle chiamate in volo |
+| Calendario: la pulizia iniziale salta perché l'accesso non è ancora noto, e un evento vecchio fa passare la verifica | medium | `calendarAllowed` era nil al primo compito. Patch: accesso chiesto prima della pulizia |
+| `EKEvent.title` nil fa cadere il Banco | low | `String!` importato da EventKit. Patch: `?? ""` |
+| osascript senza timeout sul main actor; bozze salvate non pulite | medium | Una richiesta di Automazione lo blocca. Patch: timeout di 10 s con messaggio; cancellazione anche dalle Bozze |
+| Agente avviato su qualunque app in primo piano (app, webmail, frase); URL webmail nullo | medium | Prima solo `.page` era controllato. Patch: verifica del bundle atteso per ogni tipo; URL non valido → saltato |
+| Account webmail personale: titolo e domande stampati in console | medium | Violava «log ridotto ai tempi». Patch: titolo e domanda nascosti |
+| `bloccate` contata due volte e anche per azioni poi approvate | medium | Errore «confirm first» +1 e diniego +1. Patch: dinieghi + un'azione rischiosa rimasta senza risposta; suffisso del messaggio in una sola costante |
+| Contatori azzerati nella ripetizione su un altro Motore | low | `reset(keepElements: true)` li azzerava. Patch: tenuti nella ripetizione |
+| Richiesta rifiutata prima del `defer`: il Banco riusa le fasi della precedente | medium | Le guardie stavano prima del `defer`. Patch: azzeramento prima delle guardie |
+| Orologio letto fuori dal lock: segmento negativo possibile | low | `mark` leggeva `now` prima del lock. Patch: lettura sotto lock |
+| «primo token» era il primo messaggio completo | medium | Mancava `--include-partial-messages`. Patch: flag aggiunto, numeri della ricerca corretti; Codex letto dal campo `type` invece che da una sottostringa |
+| Callback del Motore abbandonato ancora attivo dopo il ripiego | low | Patch: `onPhase = nil` nel ramo d'errore |
+| Finestre Finder lasciate aperte fanno passare `finder-apri` | medium | Patch: chiusura delle finestre sulla cartella del Banco nella pulizia |
+| Preparazione fallita lascia la cartella | low | Patch: pulizia sul ramo saltato |
+| Finestra eventi −1/+7 giorni invece di ±7 | low | Patch: −7/+7 |
+| `lavagna.html`: dati del triangolo incoerenti | low | Patch: campi inutili tolti |
+| Nessun test delle fasi attraverso `AgentRunner.run` | gap | Patch: `FakeEngine.phased` in `--fallback-test` con evento duplicato in ritardo |
+| Nessun test della lettura degli eventi Claude/Codex | gap | Patch: `ClaudeCLI.phase(of:)` e `CodexEventParser.phase` puri, testati su `success.jsonl` |
+| Nessun test dei contatori | gap | Patch: blocco in `--fallback-test` |
+| Permesso Calendario per un binario senza Info.plist | maybe-false | Si chiarisce lanciando `calendario-evento` con Nico presente. Rinviato |
+| Codex: turni sempre nil | low | Corretto insieme alla patch del parser (`turns` da `turn.started`) |
+| Frasi spurie: ignorata dal Router e arrivata all'Agente danno lo stesso esito | false | La colonna `risposta` dice già `router: …` contro la risposta dell'Agente, e l'AC chiede «nessuna azione» |
+| `bundleID` per app non mappate, `app:X:banco` non Finder | low | Respinto: nessun compito li usa |
+| Riepilogo `somma_ok` vero sui saltati; conversione `Duration` duplicata | low | Respinto come cosmetico (conversione comunque unificata) |
+| PhaseTimer classe invece di struct (affermazione della spec) | false | Serve un riferimento condiviso tra i task; nessun danno |

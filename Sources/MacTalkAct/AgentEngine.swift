@@ -330,7 +330,7 @@ enum BenchPhase: String, CaseIterable, Sendable {
 }
 
 /// One monotonic clock per request. `mark` closes the current phase and opens the next one;
-/// thread-safe because engines report from their reading tasks.
+/// thread-safe because engines report from their reading tasks and tools from MCP requests.
 final class PhaseTimer: @unchecked Sendable {
     private let lock = NSLock()
     private let clock = ContinuousClock()
@@ -338,8 +338,11 @@ final class PhaseTimer: @unchecked Sendable {
     private var current: BenchPhase
     private var since: ContinuousClock.Instant
     private var segments: [(BenchPhase, Duration)] = []
-    private var finished: [BenchPhase: Double]?
-    private(set) var turns: Int?
+    private var finished: (phases: [BenchPhase: Double], total: Double)?
+    /// Tools running right now: with parallel calls the phase is «azioni» until the last one ends.
+    private var inFlight = 0
+    private var _turns: Int?
+    var turns: Int? { lock.withLock { _turns } }
 
     init(start phase: BenchPhase = .scan) {
         started = clock.now
@@ -347,47 +350,73 @@ final class PhaseTimer: @unchecked Sendable {
         current = phase
     }
 
+    /// Opens `phase` now. Also used to go back to `.session` when another engine takes over.
     func mark(_ phase: BenchPhase) {
-        let now = clock.now
+        lock.withLock { move(to: phase) }
+    }
+
+    /// Start (`true`) or end (`false`) of a tool call.
+    func tool(_ start: Bool) {
         lock.withLock {
-            guard finished == nil, phase != current else { return }
-            segments.append((current, now - since))
-            current = phase
-            since = now
+            guard current != .close else { return }
+            if start {
+                inFlight += 1
+                move(to: .actions)
+            } else {
+                inFlight = max(0, inFlight - 1)
+                if inFlight == 0, current == .actions { move(to: .reasoning) }
+            }
         }
     }
 
-    /// Maps an engine event onto the phase that starts with it.
+    /// Maps an engine event onto the phase that starts with it. Events only move forward:
+    /// one read late (the first token after the first tool already started) changes nothing.
     func event(_ e: EnginePhase) {
-        switch e {
-        case .sessionStarted, .sessionReused: mark(.mcp)
-        case .serverConnected: mark(.firstToken)
-        case .firstToken: mark(.reasoning)
-        case .turnFinished(let t):
-            lock.withLock { turns = t }
-            mark(.close)
+        lock.withLock {
+            switch e {
+            case .sessionStarted, .sessionReused:
+                if current == .session { move(to: .mcp) }
+            case .serverConnected:
+                if current == .session || current == .mcp { move(to: .firstToken) }
+            case .firstToken:
+                if [.session, .mcp, .firstToken].contains(current) { move(to: .reasoning) }
+            case .turnFinished(let t):
+                _turns = t
+                inFlight = 0
+                move(to: .close)
+            }
         }
     }
 
     /// Closes the timer. The model's thinking after the last tool is the final turn.
     @discardableResult
     func finish() -> (phases: [BenchPhase: Double], total: Double) {
-        let now = clock.now
-        return lock.withLock {
-            if let finished { return (finished, finished.values.reduce(0, +)) }
+        lock.withLock {
+            if let finished { return finished }
+            let now = clock.now
             segments.append((current, now - since))
             if let i = segments.lastIndex(where: { $0.0 == .reasoning }),
                !segments[i...].contains(where: { $0.0 == .actions }) {
                 segments[i].0 = .finalTurn
             }
             var out: [BenchPhase: Double] = [:]
-            for (p, d) in segments {
-                let s = Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
-                out[p, default: 0] += s
-            }
-            finished = out
-            let total = now - started
-            return (out, Double(total.components.seconds) + Double(total.components.attoseconds) / 1e18)
+            for (p, d) in segments { out[p, default: 0] += Self.seconds(d) }
+            let result = (out, Self.seconds(now - started))
+            finished = result
+            return result
         }
+    }
+
+    /// Call with the lock held.
+    private func move(to phase: BenchPhase) {
+        guard finished == nil, phase != current else { return }
+        let now = clock.now
+        segments.append((current, now - since))
+        current = phase
+        since = now
+    }
+
+    private static func seconds(_ d: Duration) -> Double {
+        Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
     }
 }

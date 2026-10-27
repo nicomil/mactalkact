@@ -47,6 +47,22 @@ enum DebugCLI {
             let (ep, et) = e.finish() // error before the first token: no final turn, the sum still holds
             check("errore a metà: somma = totale", abs(ep.values.reduce(0, +) - et) < 0.001 && ep[.finalTurn] == nil)
         }
+        print("Eventi dei Motori per le fasi:")
+        do {
+            check("Claude: init con server → MCP connesso", ClaudeCLI.phase(of: ["type": "system", "subtype": "init", "mcp_servers": [["name": "mactalk", "status": "connected"]]]) == .serverConnected)
+            check("Claude: init senza server → niente", ClaudeCLI.phase(of: ["type": "system", "subtype": "init", "mcp_servers": [] as [Any]]) == nil)
+            check("Claude: stream_event → primo token", ClaudeCLI.phase(of: ["type": "stream_event"]) == .firstToken)
+            check("Claude: result → fine turno con num_turns", ClaudeCLI.phase(of: ["type": "result", "num_turns": 3]) == .turnFinished(turns: 3))
+            var parser = CodexEventParser()
+            var phases: [EnginePhase] = []
+            for line in ((try? String(contentsOfFile: "Tests/fixtures/codex/success.jsonl", encoding: .utf8)) ?? "").split(separator: "\n") {
+                if let p = parser.phase(String(line)) { phases.append(p) }
+            }
+            check("Codex: turn.started → MCP, primo item → primo token", phases == [.serverConnected, .firstToken])
+            check("Codex: un turno", parser.turns == 1)
+            var other = CodexEventParser()
+            check("Codex: «item.» dentro il testo non conta", other.phase(#"{"type":"error","message":"vedi \"item.started\""}"#) == nil)
+        }
         print("Compiti del Banco:")
         do {
             let tasks = parseBench("""
@@ -768,6 +784,8 @@ final class FakeEngine: AgentEngine {
     private let tools: AgentTools
     private let effectsBeforeFailure: Int
     private let fails: Bool
+    /// Reports phase events and calls one read-only tool, like a real engine (Bench test).
+    var phased = false
     private(set) var runs = 0
 
     init(_ id: EngineID, tools: AgentTools, effectsBeforeFailure: Int = 0, fails: Bool) {
@@ -785,6 +803,17 @@ final class FakeEngine: AgentEngine {
 
     func run(_ request: AgentRequest) async throws -> String {
         runs += 1
+        if phased {
+            func pause() async { try? await Task.sleep(for: .milliseconds(40)) }
+            await pause(); onPhase?(.sessionStarted)
+            await pause(); onPhase?(.serverConnected)
+            await pause(); onPhase?(.firstToken)
+            await pause(); _ = await tools.call("menu", ["path": ""])
+            onPhase?(.firstToken) // late duplicate: must not move the phases back
+            await pause(); onPhase?(.turnFinished(turns: 2))
+            await pause()
+            return "fatto con le fasi"
+        }
         for _ in 0..<effectsBeforeFailure { tools.simulateEffect() }
         if fails {
             let until = Date().addingTimeInterval(3600)
@@ -829,6 +858,41 @@ extension DebugCLI {
                 check("N=\(effects): fermata a metà senza ripetere", effects == 1 && midway && codex.runs == 0)
             }
             agent.shutdown()
+        }
+
+        print("Fasi attraverso AgentRunner (Storia 7.1):")
+        do {
+            let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+            try? await agent.start()
+            let claude = FakeEngine(.claude, tools: agent.tools, fails: false)
+            claude.phased = true
+            agent.register(claude)
+            agent.overrideChoice = (.claude, false)
+            _ = try? await agent.run("prova", context: ScreenContext(), deep: false)
+            let p = agent.lastPhases
+            for phase in [BenchPhase.session, .mcp, .firstToken, .finalTurn, .close] {
+                check("fase \(phase.rawValue) > 0", (p[phase] ?? 0) > 0.02)
+            }
+            check("fase azioni presente", (p[.actions] ?? 0) > 0) // a read-only call can take a millisecond
+            check("somma = totale del runner", abs(p.values.reduce(0, +) - agent.lastTotal) < 0.01)
+            check("turni dal Motore", agent.lastTurns == 2)
+            agent.shutdown()
+        }
+
+        print("Conferme e azioni bloccate (Storia 7.1):")
+        do {
+            let tools = AgentTools(executor: Executor())
+            var answer = "no"
+            tools.askUser = { _, _ in answer }
+            _ = await tools.call("confirm", ["action": "elimina la mail"])
+            check("confermata negata: 1 chiesta, 1 bloccata", tools.confirmationsAsked == 1 && tools.blockedCalls == 1)
+            answer = "sì"
+            _ = await tools.call("confirm", ["action": "elimina la mail"])
+            check("confermata approvata: 2 chieste, sempre 1 bloccata", tools.confirmationsAsked == 2 && tools.blockedCalls == 1)
+            tools.reset(keepElements: true)
+            check("ripetizione su un altro Motore: contatori tenuti", tools.confirmationsAsked == 2 && tools.blockedCalls == 1)
+            tools.reset()
+            check("richiesta nuova: contatori a zero", tools.confirmationsAsked == 0 && tools.blockedCalls == 0)
         }
         return failures == 0
     }
@@ -1031,9 +1095,11 @@ extension DebugCLI {
         }
         // «sì» on the Bench pages; «no» on real apps and accounts, where a «sì» would really send.
         let sayYes = Box(true)
+        // On the personal webmail account only times go out: questions may quote the mail.
+        let quiet = Box(false)
         agent.tools.askUser = { q, confirmation in
             let yes = confirmation && sayYes.value
-            print("      ? \(q) → \(confirmation ? (yes ? "sì (banco)" : "no (app vera)") : "nessuna risposta")")
+            print("      ? \(quiet.value ? "(domanda nascosta)" : q) → \(confirmation ? (yes ? "sì (banco)" : "no (app vera)") : "nessuna risposta")")
             return confirmation ? (yes ? "sì" : "no") : nil
         }
         do { try await agent.start() } catch { print("Server strumenti: \(error)"); return }
@@ -1083,17 +1149,27 @@ extension DebugCLI {
             }
             if let why = await BenchFixtures.setUp(kind, checks: task.checks) { skip(why); continue }
             sayYes.value = !kind.isReal
+            if case .webmail = kind { quiet.value = BenchFixtures.webmailPersonal } else { quiet.value = false }
             switch kind {
             case .page(let page), .phrase(let page):
                 await openInSafari(base.appendingPathComponent(page))
             case .webmail(let suffix):
-                if let root = BenchFixtures.webmailURL, let url = URL(string: root + suffix) { await openInSafari(url) }
+                guard let root = BenchFixtures.webmailURL, let url = URL(string: root + suffix) else {
+                    skip("indirizzo della webmail non valido"); continue
+                }
+                await openInSafari(url)
             case .app:
                 break
             }
             let ctx = ScreenContext.capture(includeLabels: false)
-            if case .page = kind, !(ctx.bundleID == "com.apple.Safari" && ctx.windowTitle.hasPrefix("Banco")) {
-                print("✗ \(task.id): pagina non in primo piano (\(ctx.appName) · \(ctx.windowTitle))")
+            // The agent must never start on whatever real app happens to be in front.
+            let pageMissing: Bool
+            switch kind {
+            case .page, .phrase: pageMissing = !(ctx.bundleID == "com.apple.Safari" && ctx.windowTitle.hasPrefix("Banco"))
+            default: pageMissing = ctx.bundleID != BenchFixtures.expectedBundle(kind)
+            }
+            if pageMissing {
+                print("✗ \(task.id): app attesa non in primo piano (\(ctx.appName)\(quiet.value ? "" : " · \(ctx.windowTitle)"))")
                 rows.append(Row(task: task, ok: false, skipped: nil, steps: 0, first: nil, total: 0, model: "", note: "pagina non aperta",
                                 phases: [:], turns: nil, confirmations: 0, blocked: 0))
                 await BenchFixtures.tearDown(kind, checks: task.checks)
@@ -1156,7 +1232,7 @@ extension DebugCLI {
                 let parts = BenchPhase.allCases.compactMap { p in row.phases[p].map { String(format: "%@ %.1f", p.rawValue, $0) } }
                 print("      fasi: \(routerTime > 0 ? String(format: "router %.1f · ", routerTime) : "")\(parts.joined(separator: " · "))\(row.sumOK ? "" : " ⚠︎ somma ≠ totale") · turni \(row.turns.map(String.init) ?? "—") · conferme \(row.confirmations) · bloccate \(row.blocked)")
             }
-            if !ok, case .phrase = kind {} else if !ok { print("      titolo: \(title.prefix(160))") }
+            if !ok, !quiet.value, task.kind.isPhrase == false { print("      titolo: \(title.prefix(160))") }
             await BenchFixtures.tearDown(kind, checks: task.checks)
             await closeBenchPages(ex)
         }

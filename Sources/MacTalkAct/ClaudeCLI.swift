@@ -190,6 +190,8 @@ final class ClaudeCLI: @unchecked Sendable {
             "-p",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
+            // Token-by-token events: the Bench measures the first token, not the first full message.
+            "--include-partial-messages",
             "--verbose",
             "--model", config.model,
             "--effort", config.effort,
@@ -230,6 +232,19 @@ final class ClaudeCLI: @unchecked Sendable {
                        stderr: errBuffer, config: config)
     }
 
+    /// The phase event carried by one stream-json event, if any (pure, tested by `--selftest`).
+    static func phase(of obj: [String: Any]) -> EnginePhase? {
+        switch obj["type"] as? String {
+        case "system":
+            guard obj["subtype"] as? String == "init", let servers = obj["mcp_servers"] as? [[String: Any]],
+                  !servers.isEmpty else { return nil }
+            return .serverConnected
+        case "stream_event", "assistant": return .firstToken
+        case "result": return .turnFinished(turns: obj["num_turns"] as? Int)
+        default: return nil
+        }
+    }
+
     private static func readResult(_ proc: Running, onPhase: PhaseSink? = nil) async throws -> Data {
         var sawToken = false
         for try await line in proc.stdout.bytes.lines {
@@ -238,14 +253,12 @@ final class ClaudeCLI: @unchecked Sendable {
                let servers = obj["mcp_servers"] as? [[String: Any]], !servers.isEmpty {
                 let status = servers.map { "\($0["name"] ?? "?")=\($0["status"] ?? "?")" }.joined(separator: ", ")
                 Log.debug("claude: server MCP \(status)")
-                onPhase?(.serverConnected)
             }
-            if !sawToken, obj["type"] as? String == "assistant" || obj["type"] as? String == "stream_event" {
-                sawToken = true
-                onPhase?(.firstToken)
+            if let phase = phase(of: obj), phase != .firstToken || !sawToken {
+                if phase == .firstToken { sawToken = true }
+                onPhase?(phase)
             }
             guard obj["type"] as? String == "result" else { continue }
-            onPhase?(.turnFinished(turns: obj["num_turns"] as? Int))
 
             if (obj["is_error"] as? Bool) == true || (obj["subtype"] as? String) != "success" {
                 let msg = (obj["result"] as? String) ?? (obj["subtype"] as? String) ?? "errore"

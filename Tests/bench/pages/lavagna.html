@@ -12,7 +12,7 @@ const c = document.getElementById("c"), ctx = c.getContext("2d");
 const forme = [
   { nome: "quadrato blu", x: 30, y: 30, w: 100, h: 100, colore: "#2a62c9" },
   { nome: "cerchio rosso", cx: 210, cy: 80, r: 50, colore: "#d23b3b" },
-  { nome: "triangolo verde", x: 300, y: 130, w: 100, h: 100, colore: "#2f9a4a" },
+  { nome: "triangolo verde", colore: "#2f9a4a" },
 ];
 ctx.fillStyle = forme[0].colore; ctx.fillRect(30, 30, 100, 100);
 ctx.fillStyle = forme[1].colore; ctx.beginPath(); ctx.arc(210, 80, 50, 0, Math.PI * 2); ctx.fill();
