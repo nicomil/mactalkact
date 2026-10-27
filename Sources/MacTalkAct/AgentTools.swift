@@ -76,7 +76,7 @@ final class AgentTools {
 
     static let definitions: [[String: Any]] = [
         tool("observe",
-             "Describe the frontmost window: app, title, focused element, and the visible UI elements with an [id] you can pass to click/type_text/scroll. Clickable elements are marked with *. Large web pages are truncated: pass `query` to search the WHOLE window for elements whose text contains it (e.g. a mail subject or sender). IDs are only valid until the next observe.",
+             "Describe the frontmost window: app, title, focused element, and the visible UI elements with an [id] you can pass to click/type_text/scroll. Clickable elements are marked with *; in browsers, elements of the web page are marked (page). Large web pages are truncated: pass `query` to search the WHOLE window for elements whose text contains it (e.g. a mail subject or sender). IDs are only valid until the next observe.",
              ["query": ["type": "string", "description": "Optional text to search for (case and accent insensitive)."]]),
         tool("screenshot",
              "Take a JPEG screenshot of the frontmost window with an orange numbered tag on every clickable element: click(id) with that number. Use it when observe is not enough (icons without labels, canvas, visual layout, to verify a result). Pixel coordinates can also be passed to click as x/y.",

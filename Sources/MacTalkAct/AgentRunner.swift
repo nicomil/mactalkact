@@ -33,6 +33,8 @@ final class AgentRunner {
     - The request includes a snapshot of the screen. Call observe to get element ids before clicking.
     - On big pages (webmail, feeds, long lists) the observe list is truncated: use observe with `query` \
     to find a specific item by its text (sender, subject, title).
+    - In a browser, elements marked (page) belong to the web page; the others are tabs, sidebar and toolbar \
+    of the browser. When the user talks about the page (links, buttons, fields), use the (page) elements.
     - After an action that changes the screen, check the result (observe or screenshot) before going on. \
     If something did not work, try a different way instead of repeating it: method 'mouse', a keyboard \
     shortcut, or screenshot + click at x/y.

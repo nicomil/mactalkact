@@ -330,9 +330,13 @@ final class Executor {
         for n in 1...max(1, count) {
             let d = CGEvent(mouseEventSource: nil, mouseType: down, mouseCursorPosition: point, mouseButton: button)
             d?.setIntegerValueField(.mouseEventClickState, value: Int64(n))
+            // A plain click: without this, a modifier still down in the system turns a click on
+            // a web link into ⌘-click, which opens the link in a new tab.
+            d?.flags = []
             d?.post(tap: .cghidEventTap)
             let u = CGEvent(mouseEventSource: nil, mouseType: up, mouseCursorPosition: point, mouseButton: button)
             u?.setIntegerValueField(.mouseEventClickState, value: Int64(n))
+            u?.flags = []
             u?.post(tap: .cghidEventTap)
             try? await Task.sleep(for: .milliseconds(40))
         }
@@ -367,6 +371,7 @@ final class Executor {
         for _ in 0..<steps {
             let ev = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
             ev?.location = point
+            ev?.flags = [] // ⌘ still down would zoom instead of scrolling
             ev?.post(tap: .cghidEventTap)
             try? await Task.sleep(for: .milliseconds(12))
         }

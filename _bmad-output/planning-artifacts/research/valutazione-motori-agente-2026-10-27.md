@@ -192,8 +192,13 @@ Stesso Banco, stesso motore locale in modalità piano, modello servito da **Olla
 | Motore | Riusciti | Brevi | Medi | Prima azione (mediana) | Tempo (mediana / 90°) |
 | --- | --- | --- | --- | --- | --- |
 | Claude (Sonnet 5.5 rapido, Opus 5.5 per i medi) | 18/20 (90%) | 13/15 | 5/5 | 4,7 s | 9,4 s / 23,5 s |
-| Codex | vedi sotto | | | | |
+| Codex (gpt-6-luna rapido, gpt-6.1-sol per i medi) | 15/20 (75%), 4 interrotti dal Portachiavi | 12/15 | 3/5 | 5,6 s | 8,7 s / 22,3 s |
 | Locale, modello Apple | 16/20 (80%) | 12/15 | 4/5 | 5,6 s | 6,5 s / 9,5 s |
 | Locale, qwen3.5:9b su Ollama | 18/20 (90%) | 13/15 | 5/5 | 18,9 s | 20,2 s / 47,2 s |
 
 Claude riesce dove il locale rinuncia (modifiche nel notebook, «tutti quelli che hanno già…») e ha mancato i due clic sul menu del sito (ha detto di non aver verificato). Il modello Apple, guidato dal piano, è **più rapido di Claude** sui compiti brevi perché non c'è rete né avvio di processi.
+
+**Codex sul Banco.** Prima prova: 15/20, con due errori sui link del sito che hanno rivelato un difetto comune a tutti i motori cloud (vedi sotto). Seconda prova, dopo la correzione: 15/20, ma quattro compiti (`posta-letta`, `posta-elimina`, `notebook-domanda`, `notebook-punti`) sono stati interrotti da una finestra del Portachiavi comparsa in primo piano durante la prova: l'agente si è fermato invece di agire su un'app diversa, come previsto. Sui 16 compiti senza interruzioni Codex ne riesce 15; nella prima prova gli stessi quattro erano riusciti per metà. L'unico errore proprio è `posta-cerca`: apre la prima mail di Giulia invece di usare la casella di ricerca. Stima realistica: **17/20, come Claude**, con tempi simili (prima azione ~5 s, mediana ~9 s).
+
+**Difetto trovato: clic del mouse con ⌘ rimasto premuto.** Gli eventi del mouse creati senza sorgente ereditano i modificatori del sistema: con ⌘ ancora segnato come premuto, il clic su un link diventava ⌘-clic e apriva la pagina in una nuova scheda. Era la causa dei due errori di Claude su `sito-prezzi` e `sito-contatti` (§7) e degli stessi errori di Codex. Ora clic e scorrimento azzerano i modificatori; la regola «gli elementi (page) sono quelli della pagina» è stata aggiunta al prompt dei motori cloud. Con la correzione Codex riesce entrambi i compiti del sito.
+

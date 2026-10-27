@@ -33,6 +33,8 @@ epics: [epic-4, epic-5]
 - `observe` mostra lo stato delle caselle (`(checked)`/`(unchecked)`) e segna gli elementi della pagina web (`(page)`).
 - `observe` con `query` trova anche elementi fuori schermo; il clic col mouse li porta prima in vista.
 - `type_text` con un id verifica che il campo mostri il testo scritto.
+- Clic e scorrimento col mouse azzerano i modificatori: un ⌘ rimasto premuto nel sistema trasformava il clic su un link in apertura di una nuova scheda (errori di Claude e Codex su `sito-*`).
+- Prompt dei motori cloud: in un browser si usano gli elementi `(page)` per ciò che riguarda la pagina.
 
 ## Verifica
 
@@ -42,7 +44,8 @@ epics: [epic-4, epic-5]
 | `--fallback-test` | ok: con zero azioni la richiesta passa a Codex, con un'azione si ferma senza ripetere |
 | `--route-test` | 116/116, 0 scritture indebite |
 | Codex reale | limite d'uso reale ricevuto e letto correttamente («try again at 5:07 AM» → pausa fino alle 05:07) |
-| Banco | Claude 18/20, modello Apple 16/20, qwen3.5:9b 18/20 (tabella nella ricerca, §7) |
+| Codex dopo la pausa | ripreso da solo alle 05:10; risposta reale in 4,1 s (gpt-6-luna) |
+| Banco | Claude 18/20, Codex 15/20 (4 compiti interrotti dal Portachiavi, stima 17/20), modello Apple 16/20, qwen3.5:9b 18/20 (tabella nella ricerca, §7) |
 
 ## Scostamenti
 
