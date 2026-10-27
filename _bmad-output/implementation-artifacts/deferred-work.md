@@ -19,3 +19,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-8-1-frasi-spurie.md`
   summary: Test del Coordinator per `.askIntent` (HUD, niente finestra, niente riavvio della sessione) e conteggio delle parole con apostrofo nella regola delle tre parole.
   evidence: review della Storia 8.1 (rinvii).
+- source_spec: `_bmad-output/implementation-artifacts/spec-8-3-lettura-locale-del-testo.md`
+  summary: Valutare `read_text` per il Motore locale (modalità piano) e un controllo automatico delle posizioni di `read_text` contro quelle di `observe`.
+  evidence: review della Storia 8.3 (rinvii).

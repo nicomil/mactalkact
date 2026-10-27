@@ -99,6 +99,23 @@ if arguments.contains("--fallback-test") {
     dispatchMain()
 }
 
+if arguments.contains("--ocr-debug") {
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        let t = Date()
+        TextReader.shared.warmUp()
+        while !TextReader.shared.isWarm, Date().timeIntervalSince(t) < 90 { try? await Task.sleep(for: .milliseconds(200)) }
+        print(String(format: "riscaldamento: %@ in %.1f s", TextReader.shared.isWarm ? "finito" : "NON finito", Date().timeIntervalSince(t)))
+        if let shot = try? await ScreenCapture.frontWindow(maxSide: 1400, scaleFactor: 2) {
+            let r0 = Date()
+            let lines = await TextReader.shared.read(shot.image)
+            print(String(format: "lettura: %d righe in %.2f s", lines?.count ?? -1, Date().timeIntervalSince(r0)))
+        }
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--local-vision-test") {
     MainActor.assumeIsolated { _ = NSApplication.shared }
     Task { @MainActor in

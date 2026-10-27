@@ -570,7 +570,7 @@ Nuovo strumento `read_text(region)`: legge il testo della finestra, o di una reg
 | --- | --- |
 | `etichetta-ordine` con Claude | riuscito, `read_text` in 0,36 s, **nessuno screenshot** |
 | Prima lettura a caldo (`--hands-test`) | 0,40 s; legge «4821-B» |
-| Vision accurata, prima volta in assoluto sul Mac | 57 s (il sistema compila il modello una volta sola); dopo 0,2 s; veloce 0,09 s |
+| Vision accurata, prima volta per un binario appena compilato | circa 55 s (Vision compila il modello per quell'eseguibile; nell'app installata succede una volta, all'avvio, in background); dopo 0,2–0,35 s; veloce 0,09 s |
 
 Il riscaldamento parte in background all'avvio dell'app. Una lettura chiesta prima che finisca usa la modalità veloce. La corsa al tempo massimo non aspetta Vision, che blocca il suo thread e non si ferma se viene cancellato. L'immagine passa a Vision ridotta a 2.000 px sul lato lungo.
 

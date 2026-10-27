@@ -7,7 +7,7 @@
 # Stati: backlog · ready-for-dev · in-progress · review · done
 
 generated: 10-26-2026 23:10
-last_updated: 10-27-2026 22:42
+last_updated: 10-27-2026 23:11
 project: mactalkact
 project_key: NOKEY
 tracking_system: file-system
@@ -78,7 +78,7 @@ development_status:
   epic-8: in-progress
   8-1-le-frasi-spurie-non-arrivano-all-agente: review
   8-2-evidenza-prima-del-fatto: review
-  8-3-lettura-locale-del-testo-nelle-immagini: in-progress
+  8-3-lettura-locale-del-testo-nelle-immagini: review
   8-4-spike-le-azioni-dirette-via-apple-events-reggono-su-macos-27: backlog
   epic-8-retrospective: optional
 

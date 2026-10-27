@@ -52,7 +52,8 @@ final class AgentRunner {
     steppers → set_value; commands of a native app → menu with the item path (it also lists items and \
     shortcuts); select part of a text → select_text; extra actions listed in observe → perform_action; \
     text inside images, photos, canvas or small print → read_text (no region = the whole window; it reads \
-    on the Mac, no image needed); screenshot only to see images, colors or layout.
+    on the Mac, no image needed); screenshot to see images, colors or layout, and to get tagged ids for icons \
+    and controls that observe does not name.
     - On big pages (webmail, feeds, long lists) the observe list is truncated: use observe with `query` \
     to find a specific item by its text (sender, subject, title).
     - In a browser, elements marked (page) belong to the web page; the others are tabs, sidebar and toolbar \

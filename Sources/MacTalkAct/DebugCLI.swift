@@ -155,6 +155,14 @@ enum DebugCLI {
             check("frase italiana lunga: valida", RouteHeuristics.spuriousReason("rispondi a Marco che arrivo alle nove", knownTarget: none) == nil)
             check("«metti in pausa la musica»: valida", RouteHeuristics.spuriousReason("metti in pausa la musica", knownTarget: none) == nil)
         }
+        print("Ordine delle righe lette (Storia 8.3):")
+        do {
+            func l(_ t: String, _ x: CGFloat, _ y: CGFloat, _ h: CGFloat = 20) -> TextReader.Line {
+                TextReader.Line(text: t, box: CGRect(x: x, y: y, width: 50, height: h), confidence: 1)
+            }
+            let order = TextReader.ordered([l("C", 0, 100), l("B", 200, 4), l("A", 0, 0), l("D", 200, 103), l("E", 100, 1, 30)]).map(\.text)
+            check("righe: dall'alto in basso, da sinistra a destra", order == ["A", "E", "B", "C", "D"])
+        }
         print("Soglie NFR-12 (Storia 7.5):")
         do {
             check("mediana pari = media dei due centrali", median([1, 2, 3, 4]) == 2.5 && median([3, 1, 2]) == 2 && median([]) == nil)
@@ -1251,6 +1259,7 @@ extension DebugCLI {
     /// `--local-vision-test` (Story 8.3): Apple's model on the Mac receives the screenshot of 5 Bench
     /// pages and answers three questions: describe, read, locate. Research only, no requirement.
     static func localVisionTest() async {
+        guard SystemLanguageModel.default.availability == .available else { print("Modello Apple non disponibile (Apple Intelligence spenta?)"); return }
         guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else { print("Safari assente"); return }
         let ex = Executor()
         let base = URL(fileURLWithPath: "Tests/bench/pages")
@@ -1472,15 +1481,46 @@ extension DebugCLI {
         print("Lettura del testo sul Mac (Storia 8.3):")
         await open("etichetta.html")
         TextReader.shared.warmUp()
-        try? await Task.sleep(for: .seconds(3))
+        // A freshly built binary pays the model compilation once (about a minute): wait for it.
+        for _ in 0..<900 where !TextReader.shared.isWarm { try? await Task.sleep(for: .milliseconds(100)) }
+        check("riscaldamento finito", TextReader.shared.isWarm)
         let t0 = Date()
         let read = text(await tools.call("read_text", [:]))
         let readTime = Date().timeIntervalSince(t0)
-        check("read_text: legge il numero d'ordine dell'etichetta", read.contains("4821-B"), read.split(separator: "\n").prefix(4).joined(separator: " | "))
-        print(String(format: "  prima lettura a caldo: %.2f s", readTime))
-        _ = await tools.call("screenshot", [:])
-        let zoomed = await tools.call("screenshot", ["region": [0, 0, 700, 400]])
-        check("zoom: contiene il testo letto", zoomed.text.contains("4821"), zoomed.text.prefix(160).description)
+        check("read_text: legge il numero d'ordine dell'etichetta", read.contains("4821-B"), read.split(separator: "\n").prefix(3).joined(separator: " | "))
+        check(String(format: "prima lettura a caldo ≤ 1 s (%.2f s)", readTime), readTime <= 1)
+        let shotResult = await tools.call("screenshot", [:])
+        // The label line in screenshot coordinates: window points × image size / window size.
+        let note = shotResult.text
+        let size = note.range(of: #"Screenshot (\d+)x(\d+)"#, options: .regularExpression).map { String(note[$0]) } ?? ""
+        let dims = size.split(whereSeparator: { !$0.isNumber }).compactMap { Double($0) }
+        let line = read.split(separator: "\n").first { $0.contains("4821-B") }.map(String.init) ?? ""
+        let at = line.range(of: #"@(\d+),(\d+) (\d+)x(\d+)"#, options: .regularExpression).map { String(line[$0]) } ?? ""
+        let nums = at.split(whereSeparator: { !$0.isNumber }).compactMap { Double($0) }
+        let window = ScreenContext.capture(includeLabels: false).windowFrame ?? .zero
+        if dims.count == 2, nums.count == 4, window.width > 0 {
+            let fx = dims[0] / window.width, fy = dims[1] / window.height
+            let region = [(nums[0] - 20) * fx, (nums[1] - 10) * fy, (nums[0] + nums[2] + 20) * fx, (nums[1] + nums[3] + 10) * fy]
+            let inside = text(await tools.call("read_text", ["region": region]))
+            check("read_text con regione sull'etichetta: legge il numero", inside.contains("4821-B"), inside.prefix(120).description)
+            let away = text(await tools.call("read_text", ["region": [0, dims[1] - 60, 200, dims[1] - 1]]))
+            check("read_text con regione lontana: niente numero", !away.contains("4821"))
+            let zoomText = await tools.call("screenshot", ["region": region])
+            check("zoom sul testo: solo testo, l'immagine resta sul Mac", zoomText.text.contains("4821") && !zoomText.content.contains { ($0["type"] as? String) == "image" })
+            let zoomImage = await tools.call("screenshot", ["region": region, "image": true])
+            check("zoom con image: true: immagine", zoomImage.content.contains { ($0["type"] as? String) == "image" })
+        } else {
+            check("posizione del numero e dimensioni dello screenshot", false, "\(line) · \(size)")
+        }
+        let bad = await tools.call("read_text", ["region": [1, 2]])
+        check("regione malformata: errore", bad.isError)
+        // A cold reader with a tiny limit answers «not readable» at once, without waiting for Vision.
+        if let shot = try? await ScreenCapture.frontWindow(maxSide: 1400, scaleFactor: 1) {
+            let cold = TextReader()
+            let c0 = Date()
+            let none = await cold.read(shot.image, limit: 0.01)
+            check("tempo massimo: risposta subito, senza testo", none == nil && Date().timeIntervalSince(c0) < 0.5)
+        }
 
         print("Zoom:")
         await open("etichetta.html")
@@ -1722,8 +1762,9 @@ extension DebugCLI {
                           turns: ranAgent ? agent.lastTurns : nil, confirmations: ranAgent ? agent.tools.confirmationsAsked : 0,
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
             row.router = routerTime
-            row.readText = agent.tools.readTextSeconds.first
-            row.screenshot = agent.tools.callLog.contains { $0.hasPrefix("- screenshot") }
+            row.readText = ranAgent ? agent.tools.readTextSeconds.first : nil
+            // A full screenshot (the image goes to the engine); a zoom with region is not counted.
+            row.screenshot = ranAgent && agent.tools.callLog.contains { $0.hasPrefix("- screenshot") && !$0.contains("region") }
             if let rt = row.readText { print(String(format: "      read_text: %.2f s%@", rt, row.screenshot ? " · anche screenshot" : " · senza screenshot")) }
             if ranAgent, !ok, !kind.isPhrase, claimed {
                 row.falseDone = true
