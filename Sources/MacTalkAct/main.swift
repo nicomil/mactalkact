@@ -96,6 +96,16 @@ if arguments.contains("--fallback-test") {
     dispatchMain()
 }
 
+if arguments.contains("--session-test") {
+    // Claude's Long session for real: two messages on one process, the second reads the cache.
+    Task { @MainActor in
+        let ok = await DebugCLI.sessionTest()
+        print(ok ? "Tutto ok." : "Prova fallita.")
+        exit(ok ? 0 : 1)
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--route-test") {
     let path = argument(after: "--route-test").flatMap { $0.hasPrefix("-") ? nil : $0 } ?? "Tests/corpus/instradamento.tsv"
     let rules = arguments.contains("--rules")

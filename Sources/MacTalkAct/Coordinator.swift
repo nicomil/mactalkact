@@ -567,6 +567,7 @@ final class Coordinator {
         case .forgetConversation:
             reopen = false
             conversation.log.clear()
+            agent.endSessions(reason: "conversazione dimenticata")
             conversation.closeWindow()
             done("Conversazione dimenticata")
         case .privateMode(let on):
@@ -879,7 +880,8 @@ final class Coordinator {
         defer { escape.stop() }
         do {
             try await agent.start()
-            let answer = try await agent.run(text, context: context, recent: conversation.log.promptBlock, deep: deep)
+            let answer = try await agent.run(text, context: context, recent: conversation.log.promptBlock, deep: deep,
+                                             memory: conversation.log)
             conversation.log.add(request: text, outcome: answer.isEmpty ? "fatto" : answer, app: context.appName,
                                  changes: agent.tools.changes)
             if cancelRequested {
@@ -979,6 +981,7 @@ final class Coordinator {
         let was = settings.privateModeActive
         settings.setPrivateMode(on)
         conversation.log.clear()
+        agent.endSessions(reason: on ? "modalità privata" : "fine della modalità privata")
         privateModeEnd?.cancel()
         privateModeEnd = nil
         onPrivateModeChange?(on)

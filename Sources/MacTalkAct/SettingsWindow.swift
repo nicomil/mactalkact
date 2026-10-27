@@ -10,6 +10,8 @@ struct SettingsContext {
     var recheckEngines: () -> Void = {}
     /// Last error of every engine, if any.
     var engineErrors: () -> [EngineID: String] = { [:] }
+    /// Version status of the CLI engines (FR-45).
+    var engineCLIStatus: () -> [EngineID: CLIStatus] = { [:] }
     /// «Prova» of the local engine: outcome and time to the first tool (FR-31).
     var testLocalEngine: () async -> String = { "—" }
     var routerDescription: () -> String = { "—" }
@@ -437,6 +439,13 @@ private struct AgentSection: View {
                 Picker("Effort delle richieste semplici", selection: $settings.fastEffort) { ForEach(efforts, id: \.0) { Text($0.1).tag($0.0) } }
                     .pickerStyle(.segmented)
             }
+            if settings.backend == .subscription {
+                Toggle("Sessione lunga: Claude resta pronto tra una richiesta e l'altra", isOn: $settings.longSession)
+                Stepper("Riavvio dopo \(settings.sessionMaxRequests) richieste", value: $settings.sessionMaxRequests, in: 1...50)
+                    .disabled(!settings.longSession)
+                Text("Un solo processo per livello, riusato per 10 minuti: niente avvio e prompt già in cache. Si riavvia da solo dopo le richieste indicate, dopo 10 minuti di inattività, al cambio di modello o effort, con «dimentica la conversazione» e con la modalità privata. Spento: un processo nuovo per ogni richiesta, come prima. Serve «claude» 2.1.299 o successivo.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .onAppear { claudeFound = settings.claudeExecutable; codexFound = settings.codexExecutable }
         .onChange(of: settings.claudePath) { _, _ in claudeFound = settings.claudeExecutable }
@@ -773,8 +782,9 @@ private struct StatusSection: View {
                 ForEach(EngineID.allCases) { id in
                     let a = context.engineStates()[id] ?? .missing
                     let err = context.engineErrors()[id].map { " · ultimo errore: \($0)" } ?? ""
+                    let cli = context.engineCLIStatus()[id].map { " · \($0)" } ?? ""
                     StatusRow(title: "Motore \(id.title)",
-                              value: (a == .available ? "Disponibile" : EngineSelector.state(a).capitalizedFirst) + err,
+                              value: (a == .available ? "Disponibile" : EngineSelector.state(a).capitalizedFirst) + cli + err,
                               ok: a == .available)
                 }
                 HStack {

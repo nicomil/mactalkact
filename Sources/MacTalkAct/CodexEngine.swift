@@ -13,6 +13,8 @@ final class CodexEngine: AgentEngine {
     private(set) var availability: AgentAvailability = .missing
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
     var onPhase: PhaseSink?
+    /// What the app knows about the `codex` version (FR-45): shown in Stato e diagnostica only.
+    private(set) var cliStatus: CLIStatus = .unverified(nil)
 
     init(settings: AppSettings, toolAccess: @escaping () -> AgentToolAccess?) {
         self.settings = settings
@@ -36,6 +38,12 @@ final class CodexEngine: AgentEngine {
             return
         }
         Task.detached(priority: .utility) {
+            let status = CodexCLI.status(executable: path)
+            await MainActor.run { [weak self] in
+                guard let self, self.cliStatus != status else { return }
+                self.cliStatus = status
+                Log.info("Motore Codex: \(status)")
+            }
             let logged = CodexCLI.isLoggedIn(executable: path)
             await MainActor.run { [weak self] in
                 guard let self else { return }

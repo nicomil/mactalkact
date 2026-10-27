@@ -111,7 +111,11 @@ final class AgentRunner {
     init(executor: Executor, settings: AppSettings) {
         self.tools = AgentTools(executor: executor)
         self.settings = settings
-        register(ClaudeEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess }))
+        let claude = ClaudeEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess })
+        claude.onNotice = { [weak self] text in
+            self?.onEngineSwitch?(EngineSwitch(from: .claude, to: .claude, message: text))
+        }
+        register(claude)
         register(CodexEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess }))
         let local = LocalEngine(settings: settings, toolAccess: { [weak self] in self?.toolAccess })
         local.onNotice = { [weak self] text in
@@ -264,7 +268,9 @@ final class AgentRunner {
 
     /// Runs one request to completion and returns the agent's final sentence.
     /// Only one request at a time (AD-6).
-    func run(_ request: String, context: ScreenContext, recent: String = "", deep: Bool = true) async throws -> String {
+    /// `memory`: the conversation memory, so a Long session receives only what it has not seen (FR-42).
+    func run(_ request: String, context: ScreenContext, recent: String = "", deep: Bool = true,
+             memory: ConversationLog? = nil) async throws -> String {
         // A request refused below must not leave the previous request's phases for the Bench.
         lastPhases = [:]
         lastTotal = 0
@@ -298,9 +304,18 @@ final class AgentRunner {
         }
         // The elements with their ids go with the request (cloud engines): one observe less per task.
         let elements = first?.engine == .local || first == nil ? "" : tools.initialObservation()
-        let req = AgentRequest(message: message(request, context: context, recent: recent, elements: elements),
+        var req = AgentRequest(message: message(request, context: context, recent: recent, elements: elements),
                                localMessage: localMessage(request, context: context, recent: recent),
                                userRequest: request, level: level)
+        req.clock = TurnClock(seconds: settings.agentTimeout)
+        if let memory {
+            req.memory = memory.snapshot
+            req.messageSince = { [unowned self] seq in
+                self.message(request, context: context, recent: memory.promptBlock(after: seq), elements: elements)
+            }
+        } else {
+            req.messageSince = { [unowned self] _ in self.message(request, context: context, recent: recent, elements: elements) }
+        }
         var tried: Set<EngineID> = []
 
         while true {
@@ -383,6 +398,19 @@ final class AgentRunner {
     func cancel() {
         tools.cancelled = true
         for e in engines.values { e.cancel() }
+    }
+
+    /// The version status of the CLI engines, for Stato e diagnostica (FR-45).
+    var cliStatuses: [EngineID: CLIStatus] {
+        var out: [EngineID: CLIStatus] = [:]
+        if let c = engines[.claude] as? ClaudeEngine { out[.claude] = c.cliStatus }
+        if let c = engines[.codex] as? CodexEngine { out[.codex] = c.cliStatus }
+        return out
+    }
+
+    /// Ends Claude's Long sessions now (private mode: no context kept on the cloud side).
+    func endSessions(reason: String) {
+        (engines[.claude] as? ClaudeEngine)?.endSessions(reason: reason)
     }
 
     func shutdown() {

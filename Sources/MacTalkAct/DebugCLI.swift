@@ -47,6 +47,34 @@ enum DebugCLI {
             let (ep, et) = e.finish() // error before the first token: no final turn, the sum still holds
             check("errore a metà: somma = totale", abs(ep.values.reduce(0, +) - et) < 0.001 && ep[.finalTurn] == nil)
         }
+        print("Sessione lunga e versioni delle CLI (Storia 7.2):")
+        do {
+            check("claude 2.1.311 verificata", CLIStatus.from(versionOutput: "2.1.311 (Claude Code)", minimum: "2.1.299") == .verified("2.1.311"))
+            check("claude 2.1.250 sotto la minima", CLIStatus.from(versionOutput: "2.1.250 (Claude Code)", minimum: "2.1.299") == .belowMinimum("2.1.250"))
+            check("versione illeggibile: non verificata", CLIStatus.from(versionOutput: "boh", minimum: "2.1.299") == .unverified(nil))
+            check("codex 0.131.0 verificata", CLIStatus.from(versionOutput: "codex-cli 0.131.0", minimum: "0.131.0").isVerified)
+            check("codex alpha successiva: intervallo", CLIStatus.from(versionOutput: "codex-cli 0.133.0-alpha.2", minimum: "0.131.0").isVerified)
+            check("codex 0.130.9 sotto la minima", CLIStatus.from(versionOutput: "codex-cli 0.130.9", minimum: "0.131.0") == .belowMinimum("0.130.9"))
+            func reason(_ r: Int, _ idle: TimeInterval, config: Bool = false, memory: Bool = false) -> String? {
+                SessionPolicy.restartReason(requests: r, maxRequests: 8, idle: idle, configChanged: config, memoryChanged: memory)
+            }
+            check("sessione riusata", reason(3, 60) == nil)
+            check("8 richieste → riavvio", reason(8, 60) == "8 richieste")
+            check("10 minuti di inattività → riavvio", reason(1, 601) == "inattiva da 10 minuti")
+            check("modello o effort cambiati → riavvio", reason(1, 1, config: true) == "modello o effort cambiati")
+            check("memoria azzerata → riavvio", reason(1, 1, memory: true) == "memoria azzerata")
+            let log = ConversationLog()
+            let g0 = log.generation
+            log.add(request: "apri la mail", outcome: "fatto", app: "Mail")
+            let first = log.snapshot.lastSeq
+            log.add(request: "rispondi", outcome: "scritta", app: "Mail")
+            let delta = log.promptBlock(after: first)
+            check("memoria delta: solo la voce nuova", delta.contains("rispondi") && !delta.contains("apri la mail"))
+            check("memoria completa: tutte e due", log.promptBlock.contains("apri la mail") && log.promptBlock.contains("rispondi"))
+            check("niente di nuovo: blocco vuoto", log.promptBlock(after: log.snapshot.lastSeq).isEmpty)
+            log.clear()
+            check("dimentica: generazione nuova", log.generation == g0 + 1 && log.entries.isEmpty)
+        }
         print("Eventi dei Motori per le fasi:")
         do {
             check("Claude: init con server → MCP connesso", ClaudeCLI.phase(of: ["type": "system", "subtype": "init", "mcp_servers": [["name": "mactalk", "status": "connected"]]]) == .serverConnected)
@@ -894,6 +922,56 @@ extension DebugCLI {
             tools.reset()
             check("richiesta nuova: contatori a zero", tools.confirmationsAsked == 0 && tools.blockedCalls == 0)
         }
+        return failures == 0
+    }
+}
+
+extension DebugCLI {
+    /// `--session-test`: two real messages on Claude's Long session (FR-42). It uses the subscription
+    /// for two tiny answers, no tools and nothing on screen.
+    static func sessionTest() async -> Bool {
+        var failures = 0
+        func check(_ name: String, _ ok: Bool, _ detail: String = "") {
+            print(ok ? "  ok   \(name)" : "  FAIL \(name)\(detail.isEmpty ? "" : " — \(detail)")")
+            if !ok { failures += 1 }
+        }
+        let cli = ClaudeCLI()
+        let custom = AppSettings.shared.claudePath
+        cli.executablePath = { ClaudeCLI.locate(custom: custom) }
+        let status = cli.status()
+        print("  claude: \(status)")
+        check("versione verificata", status.isVerified)
+        // A system prompt above the cache minimum, like the agent's.
+        let prompt = "Rispondi con una parola sola, in italiano.\n" + String(repeating: "Regola di prova del Banco di MacTalkAct, da ignorare. ", count: 120)
+        let config = ClaudeCLI.Config(model: AppSettings.shared.fastModel, systemPrompt: prompt, effort: "low")
+        let phases = Box<[EnginePhase]>([])
+        let sink: PhaseSink = { p in DispatchQueue.main.async { phases.value.append(p) } }
+        var restarts: [String] = []
+        var memory = MemorySnapshot(generation: 0, lastSeq: 0)
+        func ask(_ text: String) async -> String? {
+            do {
+                let data = try await cli.runInSession(config, memory: memory, maxRequests: 8, timeout: 60,
+                                                      message: { seq in seq == nil ? text : "(seguito) " + text },
+                                                      onPhase: sink, onRestart: { restarts.append($0) })
+                return String(data: data, encoding: .utf8)
+            } catch { print("  errore: \(error.localizedDescription)"); return nil }
+        }
+        let a = await ask("Di che colore è il cielo?")
+        try? await Task.sleep(for: .milliseconds(100))
+        check("prima risposta", a != nil, a ?? "")
+        check("prima richiesta: sessione avviata", phases.value.contains(.sessionStarted))
+        phases.value = []
+        let b = await ask("E l'erba?")
+        try? await Task.sleep(for: .milliseconds(100))
+        check("seconda risposta", b != nil, b ?? "")
+        check("seconda richiesta: sessione riusata", phases.value.contains(.sessionReused) && !phases.value.contains(.sessionStarted))
+        check("cache letta > 0", cli.lastCacheRead > 0, "\(cli.lastCacheRead)")
+        memory = MemorySnapshot(generation: 1, lastSeq: 0)
+        phases.value = []
+        _ = await ask("E il mare?")
+        try? await Task.sleep(for: .milliseconds(100))
+        check("memoria azzerata: riavvio con motivo", restarts == ["memoria azzerata"] && phases.value.contains(.sessionStarted), "\(restarts)")
+        cli.shutdown()
         return failures == 0
     }
 }

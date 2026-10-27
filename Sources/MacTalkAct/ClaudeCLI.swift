@@ -5,6 +5,8 @@ enum ClaudeCLIError: LocalizedError {
     case timeout
     case failed(String)
     case noOutput(String)
+    /// A Long session ended in the middle of a message (the process exited).
+    case sessionDied(String)
 
     var errorDescription: String? {
         switch self {
@@ -12,6 +14,7 @@ enum ClaudeCLIError: LocalizedError {
         case .timeout: return "Claude non ha risposto in tempo"
         case .failed(let m): return "Claude: \(m)"
         case .noOutput(let m): return "Nessuna risposta da Claude \(m)"
+        case .sessionDied(let m): return "La sessione di Claude si è chiusa \(m)"
         }
     }
 }
@@ -158,8 +161,153 @@ final class ClaudeCLI: @unchecked Sendable {
         spare?.terminate()
         current?.terminate()
         spare = nil
+        session?.process.terminate()
+        session = nil
         lock.unlock()
     }
+
+    // MARK: Long session (FR-42, AD-6)
+
+    /// One `claude` process kept open between requests: stdin stays open, every message gets
+    /// its own `result`, the prompt cache stays warm. Started at the first request, never in advance.
+    private final class Session {
+        let process: Running
+        var lines: AsyncLineSequence<FileHandle.AsyncBytes>.AsyncIterator
+        let generation: Int
+        var cursor: Int
+        var requests = 0
+        var lastUsed = Date()
+
+        init(process: Running, generation: Int) {
+            self.process = process
+            self.lines = process.stdout.bytes.lines.makeAsyncIterator()
+            self.generation = generation
+            self.cursor = 0
+        }
+    }
+
+    private var session: Session?
+    /// Prompt tokens read from the cache in the last Long-session turn (log and `--session-test`).
+    private(set) var lastCacheRead = 0
+
+    /// Closes the Long session (shutdown, private mode, settings changed).
+    func endSession(reason: String) {
+        let s = lock.withLock { () -> Session? in defer { session = nil }; return session }
+        guard let s else { return }
+        s.process.terminate()
+        Log.info("claude: sessione chiusa, \(reason)")
+    }
+
+    /// Sends one message on the Long session, starting it again first when a rule says so.
+    /// `message(nil)` is the full message, `message(seq)` the one with only the memory after `seq`.
+    /// `onRestart` is called with the reason when a live session is replaced.
+    func runInSession(_ config: Config, memory: MemorySnapshot, maxRequests: Int, timeout: TimeInterval,
+                      message: (Int?) -> String, onPhase: PhaseSink?, onRestart: (String) -> Void) async throws -> Data {
+        // Never a warm spare next to a Long session: one process per level.
+        lock.withLock { spare?.terminate(); spare = nil }
+        var live = lock.withLock { session }
+        if let s = live {
+            let reason = !s.process.process.isRunning ? "processo chiuso"
+                : SessionPolicy.restartReason(requests: s.requests, maxRequests: maxRequests,
+                                              idle: Date().timeIntervalSince(s.lastUsed),
+                                              configChanged: s.process.config != config,
+                                              memoryChanged: s.generation != memory.generation)
+            if let reason {
+                endSession(reason: reason)
+                onRestart(reason)
+                live = nil
+            }
+        }
+        let s: Session
+        let text: String
+        if let live {
+            s = live
+            text = message(live.cursor)
+            onPhase?(.sessionReused)
+        } else {
+            s = Session(process: try spawn(config), generation: memory.generation)
+            lock.withLock { session = s }
+            text = message(nil)
+            onPhase?(.sessionStarted)
+        }
+        lock.withLock { current = s.process }
+        defer { lock.withLock { current = nil } }
+
+        let line: [String: Any] = ["type": "user", "message": ["role": "user", "content": text]]
+        var data = try JSONSerialization.data(withJSONObject: line)
+        data.append(0x0A)
+        do { try s.process.stdin.write(contentsOf: data) } catch {
+            endSession(reason: "scrittura non riuscita")
+            throw ClaudeCLIError.sessionDied("(scrittura non riuscita)")
+        }
+
+        let stderr = s.process.stderr
+        do {
+            let result = try await withThrowingTaskGroup(of: Data.self) { group in
+                group.addTask {
+                    try await Self.readResult(next: { try await s.lines.next() }, stderr: stderr, onPhase: onPhase,
+                                              onCache: { [weak self] n in self?.lock.withLock { self?.lastCacheRead = n } })
+                }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(timeout))
+                    throw ClaudeCLIError.timeout
+                }
+                defer { group.cancelAll() }
+                guard let result = try await group.next() else { throw ClaudeCLIError.timeout }
+                return result
+            }
+            s.requests += 1
+            s.lastUsed = Date()
+            // The entry of this request is added right after it: the session has seen it.
+            s.cursor = memory.lastSeq + 1
+            return result
+        } catch ClaudeCLIError.timeout {
+            endSession(reason: "turno scaduto")
+            throw ClaudeCLIError.timeout
+        } catch ClaudeCLIError.noOutput(let m) {
+            // The stream ended without a result: the process is gone.
+            endSession(reason: "processo uscito")
+            throw ClaudeCLIError.sessionDied(m)
+        } catch {
+            // An error result (limit, login) leaves the process usable, but a fresh one is safer.
+            endSession(reason: "errore: \(error.localizedDescription.prefix(60))")
+            throw error
+        }
+    }
+
+    // MARK: Version (FR-45, AD-14)
+
+    /// `claude --version`, read once per executable path; minimum for the Long session.
+    static let minimumForSession = "2.1.299"
+
+    func status() -> CLIStatus {
+        guard let path = executablePath() else { return .unverified(nil) }
+        if let cached = lock.withLock({ statusCache }), cached.path == path { return cached.status }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = ["--version"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        var status = CLIStatus.unverified(nil)
+        if (try? p.run()) != nil {
+            p.waitUntilExit()
+            status = CLIStatus.from(versionOutput: String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8),
+                                    minimum: Self.minimumForSession)
+        }
+        lock.withLock { statusCache = (path, status) }
+        return status
+    }
+
+    /// A start without the subscription login: the version stays, the status becomes unverified.
+    func markUnverified() {
+        lock.withLock {
+            guard let c = statusCache else { return }
+            if case .verified(let v) = c.status { statusCache = (c.path, .unverified(v)) }
+        }
+    }
+
+    private var statusCache: (path: String, status: CLIStatus)?
 
     // MARK: Internals
 
@@ -212,7 +360,7 @@ final class ClaudeCLI: @unchecked Sendable {
         let home = NSHomeDirectory()
         env["PATH"] = "\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         // Use the subscription login, and don't look like a nested Claude Code session.
-        for key in ["ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] { env.removeValue(forKey: key) }
+        for key in ["ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SIMPLE"] { env.removeValue(forKey: key) }
         p.environment = env
 
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
@@ -246,8 +394,16 @@ final class ClaudeCLI: @unchecked Sendable {
     }
 
     private static func readResult(_ proc: Running, onPhase: PhaseSink? = nil) async throws -> Data {
+        var lines = proc.stdout.bytes.lines.makeAsyncIterator()
+        return try await readResult(next: { try await lines.next() }, stderr: proc.stderr, onPhase: onPhase)
+    }
+
+    /// Reads events until the `result` of one message. A Long session calls it once per message
+    /// on the same line iterator, so no buffered line is lost between two requests.
+    private static func readResult(next: () async throws -> String?, stderr: Box<Data>, onPhase: PhaseSink?,
+                                   onCache: ((Int) -> Void)? = nil) async throws -> Data {
         var sawToken = false
-        for try await line in proc.stdout.bytes.lines {
+        while let line = try await next() {
             guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
             if obj["type"] as? String == "system", obj["subtype"] as? String == "init",
                let servers = obj["mcp_servers"] as? [[String: Any]], !servers.isEmpty {
@@ -259,6 +415,10 @@ final class ClaudeCLI: @unchecked Sendable {
                 onPhase?(phase)
             }
             guard obj["type"] as? String == "result" else { continue }
+            if let usage = obj["usage"] as? [String: Any] {
+                onCache?(usage["cache_read_input_tokens"] as? Int ?? 0)
+                Log.info("claude: cache letta \(usage["cache_read_input_tokens"] as? Int ?? 0), scritta \(usage["cache_creation_input_tokens"] as? Int ?? 0), nuovi \(usage["input_tokens"] as? Int ?? 0)")
+            }
 
             if (obj["is_error"] as? Bool) == true || (obj["subtype"] as? String) != "success" {
                 let msg = (obj["result"] as? String) ?? (obj["subtype"] as? String) ?? "errore"
@@ -272,7 +432,7 @@ final class ClaudeCLI: @unchecked Sendable {
             }
             throw ClaudeCLIError.noOutput("")
         }
-        let err = String(data: proc.stderr.value, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let err = String(data: stderr.value, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         throw ClaudeCLIError.noOutput(err.isEmpty ? "" : "(\(err.prefix(300)))")
     }
 }

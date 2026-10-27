@@ -32,6 +32,8 @@ final class ConversationState {
 @MainActor
 final class ConversationLog {
     struct Entry {
+        /// Progressive number: a Long session receives only the entries after the last one it saw.
+        var seq = 0
         let time: Date
         let request: String
         let outcome: String
@@ -41,6 +43,11 @@ final class ConversationLog {
     }
 
     private(set) var entries: [Entry] = []
+    /// Grows every time the memory is emptied («dimentica», private mode, expiry): a Long session
+    /// that saw another generation starts again, so it forgets too.
+    private(set) var generation = 0
+    private var nextSeq = 1
+    var snapshot: MemorySnapshot { expire(); return MemorySnapshot(generation: generation, lastSeq: entries.last?.seq ?? nextSeq - 1) }
     var maxEntries: Int { max(1, AppSettings.shared.conversationMemoryCount) }
     var maxAge: TimeInterval { AppSettings.shared.conversationMemoryMinutes * 60 }
 
@@ -48,20 +55,28 @@ final class ConversationLog {
         // Private mode: nothing is remembered, not even in RAM.
         guard !AppSettings.shared.privateModeActive else { return }
         expire()
-        entries.append(Entry(time: Date(), request: request, outcome: outcome, app: app, changes: Array(changes.suffix(6))))
+        entries.append(Entry(seq: nextSeq, time: Date(), request: request, outcome: outcome, app: app, changes: Array(changes.suffix(6))))
+        nextSeq += 1
         if entries.count > maxEntries { entries.removeFirst(entries.count - maxEntries) }
     }
 
-    func clear() { entries.removeAll() }
+    func clear() {
+        entries.removeAll()
+        generation += 1
+    }
 
     /// Drops everything if the last interaction is older than `maxAge`.
     func expire() {
-        if let last = entries.last, Date().timeIntervalSince(last.time) > maxAge { entries.removeAll() }
+        if let last = entries.last, Date().timeIntervalSince(last.time) > maxAge { clear() }
     }
 
     /// The `<recent>` block sent to the agent. Empty when there is nothing recent.
-    var promptBlock: String {
+    var promptBlock: String { promptBlock(after: 0) }
+
+    /// The block with only the entries after `seq`: what a Long session has not seen yet.
+    func promptBlock(after seq: Int) -> String {
         expire()
+        let entries = self.entries.filter { $0.seq > seq }
         guard !entries.isEmpty else { return "" }
         let f = DateFormatter()
         f.dateFormat = "HH:mm"

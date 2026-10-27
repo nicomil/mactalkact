@@ -128,6 +128,9 @@ final class AppSettings: ObservableObject {
         static let agentMaxSteps = 60
         static let agentMaxTurns = 40
         static let agentTimeout = 240.0
+        /// Long session of Claude (FR-42): one process kept open between requests.
+        static let longSession = true
+        static let sessionMaxRequests = 8
         static let confirmValiditySeconds = 45.0
         static let cleanDictation = false
         // Engines (Epic 4-5)
@@ -215,6 +218,8 @@ final class AppSettings: ObservableObject {
     @Published var agentMaxSteps: Int { didSet { defaults.set(agentMaxSteps, forKey: "agentMaxSteps") } }
     @Published var agentMaxTurns: Int { didSet { defaults.set(agentMaxTurns, forKey: "agentMaxTurns") } }
     @Published var agentTimeout: Double { didSet { defaults.set(agentTimeout, forKey: "agentTimeout") } }
+    @Published var longSession: Bool { didSet { defaults.set(longSession, forKey: "longSession") } }
+    @Published var sessionMaxRequests: Int { didSet { defaults.set(sessionMaxRequests, forKey: "sessionMaxRequests") } }
     @Published var confirmValiditySeconds: Double { didSet { defaults.set(confirmValiditySeconds, forKey: "confirmValiditySeconds") } }
     @Published var cleanDictation: Bool { didSet { defaults.set(cleanDictation, forKey: "cleanDictation") } }
 
@@ -339,6 +344,8 @@ final class AppSettings: ObservableObject {
         agentMaxSteps = int("agentMaxSteps", Defaults.agentMaxSteps)
         agentMaxTurns = int("agentMaxTurns", Defaults.agentMaxTurns)
         agentTimeout = double("agentTimeout", Defaults.agentTimeout)
+        longSession = bool("longSession", Defaults.longSession)
+        sessionMaxRequests = d.object(forKey: "sessionMaxRequests") as? Int ?? Defaults.sessionMaxRequests
         confirmValiditySeconds = double("confirmValiditySeconds", Defaults.confirmValiditySeconds)
         cleanDictation = bool("cleanDictation", Defaults.cleanDictation)
 
@@ -406,6 +413,7 @@ final class AppSettings: ObservableObject {
             deepEffort = Defaults.deepEffort; fastEffort = Defaults.fastEffort
             agentMaxSteps = Defaults.agentMaxSteps; agentMaxTurns = Defaults.agentMaxTurns
             agentTimeout = Defaults.agentTimeout; confirmValiditySeconds = Defaults.confirmValiditySeconds
+            longSession = Defaults.longSession; sessionMaxRequests = Defaults.sessionMaxRequests
             cleanDictation = Defaults.cleanDictation
             agentEngine = Defaults.agentEngine; engineFallback = Defaults.engineFallback
             codexPath = Defaults.codexPath; codexModel = Defaults.codexModel; codexFastModel = Defaults.codexFastModel

@@ -67,6 +67,25 @@ final class CodexCLI: @unchecked Sendable {
         return l.contains("shim") || l.contains("/.cmuxterm/")
     }
 
+    // MARK: Version (FR-45, AD-14)
+
+    /// Minimum verified version (CVE-2026-19591); later ones, ChatGPT.app alphas included, count as a range.
+    static let minimumVersion = "0.131.0"
+
+    static func status(executable: String) -> CLIStatus {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: executable)
+        p.arguments = ["--version"]
+        p.environment = environment(token: nil)
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        guard (try? p.run()) != nil else { return .unverified(nil) }
+        p.waitUntilExit()
+        return CLIStatus.from(versionOutput: String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8),
+                              minimum: minimumVersion)
+    }
+
     // MARK: Login
 
     /// `codex login status`: exit 0 and «Logged in…» when the user is logged in.

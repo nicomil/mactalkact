@@ -31,6 +31,7 @@ final class ClaudeEngine: AgentEngine {
     func refreshAvailability() {
         if case .paused(let until) = availability, Date() < until { return }
         setAvailability(settings.claudeExecutable == nil ? .missing : .available)
+        refreshStatus()
     }
 
     /// "You've hit your session limit · resets 7pm (Europe/Rome)" → pause until then (FR-14).
@@ -82,6 +83,9 @@ final class ClaudeEngine: AgentEngine {
     func prewarm() {
         guard availability == .available else { return }
         refreshExecutable()
+        if cliStatus == .unverified(nil) { refreshStatus() }
+        // The Long session starts with the first request, never in advance (AD-6).
+        if usesSession { return }
         var pairs: [(ClaudeCLI, ClaudeCLI.Config)] = []
         if let c = config(deep: true) { pairs.append((cliDeep, c)) }
         if settings.useFastModel, let c = config(deep: false) { pairs.append((cliFast, c)) }
@@ -90,12 +94,46 @@ final class ClaudeEngine: AgentEngine {
         }
     }
 
+    /// «Riavvio l'Agente» and similar, for the HUD through AgentRunner (engines never touch the HUD).
+    var onNotice: ((String) -> Void)?
+    /// What the app knows about the `claude` version (FR-45). Read off the main thread.
+    private(set) var cliStatus: CLIStatus = .unverified(nil)
+
+    /// Reads `claude --version` in the background; the status page and the Long session use it.
+    func refreshStatus() {
+        refreshExecutable()
+        let cli = cliDeep
+        Task.detached(priority: .utility) { [weak self] in
+            let status = cli.status()
+            await MainActor.run {
+                guard let self, self.cliStatus != status else { return }
+                self.cliStatus = status
+                Log.info("Motore Claude: \(status)")
+            }
+        }
+    }
+
+    /// Long session only with a verified CLI and the switch on (FR-42, FR-45, NFR-15).
+    private var usesSession: Bool { settings.longSession && cliStatus.isVerified }
+
+    /// Ends both Long sessions (memory emptied, private mode, settings changed).
+    func endSessions(reason: String) {
+        cliDeep.endSession(reason: reason)
+        cliFast.endSession(reason: reason)
+    }
+
     func run(_ request: AgentRequest) async throws -> String {
         let deep = useDeep(request.level)
         guard let config = config(deep: deep) else { throw AgentEngineError.failed("server strumenti non avviato") }
         refreshExecutable()
+        let cli = cli(deep: deep)
         do {
-            let data = try await cli(deep: deep).run(config, message: request.message, timeout: settings.agentTimeout, onPhase: onPhase)
+            let data: Data
+            if usesSession {
+                data = try await runInSession(cli, config, request)
+            } else {
+                data = try await cli.run(config, message: request.message, timeout: request.clock.remaining, onPhase: onPhase)
+            }
             return (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         } catch let error as ClaudeCLIError {
             let message = error.localizedDescription
@@ -109,11 +147,39 @@ final class ClaudeEngine: AgentEngine {
                 throw AgentEngineError.notFound(message)
             case .timeout:
                 throw AgentEngineError.timeout
-            case .failed, .noOutput:
-                if ClaudeEngine.isLoginMessage(message) { throw AgentEngineError.loginNeeded(message) }
+            case .failed, .noOutput, .sessionDied:
+                if ClaudeEngine.isLoginMessage(message) {
+                    // Started without the subscription login: no Long session until checked again.
+                    cli.markUnverified()
+                    cliStatus = cli.status()
+                    throw AgentEngineError.loginNeeded(message)
+                }
                 if ClaudeEngine.isNetworkMessage(message) { throw AgentEngineError.network(message) }
                 throw AgentEngineError.failed(message)
             }
+        }
+    }
+
+    private func runInSession(_ cli: ClaudeCLI, _ config: ClaudeCLI.Config, _ request: AgentRequest) async throws -> Data {
+        let maxRequests = max(1, settings.sessionMaxRequests)
+        let tools = toolAccess()?.tools
+        let onRestart: (String) -> Void = { [weak self] reason in
+            Log.info("Agente (claude/\(config.model)): riavvio la sessione, \(reason)")
+            self?.onNotice?("Riavvio l'Agente")
+        }
+        func attempt() async throws -> Data {
+            try await cli.runInSession(config, memory: request.memory, maxRequests: maxRequests,
+                                       timeout: request.clock.remaining,
+                                       message: { seq in seq.map(request.messageSince) ?? request.message },
+                                       onPhase: onPhase, onRestart: onRestart)
+        }
+        do {
+            return try await attempt()
+        } catch ClaudeCLIError.sessionDied(let m) where (tools?.effectfulCalls ?? 1) == 0 && !(tools?.cancelled ?? true) {
+            // The session died before doing anything: once more, on a new session (FR-28).
+            Log.info("Agente (claude/\(config.model)): sessione chiusa a metà senza azioni \(m), ripeto la richiesta")
+            onNotice?("Riavvio l'Agente")
+            return try await attempt()
         }
     }
 
@@ -136,6 +202,7 @@ final class ClaudeEngine: AgentEngine {
 
     func shutdown() {
         pause.cancel()
+        endSessions(reason: "app chiusa")
         cliDeep.shutdown()
         cliFast.shutdown()
     }

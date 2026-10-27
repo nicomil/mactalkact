@@ -70,6 +70,79 @@ struct AgentRequest {
     /// Only the user's words.
     let userRequest: String
     let level: AgentLevel
+    /// The one deadline of the turn (AD-24): engines have no timeout of their own.
+    var clock = TurnClock(seconds: 240) // AgentRunner sets it from `agentTimeout`
+    /// The conversation memory when the request was composed, for a Long session (FR-42).
+    var memory = MemorySnapshot(generation: 0, lastSeq: 0)
+    /// The message with only the memory entries after `seq` (a Long session saw the rest).
+    var messageSince: (Int) -> String = { _ in "" }
+}
+
+/// Where the conversation memory stood: `generation` changes when the memory is emptied.
+struct MemorySnapshot: Equatable {
+    let generation: Int
+    let lastSeq: Int
+}
+
+/// One clock for the turn (AD-24). Started with the request; the pause while a question waits
+/// arrives with Story 9.2.
+struct TurnClock {
+    let deadline: ContinuousClock.Instant
+    init(seconds: Double) { deadline = ContinuousClock.now + .milliseconds(Int(max(1, seconds) * 1000)) }
+    var remaining: TimeInterval {
+        let d = deadline - ContinuousClock.now
+        return max(0, Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18)
+    }
+}
+
+/// What the app knows about a CLI's version (AD-14). Separate from availability: the selector
+/// never reads it; `ClaudeCLI` uses it to decide on the Long session, the status page shows it.
+enum CLIStatus: Equatable, CustomStringConvertible {
+    case verified(String)
+    case unverified(String?)
+    case belowMinimum(String)
+
+    /// From `--version` output («2.1.311 (Claude Code)», «codex-cli 0.131.0»).
+    static func from(versionOutput: String?, minimum: String) -> CLIStatus {
+        guard let out = versionOutput,
+              let r = out.range(of: #"\d+\.\d+\.\d+"#, options: .regularExpression) else { return .unverified(nil) }
+        let v = String(out[r])
+        return compare(v, minimum) >= 0 ? .verified(v) : .belowMinimum(v)
+    }
+
+    /// -1, 0, 1 like a comparator, on dotted numbers.
+    static func compare(_ a: String, _ b: String) -> Int {
+        let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(x.count, y.count) {
+            let l = i < x.count ? x[i] : 0, r = i < y.count ? y[i] : 0
+            if l != r { return l < r ? -1 : 1 }
+        }
+        return 0
+    }
+
+    var isVerified: Bool { if case .verified = self { return true } else { return false } }
+
+    var description: String {
+        switch self {
+        case .verified(let v): return "versione \(v) verificata"
+        case .unverified(let v): return v.map { "versione \($0) non verificata" } ?? "versione non verificata"
+        case .belowMinimum(let v): return "versione \(v) non verificata (sotto la minima)"
+        }
+    }
+}
+
+/// When a Long session must start again (FR-42, AD-6). Pure, tested by `--selftest`.
+enum SessionPolicy {
+    static let maxIdle: TimeInterval = 10 * 60
+
+    static func restartReason(requests: Int, maxRequests: Int, idle: TimeInterval,
+                              configChanged: Bool, memoryChanged: Bool) -> String? {
+        if configChanged { return "modello o effort cambiati" }
+        if memoryChanged { return "memoria azzerata" }
+        if requests >= maxRequests { return "\(maxRequests) richieste" }
+        if idle >= maxIdle { return "inattiva da 10 minuti" }
+        return nil
+    }
 }
 
 /// Why an engine stopped. AgentRunner decides from this whether another engine can try (AD-15).

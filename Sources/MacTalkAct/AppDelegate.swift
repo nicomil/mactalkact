@@ -414,6 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         c.engineStates = { [weak self] in self?.coordinator.agent.engines.mapValues(\.availability) ?? [:] }
         c.recheckEngines = { [weak self] in self?.coordinator.agent.refreshAvailability() }
         c.engineErrors = { [weak self] in self?.coordinator.agent.lastErrors ?? [:] }
+        c.engineCLIStatus = { [weak self] in self?.coordinator.agent.cliStatuses ?? [:] }
         c.testLocalEngine = { [weak self] in await self?.coordinator.testLocalEngine() ?? "—" }
         return c
     }
