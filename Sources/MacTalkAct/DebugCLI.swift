@@ -1053,7 +1053,9 @@ extension DebugCLI {
         struct Row {
             let task: BenchTask; let ok: Bool; let skipped: String?; let steps: Int; let first: Double?; let total: Double
             let model: String; let note: String; let phases: [BenchPhase: Double]; let turns: Int?; let confirmations: Int; let blocked: Int
-            var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) - total) <= 0.2 }
+            /// Time of the Router's decision (Frasi spurie only): before the agent, outside its phases.
+            var router: Double = 0
+            var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) + router - total) <= 0.2 }
         }
         var rows: [Row] = []
         let base = URL(fileURLWithPath: path).deletingLastPathComponent().appendingPathComponent("pages")
@@ -1101,9 +1103,16 @@ extension DebugCLI {
             var note = ""
             var ranAgent = true
             var phraseOK = true
+            var routerTime = 0.0
             if case .phrase = kind {
                 // A misheard sentence goes through the Router like in the app: only an agent decision reaches the agent.
-                let decision = await router.decide(task.request, editable: { false }, state: RouterState())
+                // Continuous listening with the conversation window open: no wake word is needed, so this
+                // is where a misheard sentence can start the agent (FR-48).
+                var state = RouterState()
+                state.listening = .session
+                state.windowOpen = true
+                let decision = await router.decide(task.request, editable: { false }, state: state)
+                routerTime = Date().timeIntervalSince(started)
                 switch decision {
                 case .agent(let text, let deep, _):
                     do { note = try await agent.run(text, context: ctx, deep: deep) } catch { note = "errore: \(error.localizedDescription)" }
@@ -1135,16 +1144,17 @@ extension DebugCLI {
             let first = ranAgent ? (agent.tools.firstEffectAt ?? agent.tools.firstCallAt).map { $0.timeIntervalSince(started) } : nil
             // On the personal account only the times go to the table, never what the agent read.
             if case .webmail = kind, BenchFixtures.webmailPersonal { note = "" }
-            let row = Row(task: task, ok: ok, skipped: nil, steps: ranAgent ? agent.tools.callCount : 0, first: first, total: total,
+            var row = Row(task: task, ok: ok, skipped: nil, steps: ranAgent ? agent.tools.callCount : 0, first: first, total: total,
                           model: ranAgent ? agent.lastModel : "", note: note, phases: ranAgent ? agent.lastPhases : [:],
                           turns: ranAgent ? agent.lastTurns : nil, confirmations: ranAgent ? agent.tools.confirmationsAsked : 0,
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
+            row.router = routerTime
             rows.append(row)
             print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, row.steps,
                          first.map { String(format: "%4.1f s", $0) } ?? "  — ", total, String(note.prefix(70))))
             if !row.phases.isEmpty {
                 let parts = BenchPhase.allCases.compactMap { p in row.phases[p].map { String(format: "%@ %.1f", p.rawValue, $0) } }
-                print("      fasi: \(parts.joined(separator: " · "))\(row.sumOK ? "" : " ⚠︎ somma ≠ totale") · turni \(row.turns.map(String.init) ?? "—") · conferme \(row.confirmations) · bloccate \(row.blocked)")
+                print("      fasi: \(routerTime > 0 ? String(format: "router %.1f · ", routerTime) : "")\(parts.joined(separator: " · "))\(row.sumOK ? "" : " ⚠︎ somma ≠ totale") · turni \(row.turns.map(String.init) ?? "—") · conferme \(row.confirmations) · bloccate \(row.blocked)")
             }
             if !ok, case .phrase = kind {} else if !ok { print("      titolo: \(title.prefix(160))") }
             await BenchFixtures.tearDown(kind, checks: task.checks)
@@ -1179,12 +1189,12 @@ extension DebugCLI {
         let out = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
         let phaseHeader = BenchPhase.allCases.map { "\($0.rawValue)_s" }.joined(separator: "\t")
-        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\tsomma_ok\tturni\tconferme\tbloccate\tmodello\trisposta\n"
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tturni\tconferme\tbloccate\tmodello\trisposta\n"
         for r in rows {
             let esito = r.skipped != nil ? "saltato" : (r.ok ? "ok" : "no")
             let phases = BenchPhase.allCases.map { p in r.phases[p].map { String(format: "%.2f", $0) } ?? "" }.joined(separator: "\t")
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(r.sumOK ? "sì" : "no")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")
