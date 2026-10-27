@@ -18,6 +18,7 @@ final class LocalEngine: AgentEngine {
 
     private(set) var availability: AgentAvailability = .available
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
+    var onPhase: PhaseSink?
 
     /// Debug commands only (`--agent-bench --model`): provider, server and model without touching the settings.
     struct Override {
@@ -178,6 +179,11 @@ final class LocalEngine: AgentEngine {
 
     func run(_ request: AgentRequest) async throws -> String {
         guard let access = toolAccess() else { throw AgentEngineError.failed("strumenti non pronti") }
+        // No process and no MCP server here: all of the model's time is thinking.
+        onPhase?(.sessionReused)
+        onPhase?(.serverConnected)
+        onPhase?(.firstToken)
+        defer { onPhase?(.turnFinished(turns: nil)) }
         var (model, name) = languageModel()
         if provider == .server, name == "apple-on-device" {
             onNotice?("Server locale non raggiungibile · uso il modello Apple")

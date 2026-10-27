@@ -91,6 +91,10 @@ final class AgentRunner {
 
     /// Called when the engine in use changes (fallback or return to the chosen one).
     var onEngineSwitch: ((EngineSwitch) -> Void)?
+    /// Phases, total and model turns of the last request, for the Bench (FR-41).
+    private(set) var lastPhases: [BenchPhase: Double] = [:]
+    private(set) var lastTotal: Double = 0
+    private(set) var lastTurns: Int?
     /// Called when any engine changes state; the aggregate is `availability`.
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
     /// Called when one engine changes state (menu, "Codex è tornato").
@@ -265,7 +269,20 @@ final class AgentRunner {
         guard !running else { throw AgentEngineError.failed("sto già lavorando a un'altra richiesta") }
         tools.reset()
         running = true
-        defer { running = false }
+        // One monotonic clock for the whole request, split into contiguous phases (FR-41, AD-18).
+        let timer = PhaseTimer()
+        tools.onCall = { start in timer.mark(start ? .actions : .reasoning) }
+        defer {
+            running = false
+            tools.onCall = nil
+            for engine in engines.values { engine.onPhase = nil }
+            let (phases, total) = timer.finish()
+            lastPhases = phases
+            lastTotal = total
+            lastTurns = timer.turns
+            Log.debug("Agente: fasi " + BenchPhase.allCases.compactMap { p in
+                phases[p].map { String(format: "%@ %.2fs", p.rawValue, $0) } }.joined(separator: " · "))
+        }
         let level: AgentLevel = deep ? .deep : .fast
         // Private mode, a reserved app or site: only the local engine, the data stays on the Mac.
         let privateReason = PrivacyGuard.cloudBlockReason()
@@ -289,6 +306,8 @@ final class AgentRunner {
                 throw RunError.noEngine(EngineSelector.unavailableMessage(chosen: chosenEngine, engines: engineStates))
             }
             announce(choice)
+            timer.mark(.session)
+            engine.onPhase = { timer.event($0) }
             let model = engine.model(for: level)
             let started = Date()
             // Cloud engines get the outcome of each action (AD-19); the local engine observes on its own.

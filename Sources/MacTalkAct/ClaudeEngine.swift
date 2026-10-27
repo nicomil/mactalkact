@@ -13,6 +13,7 @@ final class ClaudeEngine: AgentEngine {
 
     private(set) var availability: AgentAvailability = .available
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
+    var onPhase: PhaseSink?
 
     init(settings: AppSettings, toolAccess: @escaping () -> AgentToolAccess?) {
         self.settings = settings
@@ -94,7 +95,7 @@ final class ClaudeEngine: AgentEngine {
         guard let config = config(deep: deep) else { throw AgentEngineError.failed("server strumenti non avviato") }
         refreshExecutable()
         do {
-            let data = try await cli(deep: deep).run(config, message: request.message, timeout: settings.agentTimeout)
+            let data = try await cli(deep: deep).run(config, message: request.message, timeout: settings.agentTimeout, onPhase: onPhase)
             return (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         } catch let error as ClaudeCLIError {
             let message = error.localizedDescription

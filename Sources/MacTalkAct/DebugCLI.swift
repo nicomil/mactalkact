@@ -716,6 +716,7 @@ final class FakeEngine: AgentEngine {
     let id: EngineID
     var availability: AgentAvailability = .available
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
+    var onPhase: PhaseSink?
     private let tools: AgentTools
     private let effectsBeforeFailure: Int
     private let fails: Bool

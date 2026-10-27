@@ -134,7 +134,7 @@ final class CodexCLI: @unchecked Sendable {
 
     // MARK: Running
 
-    func run(_ config: Config, message: String, timeout: TimeInterval) async throws -> Outcome {
+    func run(_ config: Config, message: String, timeout: TimeInterval, onPhase: PhaseSink? = nil) async throws -> Outcome {
         guard let path = executablePath() else { throw AgentEngineError.notFound("Comando «codex» non trovato. Installa ChatGPT o Codex, o indica il percorso nelle impostazioni.") }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
@@ -152,6 +152,7 @@ final class CodexCLI: @unchecked Sendable {
             if errBuffer.value.count < 16_000 { errBuffer.value.append(chunk) }
         }
         try p.run()
+        onPhase?(.sessionStarted)
         lock.withLock { current = p }
         defer {
             lock.withLock { current = nil }
@@ -164,8 +165,12 @@ final class CodexCLI: @unchecked Sendable {
         return try await withThrowingTaskGroup(of: Outcome.self) { group in
             group.addTask {
                 var parser = CodexEventParser()
+                var sawToken = false
                 for try await line in stdout.bytes.lines {
+                    if line.contains("\"turn.started\"") { onPhase?(.serverConnected) }
+                    if !sawToken, line.contains("\"item.") { sawToken = true; onPhase?(.firstToken) }
                     if let outcome = parser.feed(line) {
+                        onPhase?(.turnFinished(turns: nil))
                         if !parser.usage.isEmpty { Log.info("Codex: token \(parser.usage)") }
                         return outcome
                     }

@@ -107,6 +107,8 @@ protocol AgentEngine: AnyObject {
     /// Owned by the engine itself (AD-14): limit pauses, missing command, login.
     var availability: AgentAvailability { get }
     var onAvailabilityChange: ((AgentAvailability) -> Void)? { get set }
+    /// Events of the request in progress, for the phases of the Bench (AD-13, AD-18).
+    var onPhase: PhaseSink? { get set }
     /// The model used for a level, for logs and menus.
     func model(for level: AgentLevel) -> String
     /// Re-checks the command and the login, without touching a pause in progress.
@@ -293,5 +295,99 @@ enum LimitMessage {
         }
         guard hour < 24, minute < 60 else { return nil }
         return (hour, minute)
+    }
+}
+
+// MARK: - Phases of a request (AD-13, AD-18)
+
+/// What an engine sees while it works. Engines report events, never durations:
+/// the clock belongs to `AgentRunner`.
+enum EnginePhase: Sendable, Equatable {
+    case sessionStarted
+    case sessionReused
+    case serverConnected
+    case firstToken
+    /// The turn is over; `turns` is the number of model turns when the engine knows it.
+    case turnFinished(turns: Int?)
+}
+
+typealias PhaseSink = @Sendable (EnginePhase) -> Void
+
+/// The phases of the Bench table, in order. Contiguous: every instant of a request belongs
+/// to exactly one phase, so the phases add up to the total.
+enum BenchPhase: String, CaseIterable, Sendable {
+    case scan = "scansione"
+    case session = "sessione"
+    case mcp = "mcp"
+    case firstToken = "primo_token"
+    case actions = "azioni"
+    /// The model thinking between two tools.
+    case reasoning = "ragionamento"
+    /// The safety classifier (Story 9.5); zero until it exists.
+    case classifier = "classificatore"
+    case finalTurn = "turno_finale"
+    case close = "chiusura"
+}
+
+/// One monotonic clock per request. `mark` closes the current phase and opens the next one;
+/// thread-safe because engines report from their reading tasks.
+final class PhaseTimer: @unchecked Sendable {
+    private let lock = NSLock()
+    private let clock = ContinuousClock()
+    private let started: ContinuousClock.Instant
+    private var current: BenchPhase
+    private var since: ContinuousClock.Instant
+    private var segments: [(BenchPhase, Duration)] = []
+    private var finished: [BenchPhase: Double]?
+    private(set) var turns: Int?
+
+    init(start phase: BenchPhase = .scan) {
+        started = clock.now
+        since = started
+        current = phase
+    }
+
+    func mark(_ phase: BenchPhase) {
+        let now = clock.now
+        lock.withLock {
+            guard finished == nil, phase != current else { return }
+            segments.append((current, now - since))
+            current = phase
+            since = now
+        }
+    }
+
+    /// Maps an engine event onto the phase that starts with it.
+    func event(_ e: EnginePhase) {
+        switch e {
+        case .sessionStarted, .sessionReused: mark(.mcp)
+        case .serverConnected: mark(.firstToken)
+        case .firstToken: mark(.reasoning)
+        case .turnFinished(let t):
+            lock.withLock { turns = t }
+            mark(.close)
+        }
+    }
+
+    /// Closes the timer. The model's thinking after the last tool is the final turn.
+    @discardableResult
+    func finish() -> (phases: [BenchPhase: Double], total: Double) {
+        let now = clock.now
+        return lock.withLock {
+            if let finished { return (finished, finished.values.reduce(0, +)) }
+            segments.append((current, now - since))
+            if let i = segments.lastIndex(where: { $0.0 == .reasoning }),
+               !segments[i...].contains(where: { $0.0 == .actions }) {
+                segments[i].0 = .finalTurn
+            }
+            var out: [BenchPhase: Double] = [:]
+            for (p, d) in segments {
+                let s = Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
+                out[p, default: 0] += s
+            }
+            finished = out
+            let total = now - started
+            return (out, Double(total.components.seconds) + Double(total.components.attoseconds) / 1e18)
+        }
     }
 }

@@ -2,7 +2,8 @@
 title: 'Storia 7.1 — Riga di base: il Banco misura fase per fase, anche fuori dal browser'
 type: 'feature'
 created: '2026-10-27'
-status: 'ready-for-dev'
+status: 'in-progress'
+baseline_commit: '2fe1b7b5e9d579e3dc13f16e72b1a6eeb36ccc9e'
 route: 'dispatch'
 review_loop_iteration: 0
 context:

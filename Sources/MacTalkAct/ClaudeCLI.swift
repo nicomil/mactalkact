@@ -113,8 +113,15 @@ final class ClaudeCLI: @unchecked Sendable {
 
     /// Sends one message and returns the `structured_output` JSON as Data.
     /// Sends one message; for a plain-text config the Data is the final answer text.
-    func run(_ config: Config, message: String, timeout: TimeInterval = 60) async throws -> Data {
-        let proc = try takeSpare(config) ?? spawn(config)
+    func run(_ config: Config, message: String, timeout: TimeInterval = 60, onPhase: PhaseSink? = nil) async throws -> Data {
+        let proc: Running
+        if let spare = takeSpare(config) {
+            proc = spare
+            onPhase?(.sessionReused)
+        } else {
+            proc = try spawn(config)
+            onPhase?(.sessionStarted)
+        }
         lock.withLock { current = proc }
         defer {
             lock.withLock { current = nil }
@@ -130,7 +137,7 @@ final class ClaudeCLI: @unchecked Sendable {
         try proc.stdin.close()
 
         return try await withThrowingTaskGroup(of: Data.self) { group in
-            group.addTask { try await Self.readResult(proc) }
+            group.addTask { try await Self.readResult(proc, onPhase: onPhase) }
             group.addTask {
                 try await Task.sleep(for: .seconds(timeout))
                 throw ClaudeCLIError.timeout
@@ -223,15 +230,22 @@ final class ClaudeCLI: @unchecked Sendable {
                        stderr: errBuffer, config: config)
     }
 
-    private static func readResult(_ proc: Running) async throws -> Data {
+    private static func readResult(_ proc: Running, onPhase: PhaseSink? = nil) async throws -> Data {
+        var sawToken = false
         for try await line in proc.stdout.bytes.lines {
             guard let obj = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
             if obj["type"] as? String == "system", obj["subtype"] as? String == "init",
                let servers = obj["mcp_servers"] as? [[String: Any]], !servers.isEmpty {
                 let status = servers.map { "\($0["name"] ?? "?")=\($0["status"] ?? "?")" }.joined(separator: ", ")
                 Log.debug("claude: server MCP \(status)")
+                onPhase?(.serverConnected)
+            }
+            if !sawToken, obj["type"] as? String == "assistant" || obj["type"] as? String == "stream_event" {
+                sawToken = true
+                onPhase?(.firstToken)
             }
             guard obj["type"] as? String == "result" else { continue }
+            onPhase?(.turnFinished(turns: obj["num_turns"] as? Int))
 
             if (obj["is_error"] as? Bool) == true || (obj["subtype"] as? String) != "success" {
                 let msg = (obj["result"] as? String) ?? (obj["subtype"] as? String) ?? "errore"

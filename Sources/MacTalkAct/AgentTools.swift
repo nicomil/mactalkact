@@ -40,6 +40,11 @@ final class AgentTools {
     private(set) var firstCallAt: Date?
     /// When the first action with effects happened (local engine: the app observes first).
     private(set) var firstEffectAt: Date?
+    /// Bench counters (FR-41): confirmations asked, and actions stopped without a «sì».
+    private(set) var confirmationsAsked = 0
+    private(set) var blockedCalls = 0
+    /// Start (`true`) and end (`false`) of every tool call, settling included: the phases of the Bench.
+    var onCall: ((Bool) -> Void)?
     /// Text changes made during the current task, for the conversation memory (FR-8).
     private(set) var changes: [String] = []
     /// The app the task works in: keystrokes and clicks stop if another app takes the front
@@ -69,6 +74,8 @@ final class AgentTools {
         lastShot = nil
         confirmedUntil = .distantPast
         callCount = 0
+        confirmationsAsked = 0
+        blockedCalls = 0
         effectfulCalls = 0
         firstCallAt = nil
         firstEffectAt = nil
@@ -233,6 +240,8 @@ final class AgentTools {
 
     func call(_ name: String, _ args: [String: Any]) async -> Result {
         if cancelled { return .error("The user cancelled the task. Stop now.") }
+        onCall?(true)
+        defer { onCall?(false) }
         callCount += 1
         if firstCallAt == nil { firstCallAt = Date() }
         if callCount > maxCalls { return .error("Step limit reached. Stop and tell the user what is left to do.") }
@@ -242,6 +251,7 @@ final class AgentTools {
             return Self.privateWindowError(why)
         }
         var result = await perform(name, args)
+        if result.isError, result.text.hasSuffix("call confirm first.") { blockedCalls += 1 }
         if reportOutcome, Self.outcomeTools.contains(name), !result.readOnly, !cancelled,
            !result.text.hasPrefix("MacTalkAct does not have"), !result.text.hasPrefix("The frontmost app changed") {
             await settle()
@@ -530,11 +540,13 @@ final class AgentTools {
 
         case "confirm":
             guard let action = a["action"] as? String else { return .error("Missing action") }
+            confirmationsAsked += 1
             let answer = await askUser?(action, true)
             if let answer, Grammar.isYes(answer) {
                 confirmedUntil = Date().addingTimeInterval(AppSettings.shared.confirmValiditySeconds)
                 return .text("approved")
             }
+            blockedCalls += 1
             return .text("denied — do not perform the action. Tell the user it was cancelled.")
 
         default:
