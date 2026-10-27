@@ -183,9 +183,21 @@ Durante un compito l'HUD mostra cosa sta facendo («Cerco «LangChain»…», «
 
 L'app lancia `claude -p` senza strumenti, server MCP, hook né plugin, con un prompt di sistema dedicato e un JSON Schema per la risposta. Claude quindi decide soltanto: le azioni le esegue l'app.
 
-L'avvio di `claude` richiede circa 2 secondi. Per non farli pesare, l'app tiene **sempre un processo pronto** in attesa della richiesta e, appena lo usa, ne avvia un altro. Così una richiesta libera risponde in circa 2–4 secondi dalla fine della frase. Il prezzo è un processo `claude` sempre in memoria.
+L'avvio di `claude` richiede circa 2 secondi. Con la **Sessione lunga** (predefinita) l'app tiene aperto un solo processo `claude` per livello e lo riusa tra una richiesta e l'altra. Non c'è avvio, e il prompt di sistema e gli strumenti restano nella cache del modello: dalla seconda richiesta Claude rilegge solo la parte nuova. La sessione parte alla prima richiesta, mai in anticipo. Riceve solo le voci della memoria di conversazione che non ha ancora visto, e non lascia file su disco (`--no-session-persistence`).
 
-L'agente ha due livelli, ognuno con il suo processo pronto: le richieste **semplici** usano **Claude Sonnet 5.5** con effort basso, quelle **lunghe** (più passi, mail, ricerche, «tutte le…») usano **Claude Opus 5.5** con effort medio. Dire «pensaci bene» forza il secondo. Entrambi i modelli si scelgono nelle impostazioni. Le prime tre corsie non usano mai Claude e non consumano l'abbonamento.
+La sessione si riavvia da sola, scrivendo il motivo nel log e «Riavvio l'Agente» nell'HUD, in questi casi:
+- dopo 8 richieste (si regola nelle impostazioni);
+- dopo 10 minuti di inattività;
+- quando il turno supera il tempo massimo;
+- al cambio di modello o di effort;
+- con «dimentica la conversazione»;
+- entrando o uscendo dalla modalità privata.
+
+Se la sessione si chiude a metà senza aver fatto azioni, la richiesta viene ripetuta una volta. L'interruttore **Impostazioni › Agente › Claude › Sessione lunga** spento torna al comportamento di prima: un processo pronto, usato una volta per richiesta.
+
+La Sessione lunga richiede `claude` 2.1.299 o successivo. L'app legge la versione con `claude --version` e la mostra in **Stato e diagnostica**, insieme a quella di `codex` (minima 0.131.0). Con una versione non verificata, o se `claude` parte senza il login dell'abbonamento, l'app usa un processo per richiesta. Le versioni minime vanno rilette entro il **1° novembre 2026**.
+
+L'agente ha due livelli, ognuno con il suo processo: le richieste **semplici** usano **Claude Sonnet 5.5** con effort basso, quelle **lunghe** (più passi, mail, ricerche, «tutte le…») usano **Claude Opus 5.5** con effort medio. Dire «pensaci bene» forza il secondo. Entrambi i modelli si scelgono nelle impostazioni. Le prime tre corsie non usano mai Claude e non consumano l'abbonamento.
 
 ## Motori: Claude, Codex o il Mac
 

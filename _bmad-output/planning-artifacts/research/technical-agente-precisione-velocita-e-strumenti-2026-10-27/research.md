@@ -435,3 +435,25 @@ Cosa dice: con il processo pronto l'avvio e la connessione MCP pesano poco. Il t
 **Correzione dopo la review della Storia 7.1.** Nella corsa qui sopra la colonna «primo token» misurava in realtà il primo messaggio completo, perché Claude non mandava gli eventi token per token. Con `--include-partial-messages` (prova su 5 compiti) il primo token arriva in circa 1 s, e il resto del primo messaggio passa alle fasi successive. Il totale non cambia. Il confronto prima/dopo delle Storie 7.2–7.5 va fatto con la misura corretta, quindi va rifatta la riga di base della colonna primo token.
 
 Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-27-1631-claude.tsv`, `…-2019-claude.tsv`, `…-2020-claude.tsv`, `…-2021-claude.tsv`.
+
+## 14. Sessione lunga: prima e dopo (Storia 7.2, 27 ottobre 2026)
+
+Stessi 34 compiti della riga di base (pagine, canvas, Finder, Frasi spurie), Motore Claude, con il primo token misurato token per token. «Prima» = processo pronto, uno per richiesta; «dopo» = Sessione lunga con riavvio ogni 8 richieste.
+
+| Misura (29 compiti con azioni) | Prima | Dopo |
+| --- | --- | --- |
+| Riusciti | 29/29 | 29/29 |
+| Primo strumento, mediana | 2,6 s | 2,8 s |
+| Compito, mediana | 7,6 s | 6,9 s |
+| Connessione MCP | 0,10 s | 0,08 s |
+| Primo token | 1,61 s | 1,73 s |
+| Azioni con assestamento | 1,24 s | 1,40 s |
+| Ragionamento tra le azioni | 0,72 s | 0,68 s |
+| Turno finale | 1,31 s | 1,34 s |
+| Frasi spurie, mediana | 4,6 s | 4,7 s |
+| Token letti dalla cache per turno | — (non registrati) | 42.117 in media |
+| Riavvii della sessione | — | 4, tutti per «8 richieste» |
+
+Cosa dice: il guadagno è piccolo, circa 0,7 s sulla mediana del compito, e il primo strumento non migliora (la differenza sta nel rumore di una corsa). La ragione più probabile è che anche prima la cache del prompt lavorava: il prompt di sistema e gli strumenti restano in cache lato server per alcuni minuti anche tra processi diversi, come mostra `--session-test` (3.048 token letti dalla cache subito dopo un riavvio). L'avvio era già nascosto dal processo pronto. La Sessione lunga aggiunge invece la storia dei turni precedenti: in media 42 mila token letti dalla cache per turno, che pesano poco sul tempo ma crescono fino al riavvio.
+
+Conseguenze per l'Epic 7: la Sessione lunga resta attiva (non peggiora la precisione, accorcia un po' il compito, ricorda i turni precedenti), ma l'obiettivo di NFR-12 (primo strumento ≤ 1,5 s) non si raggiunge da questa parte. Il margine sta nel modello: il primo token (1,6–1,7 s) e il turno finale (1,3 s). Questo rende la Storia 7.3 (Livello istantaneo con Haiku 5.5) la leva principale. Va valutato se abbassare `sessionMaxRequests` riduce la storia senza perdere il guadagno. Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2039-claude.tsv` (prima), `…-2046-claude.tsv` (dopo).

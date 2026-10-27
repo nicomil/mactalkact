@@ -2,7 +2,8 @@
 title: 'Storia 7.2 — Sessione lunga sorvegliata e CLI sotto controllo'
 type: 'feature'
 created: '2026-10-27'
-status: 'in-progress'
+status: 'in-review'
+baseline_commit: '25298a8795ea80ce2f2cc4e158d1dcd201abd200'
 route: 'dispatch'
 review_loop_iteration: 0
 context:
@@ -69,16 +70,16 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `Sources/MacTalkAct/AgentEngine.swift` -- `CLIStatus`, `TurnClock`, campi nuovi di `AgentRequest`, funzione pura `SessionPolicy.restartReason(...) -> String?` (richieste, inattività, config, generazione) -- regole testabili senza processi.
-- [ ] `Sources/MacTalkAct/Conversation.swift` -- numerazione, `generation`, `promptBlock(after:)`.
-- [ ] `Sources/MacTalkAct/ClaudeCLI.swift` -- sessione lunga, versione, ambiente, usage con cache nel log.
-- [ ] `Sources/MacTalkAct/ClaudeEngine.swift` -- scelta, riavvii, avviso, ripetizione su sessione morta.
-- [ ] `Sources/MacTalkAct/CodexCLI.swift`, `CodexEngine.swift` -- `CLIStatus`.
-- [ ] `Sources/MacTalkAct/AgentRunner.swift`, `Coordinator.swift` -- `TurnClock`, messaggio di sessione, avviso.
-- [ ] `Sources/MacTalkAct/Settings.swift`, `SettingsWindow.swift` -- interruttore, tetto, Stato e diagnostica.
-- [ ] `Sources/MacTalkAct/DebugCLI.swift` -- test delle funzioni pure; `--session-test` (due richieste reali consecutive con Claude: la seconda riusa il processo e legge dalla cache).
-- [ ] `README.md` -- Sessione lunga e interruttore (le CLI vanno rilette entro il 1° novembre 2026).
-- [ ] `_bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md` -- tabella prima/dopo sul Banco.
+- [x] `Sources/MacTalkAct/AgentEngine.swift` -- `CLIStatus`, `TurnClock`, campi nuovi di `AgentRequest`, funzione pura `SessionPolicy.restartReason(...) -> String?` (richieste, inattività, config, generazione) -- regole testabili senza processi.
+- [x] `Sources/MacTalkAct/Conversation.swift` -- numerazione, `generation`, `promptBlock(after:)`.
+- [x] `Sources/MacTalkAct/ClaudeCLI.swift` -- sessione lunga, versione, ambiente, usage con cache nel log.
+- [x] `Sources/MacTalkAct/ClaudeEngine.swift` -- scelta, riavvii, avviso, ripetizione su sessione morta.
+- [x] `Sources/MacTalkAct/CodexCLI.swift`, `CodexEngine.swift` -- `CLIStatus`.
+- [x] `Sources/MacTalkAct/AgentRunner.swift`, `Coordinator.swift` -- `TurnClock`, messaggio di sessione, avviso.
+- [x] `Sources/MacTalkAct/Settings.swift`, `SettingsWindow.swift` -- interruttore, tetto, Stato e diagnostica.
+- [x] `Sources/MacTalkAct/DebugCLI.swift` -- test delle funzioni pure; `--session-test` (due richieste reali consecutive con Claude: la seconda riusa il processo e legge dalla cache).
+- [x] `README.md` -- Sessione lunga e interruttore (le CLI vanno rilette entro il 1° novembre 2026).
+- [x] `_bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md` -- tabella prima/dopo sul Banco.
 
 **Acceptance Criteria:**
 - Given il Banco con Claude, when lo eseguo con la Sessione lunga, then la ricerca riporta prima/dopo (primo strumento, compito, fasi) e il log mostra cache letta > 0 dalla seconda richiesta dello stesso livello.
@@ -101,6 +102,8 @@ La memoria delta evita di ripetere alla sessione ciò che ha già visto nei prop
 ## Implementation Notes
 
 - Spec scritta e approvata in autonomia (Nico: «committa e procedi»); sopra i 1600 token, obiettivo unico (Sessione lunga con i suoi controlli).
+- Implementazione diretta (commit `0cae5e7`): `ClaudeCLI.runInSession` con iteratore di righe per sessione (nessuna riga persa tra due messaggi), `SessionPolicy`, `CLIStatus`, `TurnClock`, `MemorySnapshot`/`promptBlock(after:)`; il cursore della sessione è `lastSeq + 1` perché la voce della richiesta viene aggiunta subito dopo. Con la Sessione lunga non si tiene alcun processo pronto.
+- Banco prima/dopo nella ricerca, §14: compito 7,6 → 6,9 s, primo strumento 2,6 → 2,8 s, 42 mila token di cache per turno. Il guadagno è piccolo perché la cache del prompt lavorava già tra processi.
 
 ## Spec Change Log
 
