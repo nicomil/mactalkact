@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import FoundationModels
 import Speech
 
 /// Command-line entry points for testing pieces without the full app.
@@ -1246,6 +1247,43 @@ extension DebugCLI {
     }
 }
 
+extension DebugCLI {
+    /// `--local-vision-test` (Story 8.3): Apple's model on the Mac receives the screenshot of 5 Bench
+    /// pages and answers three questions: describe, read, locate. Research only, no requirement.
+    static func localVisionTest() async {
+        guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else { print("Safari assente"); return }
+        let ex = Executor()
+        let base = URL(fileURLWithPath: "Tests/bench/pages")
+        let pages: [(String, String, String)] = [
+            ("etichetta.html", "Qual è il numero d'ordine scritto sull'etichetta?", "4821-B"),
+            ("posta.html", "Chi è il mittente della mail sul preventivo della cucina?", "Marco"),
+            ("modulo.html", "Quali campi ha il modulo?", "Nome"),
+            ("lavagna.html", "Di che colore è il cerchio?", "rosso"),
+            ("tabella.html", "Che cosa mostra la tabella?", ""),
+        ]
+        for (page, question, expected) in pages {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            _ = try? await NSWorkspace.shared.open([base.appendingPathComponent(page)], withApplicationAt: safari, configuration: config)
+            try? await Task.sleep(for: .seconds(2.5))
+            guard let shot = try? await ScreenCapture.frontWindow(maxSide: 1400, scaleFactor: 1) else { print("✗ \(page): screenshot non riuscito"); continue }
+            print("\(page):")
+            for q in ["Descrivi in una frase che cosa mostra questa finestra.", question, "Dove si trova, in alto, al centro o in basso, il primo pulsante o campo della pagina?"] {
+                let started = Date()
+                let session = LanguageModelSession(instructions: "Rispondi in italiano, in una o due frasi, guardando l'immagine.")
+                do {
+                    let r = try await session.respond { q; Attachment(shot.image) }
+                    let ok = q == question && !expected.isEmpty ? (r.content.localizedCaseInsensitiveContains(expected) ? " ✓" : " ✗ (atteso «\(expected)»)") : ""
+                    print(String(format: "  %.1f s · %@ → %@%@", Date().timeIntervalSince(started), q, r.content.replacingOccurrences(of: "\n", with: " ").prefix(160).description, ok))
+                } catch {
+                    print("  errore: \(error.localizedDescription)")
+                }
+            }
+        }
+        await closeBenchPages(ex)
+    }
+}
+
 // MARK: - Banco di prova dell'Agente (Story 5.1)
 
 extension DebugCLI {
@@ -1431,11 +1469,25 @@ extension DebugCLI {
         check("lista scorsa: si vedono le righe sullo schermo, non le prime", far && !scrolled.contains("«Messaggio 1 ·"))
         if !far { print("      " + scrolled.split(separator: "\n").filter { $0.contains("Messaggio") }.prefix(3).joined(separator: "\n      ")) }
 
+        print("Lettura del testo sul Mac (Storia 8.3):")
+        await open("etichetta.html")
+        TextReader.shared.warmUp()
+        try? await Task.sleep(for: .seconds(3))
+        let t0 = Date()
+        let read = text(await tools.call("read_text", [:]))
+        let readTime = Date().timeIntervalSince(t0)
+        check("read_text: legge il numero d'ordine dell'etichetta", read.contains("4821-B"), read.split(separator: "\n").prefix(4).joined(separator: " | "))
+        print(String(format: "  prima lettura a caldo: %.2f s", readTime))
+        _ = await tools.call("screenshot", [:])
+        let zoomed = await tools.call("screenshot", ["region": [0, 0, 700, 400]])
+        check("zoom: contiene il testo letto", zoomed.text.contains("4821"), zoomed.text.prefix(160).description)
+
         print("Zoom:")
         await open("etichetta.html")
         let shot = await tools.call("screenshot", [:])
         let z = await tools.call("screenshot", ["region": [0, 0, 400, 300]])
-        check("screenshot con region", !z.isError && z.content.contains { ($0["type"] as? String) == "image" }, z.text)
+        // An image, or (Story 8.3) the text read on the Mac when it is enough.
+        check("screenshot con region", !z.isError && (z.content.contains { ($0["type"] as? String) == "image" } || z.text.contains("read on the Mac")), z.text.prefix(120).description)
         _ = shot
 
         print("Esc:")
@@ -1523,6 +1575,7 @@ extension DebugCLI {
         }
         do { try await agent.start() } catch { print("Server strumenti: \(error)"); return }
         // Restarts of the Long session (Story 7.5): every one is announced with «Riavvio l'Agente».
+        TextReader.shared.warmUp()
         let restarts = Box(0)
         agent.onNotice = { text in if text == ClaudeEngine.restartNotice { restarts.value += 1 } }
         await closeBenchPages(ex)
@@ -1549,6 +1602,9 @@ extension DebugCLI {
             var escalationCost: Double?
             /// The answer claims success but the check fails (Story 8.2, FR-46).
             var falseDone = false
+            /// First `read_text` of the task and whether a screenshot was asked (Story 8.3).
+            var readText: Double?
+            var screenshot = false
             var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) + router - total) <= 0.2 }
         }
         var rows: [Row] = []
@@ -1666,6 +1722,9 @@ extension DebugCLI {
                           turns: ranAgent ? agent.lastTurns : nil, confirmations: ranAgent ? agent.tools.confirmationsAsked : 0,
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
             row.router = routerTime
+            row.readText = agent.tools.readTextSeconds.first
+            row.screenshot = agent.tools.callLog.contains { $0.hasPrefix("- screenshot") }
+            if let rt = row.readText { print(String(format: "      read_text: %.2f s%@", rt, row.screenshot ? " · anche screenshot" : " · senza screenshot")) }
             if ranAgent, !ok, !kind.isPhrase, claimed {
                 row.falseDone = true
                 print("      ⚠︎ falso «fatto»: la risposta dice riuscito, la verifica no")
@@ -1741,12 +1800,12 @@ extension DebugCLI {
         let out = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
         let phaseHeader = BenchPhase.allCases.map { "\($0.rawValue)_s" }.joined(separator: "\t")
-        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tfalso_fatto\tturni\tconferme\tbloccate\tmodello\trisposta\n"
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tfalso_fatto\tread_text_s\tscreenshot\tturni\tconferme\tbloccate\tmodello\trisposta\n"
         for r in rows {
             let esito = r.skipped != nil ? "saltato" : (r.ok ? "ok" : "no")
             let phases = BenchPhase.allCases.map { p in r.phases[p].map { String(format: "%.2f", $0) } ?? "" }.joined(separator: "\t")
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.falseDone ? "sì" : "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.falseDone ? "sì" : "")\t\(r.readText.map { String(format: "%.2f", $0) } ?? "")\t\(r.screenshot ? "sì" : "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         // The verdict in a file of its own, next to the table: the TSV stays a plain table.

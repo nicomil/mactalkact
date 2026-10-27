@@ -561,3 +561,25 @@ Cosa dice: su questo Banco l'Agente non dichiarava già il falso. I tre fallimen
 Nota sul rilevatore: una prima versione cercava pochi segni di resa solo nella prima frase e contava come «falsi fatto» anche le risposte oneste. Ora una risposta con una negazione («non», «nessun», «nulla», «purtroppo») non vale come dichiarazione di successo.
 
 Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-27-2236-claude.tsv`.
+
+## 20. Lettura del testo nelle immagini sul Mac (Storia 8.3, 27 ottobre 2026)
+
+Nuovo strumento `read_text(region)`: legge il testo della finestra, o di una regione dello screenshot, con Vision sul Mac. Usa la modalità accurata con ripiego alla veloce, ha un tempo massimo di 10 s e riporta le righe con la loro posizione. `screenshot` con `region` ora include il testo letto e, quando la lettura è sicura (fiducia media ≥ 0,8), manda il testo al posto dell'immagine.
+
+| Misura | Valore |
+| --- | --- |
+| `etichetta-ordine` con Claude | riuscito, `read_text` in 0,36 s, **nessuno screenshot** |
+| Prima lettura a caldo (`--hands-test`) | 0,40 s; legge «4821-B» |
+| Vision accurata, prima volta in assoluto sul Mac | 57 s (il sistema compila il modello una volta sola); dopo 0,2 s; veloce 0,09 s |
+
+Il riscaldamento parte in background all'avvio dell'app. Una lettura chiesta prima che finisca usa la modalità veloce. La corsa al tempo massimo non aspetta Vision, che blocca il suo thread e non si ferma se viene cancellato. L'immagine passa a Vision ridotta a 2.000 px sul lato lungo.
+
+**Modello Apple con l'immagine** (`--local-vision-test`, 5 pagine del Banco, macOS 27 `Attachment(cgImage)`):
+
+| Domanda | Esito |
+| --- | --- |
+| Descrive la finestra | 5/5 corrette («tre forme: un quadrato blu, un cerchio rosso e un triangolo verde») |
+| Legge un testo preciso | 1 su 2 utili: numero d'ordine **inventato** («495832510» invece di «4821-B»), mittente «Marco Resti» invece di «Marco Rossi» |
+| Localizza (in alto, al centro, in basso) | inutile: risponde sempre «in alto, al centro» |
+
+Tempi: 2–8 s per la prima domanda, 0,7–1,8 s per le successive. Conclusione: il modello Apple vede e descrive, ma non legge in modo affidabile e non localizza. Per il testo resta `read_text`, esatto e dieci volte più veloce. Nessun requisito nuovo.

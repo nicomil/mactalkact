@@ -86,6 +86,7 @@ final class AgentTools {
         callCount = 0
         escalation = nil
         instantGuard = false
+        readTextSeconds = []
         if !keepElements {
             callLog = []
             // The same request retried on another engine keeps what the first one asked (AD-15).
@@ -138,6 +139,9 @@ final class AgentTools {
         tool("screenshot",
              "JPEG screenshot of the frontmost window with an orange numbered tag on every clickable element: click(id) with that number. Use it when observe is not enough (icons without labels, images, canvas, visual layout). Pass `region` [x0, y0, x1, y1] (coordinates of the latest screenshot) to zoom into a part at full resolution, e.g. small text; click x/y keep using the coordinates of the full screenshot.",
              ["region": ["type": "array", "items": ["type": "number"], "description": "Optional [x0, y0, x1, y1] to zoom into."]]),
+        tool("read_text",
+             "Read the text of the frontmost window, or of `region` [x0, y0, x1, y1] of the latest screenshot, with the Mac's text recognition: labels, photos, canvas, scanned documents, small print. Returns each line with its position (@x,y like observe). The image never leaves the Mac: prefer it to screenshot when you only need the text.",
+             ["region": ["type": "array", "items": ["type": "number"], "description": "Optional [x0, y0, x1, y1] in coordinates of the latest screenshot."]]),
         tool("click",
              "Click an element by id or at x/y of the latest screenshot. method: 'auto' (accessibility press, then real mouse click), 'mouse' (real mouse click, best for web pages and lists), 'double', 'right' (context menu), 'middle'. `count` 2 or 3 for double/triple click (triple selects a line or paragraph). `modifiers` e.g. 'cmd' or 'shift' for cmd-click (new tab, multiple selection) or shift-click (range)." + afterAction,
              idOrPoint.merging([
@@ -247,6 +251,7 @@ final class AgentTools {
         static func text(_ s: String) -> Result { Result(content: [["type": "text", "text": s]]) }
         static func error(_ s: String) -> Result { Result(content: [["type": "text", "text": s]], isError: true) }
         var text: String { content.compactMap { $0["text"] as? String }.joined(separator: "\n") }
+        var asReadOnly: Result { var r = self; r.readOnly = true; return r }
     }
 
     /// An error for the agent, thrown from deep inside a tool.
@@ -344,6 +349,9 @@ final class AgentTools {
 
         case "screenshot":
             return try await screenshot(a)
+
+        case "read_text":
+            return try await readText(a)
 
         case "click":
             return try await click(a)
@@ -1069,6 +1077,47 @@ final class AgentTools {
         ])
     }
 
+    /// Seconds of each `read_text` of this request, for the Bench (Story 8.3).
+    private(set) var readTextSeconds: [Double] = []
+
+    /// The text of the window or of a region of the latest screenshot, read on the Mac (FR-47).
+    private func readText(_ a: [String: Any]) async throws -> Result {
+        onProgress?("Leggo il testo…")
+        guard ScreenCapture.hasPermission else {
+            ScreenCapture.requestPermission()
+            return .error("Screen Recording permission not granted. Use observe instead.")
+        }
+        let started = Date()
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let full = try await ScreenCapture.frontWindow(maxSide: 8000, scaleFactor: scale)
+        let sx = CGFloat(full.image.width) / full.windowFrame.width
+        let sy = CGFloat(full.image.height) / full.windowFrame.height
+        var crop = CGRect(x: 0, y: 0, width: full.image.width, height: full.image.height)
+        if let r = (a["region"] as? [Any])?.compactMap(Self.double), r.count == 4 {
+            guard let shot = lastShot else { return .error("region uses the coordinates of a screenshot: take one, or call read_text without region for the whole window.") }
+            let p0 = shot.screenPoint(imageX: min(r[0], r[2]), imageY: min(r[1], r[3]))
+            let p1 = shot.screenPoint(imageX: max(r[0], r[2]), imageY: max(r[1], r[3]))
+            crop = CGRect(x: (p0.x - full.windowFrame.minX) * sx, y: (p0.y - full.windowFrame.minY) * sy,
+                          width: (p1.x - p0.x) * sx, height: (p1.y - p0.y) * sy).integral
+                .intersection(CGRect(x: 0, y: 0, width: full.image.width, height: full.image.height))
+        }
+        guard !crop.isEmpty, let image = full.image.cropping(to: crop) else {
+            return .error("The region is empty or outside the window: use coordinates of the latest screenshot.")
+        }
+        guard let lines = await TextReader.shared.read(image) else {
+            return .text("Text not readable right now (text recognition still loading or too slow): try again, or take a screenshot.").asReadOnly
+        }
+        readTextSeconds.append(Date().timeIntervalSince(started))
+        guard !lines.isEmpty else { return .text("No text found there.").asReadOnly }
+        // Positions in window points, like observe.
+        let rows = lines.sorted { abs($0.box.minY - $1.box.minY) > 6 ? $0.box.minY < $1.box.minY : $0.box.minX < $1.box.minX }
+            .map { l -> String in
+                let x = Int((crop.minX + l.box.minX) / sx), y = Int((crop.minY + l.box.minY) / sy)
+                return "«\(l.text)» @\(x),\(y) \(Int(l.box.width / sx))x\(Int(l.box.height / sy))"
+            }
+        return .text("Text read on the Mac (\(rows.count) lines):\n" + rows.joined(separator: "\n")).asReadOnly
+    }
+
     /// A region of the latest screenshot at full (Retina) resolution, like Claude's `zoom`.
     private func zoom(_ r: [Double]) async throws -> Result {
         guard let shot = lastShot else { return .error("region needs a screenshot first: take one, then zoom into its coordinates.") }
@@ -1082,6 +1131,21 @@ final class AgentTools {
                           width: (p1.x - p0.x) * sx, height: (p1.y - p0.y) * sy)
         guard let (jpeg, size) = ScreenCapture.zoomJPEG(full.image, crop: crop) else {
             return .error("The region is empty or outside the window: use coordinates of the latest screenshot.")
+        }
+        // The text of the region, read on the Mac (FR-47). When it is read with confidence, it
+        // replaces the image: the picture does not have to go to the cloud to be read.
+        if let image = full.image.cropping(to: crop.integral), let lines = await TextReader.shared.read(image), !lines.isEmpty {
+            let text = lines.sorted { abs($0.box.minY - $1.box.minY) > 6 ? $0.box.minY < $1.box.minY : $0.box.minX < $1.box.minX }.map(\.text)
+            let confident = lines.map(\.confidence).reduce(0, +) / Float(lines.count) >= 0.8
+            if confident {
+                return .text("Text of region \(r.map { String(Int($0)) }.joined(separator: ",")), read on the Mac (the image was not needed):\n"
+                             + text.map { "«\($0)»" }.joined(separator: "\n")
+                             + "\nIf you need to see the region itself (colors, layout), use screenshot without region and look there.")
+            }
+            return Result(content: [
+                ["type": "image", "data": jpeg.base64EncodedString(), "mimeType": "image/jpeg"],
+                ["type": "text", "text": "Zoom of \(r.map { String(Int($0)) }.joined(separator: ",")) at full resolution (\(Int(size.width))x\(Int(size.height)) px). Text read on the Mac (uncertain): " + text.map { "«\($0)»" }.joined(separator: " · ")],
+            ])
         }
         return Result(content: [
             ["type": "image", "data": jpeg.base64EncodedString(), "mimeType": "image/jpeg"],

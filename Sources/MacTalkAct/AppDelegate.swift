@@ -49,6 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Text recognition (FR-47) loads in the background: listening is not delayed.
+        TextReader.shared.warmUp()
         hud = HUDController()
         coordinator = Coordinator(hud: hud, settings: settings)
         coordinator.onModeChange = { [weak self] in self?.updateIcon() }

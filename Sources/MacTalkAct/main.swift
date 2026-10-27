@@ -99,6 +99,15 @@ if arguments.contains("--fallback-test") {
     dispatchMain()
 }
 
+if arguments.contains("--local-vision-test") {
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        await DebugCLI.localVisionTest()
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--session-test") {
     // Claude's Long session for real: two messages on one process, the second reads the cache.
     Task { @MainActor in
