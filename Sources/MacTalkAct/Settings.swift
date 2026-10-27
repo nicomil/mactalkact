@@ -42,7 +42,7 @@ enum PTTKey: String, CaseIterable, Identifiable {
 
 /// The sections of the settings window (also used by the menu bar).
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case listening, conversation, understanding, agent, voice, numbers, memory, permissions, status
+    case listening, conversation, understanding, agent, voice, numbers, memory, privacy, permissions, status
 
     var id: String { rawValue }
 
@@ -55,6 +55,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .voice: return "Voce e suoni"
         case .numbers: return "Numeri"
         case .memory: return "Memoria e macro"
+        case .privacy: return "Privacy"
         case .permissions: return "Permessi"
         case .status: return "Stato e diagnostica"
         }
@@ -69,6 +70,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .voice: return "speaker.wave.2"
         case .numbers: return "number.square"
         case .memory: return "book.closed"
+        case .privacy: return "hand.raised"
         case .permissions: return "lock.shield"
         case .status: return "stethoscope"
         }
@@ -156,6 +158,13 @@ final class AppSettings: ObservableObject {
         // Numbers
         static let numbersTimeout = 30.0
         static let numbersLimit = 180
+        // Privacy
+        static let privateModeMinutes = 30.0
+        static let reservedApps = Privacy.defaultReservedApps
+        static let reservedSites = Privacy.defaultReservedSites
+        static let hideSensitiveFromCloud = true
+        static let logRetentionDays = 7
+        static let detailedLog = false
     }
 
     // MARK: Listening
@@ -247,6 +256,33 @@ final class AppSettings: ObservableObject {
     @Published var numbersTimeout: Double { didSet { defaults.set(numbersTimeout, forKey: "numbersTimeout") } }
     @Published var numbersLimit: Int { didSet { defaults.set(numbersLimit, forKey: "numbersLimit") } }
 
+    // MARK: Privacy
+    /// How long «modalità privata» lasts before switching off by itself.
+    @Published var privateModeMinutes: Double { didSet { defaults.set(privateModeMinutes, forKey: "privateModeMinutes") } }
+    /// Apps never shown to a cloud engine (bundle identifier or name, one per line).
+    @Published var reservedApps: String { didSet { defaults.set(reservedApps, forKey: "reservedApps") } }
+    /// Sites never shown to a cloud engine (domain or word, one per line).
+    @Published var reservedSites: String { didSet { defaults.set(reservedSites, forKey: "reservedSites") } }
+    /// Masks card numbers, IBANs, tax codes and numeric secrets in what the cloud engines read.
+    @Published var hideSensitiveFromCloud: Bool { didSet { defaults.set(hideSensitiveFromCloud, forKey: "hideSensitiveFromCloud") } }
+    /// Days of log kept on disk.
+    @Published var logRetentionDays: Int { didSet { defaults.set(logRetentionDays, forKey: "logRetentionDays"); syncLogPolicy() } }
+    /// The log also contains what the agent saw and did and the text of ignored sentences (diagnosis).
+    @Published var detailedLog: Bool { didSet { defaults.set(detailedLog, forKey: "detailedLog"); syncLogPolicy() } }
+    /// Until when «modalità privata» is on. Never saved: a restart ends it.
+    @Published private(set) var privateModeUntil: Date? { didSet { syncLogPolicy() } }
+
+    var privateModeActive: Bool { privateModeUntil.map { $0 > Date() } ?? false }
+
+    func setPrivateMode(_ on: Bool) {
+        privateModeUntil = on ? Date().addingTimeInterval(max(1, privateModeMinutes) * 60) : nil
+    }
+
+    /// The log runs on its own queue: it gets a copy of the rules it needs.
+    private func syncLogPolicy() {
+        Log.setPolicy(detailed: detailedLog, privateUntil: privateModeUntil, retentionDays: logRetentionDays)
+    }
+
     // MARK: Window
     @Published var lastSettingsSection: SettingsSection { didSet { defaults.set(lastSettingsSection.rawValue, forKey: "lastSettingsSection") } }
 
@@ -334,7 +370,16 @@ final class AppSettings: ObservableObject {
         numbersTimeout = double("numbersTimeout", Defaults.numbersTimeout)
         numbersLimit = int("numbersLimit", Defaults.numbersLimit)
 
+        privateModeMinutes = double("privateModeMinutes", Defaults.privateModeMinutes)
+        reservedApps = string("reservedApps", Defaults.reservedApps)
+        reservedSites = string("reservedSites", Defaults.reservedSites)
+        hideSensitiveFromCloud = bool("hideSensitiveFromCloud", Defaults.hideSensitiveFromCloud)
+        logRetentionDays = int("logRetentionDays", Defaults.logRetentionDays)
+        detailedLog = bool("detailedLog", Defaults.detailedLog)
+        privateModeUntil = nil
+
         lastSettingsSection = SettingsSection(rawValue: string("lastSettingsSection", "")) ?? .listening
+        syncLogPolicy()
     }
 
     /// "Ripristina predefiniti": only the keys of one section (AD-12).
@@ -376,6 +421,10 @@ final class AppSettings: ObservableObject {
             hudPosition = Defaults.hudPosition; hudCompact = Defaults.hudCompact
         case .numbers:
             numbersTimeout = Defaults.numbersTimeout; numbersLimit = Defaults.numbersLimit
+        case .privacy:
+            privateModeMinutes = Defaults.privateModeMinutes; reservedApps = Defaults.reservedApps
+            reservedSites = Defaults.reservedSites; hideSensitiveFromCloud = Defaults.hideSensitiveFromCloud
+            logRetentionDays = Defaults.logRetentionDays; detailedLog = Defaults.detailedLog
         case .memory, .permissions, .status:
             break
         }

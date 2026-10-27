@@ -97,7 +97,9 @@ final class LocalEngine: AgentEngine {
     /// The model of the next request: the server when chosen and allowed, otherwise Apple's.
     private func languageModel() -> (any LanguageModel, String) {
         if provider == .server, !serverModel.isEmpty, serverReachable != false,
-           OpenAICompatibleModel.isAllowed(baseURL: serverURL, allowRemote: settings.localServerAllowRemote),
+           // A server on another computer is not «on the Mac»: never for private or reserved windows.
+           OpenAICompatibleModel.isAllowed(baseURL: serverURL,
+                                           allowRemote: settings.localServerAllowRemote && PrivacyGuard.cloudBlockReason() == nil),
            let m = OpenAICompatibleModel.make(baseURL: serverURL, model: serverModel,
                                               keepAliveMinutes: settings.localKeepAliveMinutes) {
             return (m, serverModel)

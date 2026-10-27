@@ -275,6 +275,46 @@ enum DebugCLI {
         check("nessun avviso per Jarvis", AppSettings.wakeWordWarning("Jarvis") == nil)
         check("tutte le sezioni hanno titolo e icona", SettingsSection.allCases.allSatisfy { !$0.title.isEmpty && !$0.icon.isEmpty })
 
+        print("Privacy:")
+        check("email mascherata nel log", Privacy.redact("scrivi a mario.rossi@gmail.com che arrivo") == "scrivi a [email] che arrivo")
+        check("cellulare mascherato", Privacy.redact("chiama il 347 123 4567") == "chiama il [telefono]")
+        check("telefono con prefisso", Privacy.redact("numero +39 02 1234 5678") == "numero [telefono]")
+        check("IBAN mascherato", Privacy.redact("IBAN IT60 X054 2811 1010 0000 0123 456 grazie") == "IBAN [IBAN] grazie")
+        check("carta (Luhn) mascherata", Privacy.redact("carta 4111 1111 1111 1111 scade") == "carta [carta] scade")
+        check("numero lungo non carta resta", Privacy.redact("ordine 1234567890123") == "ordine 1234567890123")
+        check("codice fiscale", Privacy.redact("il mio CF è RSSMRA85T10A562S") == "il mio CF è [codice fiscale]")
+        check("password", Privacy.redact("la password è gattino") == "la password è [segreto]")
+        check("PIN numerico", Privacy.redact("il pin: 4821") == "il pin: [segreto]")
+        check("codice di verifica", Privacy.redact("codice di verifica 482913") == "codice di verifica [segreto]")
+        check("orari e date restano", Privacy.redact("alle 17:40 del 27.10.2026, 320 ms") == "alle 17:40 del 27.10.2026, 320 ms")
+        check("cloud: email resta", Privacy.redact("scrivi a mario@x.it", forCloud: true) == "scrivi a mario@x.it")
+        check("cloud: telefono resta", Privacy.redact("chiama il 347 123 4567", forCloud: true) == "chiama il 347 123 4567")
+        check("cloud: «Password dimenticata?» resta", Privacy.redact("[3]* link «Password dimenticata?»", forCloud: true) == "[3]* link «Password dimenticata?»")
+        check("cloud: carta nascosta", Privacy.redact("«4111 1111 1111 1111»", forCloud: true) == "«[carta]»")
+        check("memoria: rifiuta password", Privacy.containsSensitive("la password del wifi è Gatto2024"))
+        check("memoria: rifiuta IBAN", Privacy.containsSensitive("IBAN di Marco IT60X0542811101000000123456"))
+        check("memoria: accetta profilo", !Privacy.containsSensitive("«profilo aula IB» = Microsoft Edge, profilo «Aulab»"))
+        check("app riservata per id", Privacy.isReservedApp(name: "1Password", bundleID: "com.1password.1password", list: Privacy.defaultReservedApps))
+        check("app riservata per nome", Privacy.isReservedApp(name: "Banca Mia", bundleID: "x.y", list: "# commento\nbanca mia"))
+        check("Safari non riservata", !Privacy.isReservedApp(name: "Safari", bundleID: "com.apple.Safari", list: Privacy.defaultReservedApps))
+        check("sito: sottodominio", Privacy.reservedSite(host: "www.paypal.com", title: "", list: Privacy.defaultReservedSites) == "paypal.com")
+        check("sito: dominio diverso", Privacy.reservedSite(host: "paypal.com.truffa.ru", title: "", list: "paypal.com") == nil)
+        check("sito: parola nell'indirizzo", Privacy.reservedSite(host: "online.miabanca.it", title: "", list: "banca") == "banca")
+        check("sito: dal titolo", Privacy.reservedSite(host: nil, title: "Intesa Sanpaolo – Home", list: Privacy.defaultReservedSites) == "intesasanpaolo.com")
+        check("sito: titolo qualsiasi", Privacy.reservedSite(host: nil, title: "YouTube", list: Privacy.defaultReservedSites) == nil)
+        check("«modalità privata»", Phrases.privateMode("Modalità privata.") == true)
+        check("«esci dalla modalità privata»", Phrases.privateMode("esci dalla modalità privata") == false)
+        check("frase qualsiasi non è privata", Phrases.privateMode("apri la mail") == nil)
+        let day = DateFormatter()
+        day.dateFormat = "yyyy-MM-dd"
+        let logNow = day.date(from: "2026-10-27")!.addingTimeInterval(3600 * 10)
+        let names = ["MacTalkAct.log", "MacTalkAct-2026-10-27.log", "MacTalkAct-2026-10-21.log", "MacTalkAct-2026-10-20.log",
+                     "MacTalkAct-2026-10-19-101010.log", "MacTalkAct-bench-2026-10-01-0101-local.tsv", "Altro-2026-01-01.log"]
+        check("log: tiene 7 giorni, tocca solo i suoi file",
+              Set(Log.archivesToDelete(names, now: logNow, days: 7)) == ["MacTalkAct-2026-10-20.log", "MacTalkAct-2026-10-19-101010.log"])
+        check("log: 1 giorno = solo oggi",
+              Log.archivesToDelete(["MacTalkAct-2026-10-26.log", "MacTalkAct-2026-10-27.log"], now: logNow, days: 1) == ["MacTalkAct-2026-10-26.log"])
+
         print(failures == 0 ? "Tutto ok." : "\(failures) test falliti.")
         return failures == 0
     }

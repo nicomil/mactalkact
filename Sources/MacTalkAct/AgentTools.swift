@@ -16,6 +16,9 @@ final class AgentTools {
     var askUser: ((String, Bool) async -> String?)?
     /// Add «what changed» to the result of every action (AD-19). The local engine observes on its own.
     var reportOutcome = true
+    /// The engine calling the tools runs in the cloud: reserved windows are off limits and
+    /// sensitive data in the results is masked.
+    var cloudEngine = false
 
     private let executor: Executor
     private var registry: [Int: (element: AXUIElement, label: String, role: String)] = [:]
@@ -173,7 +176,7 @@ final class AgentTools {
              "List the profiles of a Chromium browser (Edge, Chrome, Brave): directory, name, account email.",
              ["browser": ["type": "string"]], required: ["browser"]),
         tool("remember",
-             "Save a short fact in the user's personal memory (Italian), e.g. «profilo aula IB» = Edge, profilo «Aulab». Use when the user says «ricorda che…» or when you learn a stable preference or alias.",
+             "Save a short fact in the user's personal memory (Italian), e.g. «profilo aula IB» = Edge, profilo «Aulab». Use when the user says «ricorda che…» or when you learn a stable preference or alias. Never save passwords, codes, card or bank details, health information or other people's personal data (phone numbers, addresses) unless the user explicitly asks to remember that exact thing.",
              ["fact": ["type": "string"]], required: ["fact"]),
         tool("forget",
              "Remove facts from the personal memory that contain this text («dimentica…»).",
@@ -233,16 +236,43 @@ final class AgentTools {
         callCount += 1
         if firstCallAt == nil { firstCallAt = Date() }
         if callCount > maxCalls { return .error("Step limit reached. Stop and tell the user what is left to do.") }
-        Log.debug("Agente → \(name) \(Self.compact(args))")
+        Log.debug("Agente → \(name) \(Log.isDetailed ? Self.compact(args) : Self.shape(args))")
+        if cloudEngine, let why = PrivacyGuard.cloudBlockReason() {
+            Log.info("Agente: \(name) bloccato, \(why)")
+            return Self.privateWindowError(why)
+        }
         var result = await perform(name, args)
         if reportOutcome, Self.outcomeTools.contains(name), !result.readOnly, !cancelled,
            !result.text.hasPrefix("MacTalkAct does not have"), !result.text.hasPrefix("The frontmost app changed") {
             await settle()
+            if cloudEngine, let why = PrivacyGuard.cloudBlockReason() {
+                // The action led to a reserved window: the engine does not see what is there.
+                Log.info("Agente: dopo \(name) la finestra è riservata, \(why)")
+                return Self.privateWindowError(why)
+            }
             result.content.append(["type": "text", "text": outcome()])
         }
-        let summary = (result.content.first?["text"] as? String).map { String($0.prefix(160)) } ?? "(immagine)"
-        Log.debug("Agente ← \(name)\(result.isError ? " ERRORE" : ""): \(summary.replacingOccurrences(of: "\n", with: " ⏎ "))")
+        if cloudEngine, AppSettings.shared.hideSensitiveFromCloud {
+            result.content = result.content.map { item in
+                guard let t = item["text"] as? String else { return item }
+                var copy = item
+                copy["text"] = Privacy.redact(t, forCloud: true)
+                return copy
+            }
+        }
+        if Log.isDetailed {
+            let summary = (result.content.first?["text"] as? String).map { String($0.prefix(160)) } ?? "(immagine)"
+            Log.debug("Agente ← \(name)\(result.isError ? " ERRORE" : ""): \(summary.replacingOccurrences(of: "\n", with: " ⏎ "))")
+        } else {
+            // What is on screen stays out of the log: only the size of the answer.
+            let images = result.content.filter { ($0["type"] as? String) == "image" }.count
+            Log.debug("Agente ← \(name)\(result.isError ? " ERRORE" : ""): \(result.text.count) caratteri\(images > 0 ? " + immagine" : "")")
+        }
         return result
+    }
+
+    private static func privateWindowError(_ why: String) -> Result {
+        .error("PRIVATE WINDOW (\(why)): the user does not want a cloud assistant to see or touch this window. Do not call any more tools. Reply in one short Italian sentence that you stopped because the window is private and they can do it by hand or with the local engine.")
     }
 
     /// The safety checks and the tool itself, without the outcome (`act` runs its steps here).
@@ -433,9 +463,17 @@ final class AgentTools {
 
         case "remember":
             guard let fact = a["fact"] as? String else { return .error("Missing fact") }
-            Memory.shared.remember(fact)
-            onProgress?("Ricordo: \(fact)")
-            return .text("Saved.")
+            switch Memory.shared.remember(fact) {
+            case .saved:
+                onProgress?("Ricordo: \(fact)")
+                return .text("Saved.")
+            case .sensitive:
+                return .error("Not saved: the fact contains sensitive data (password, code, card or bank details, tax code). The app never stores these. Tell the user in one short Italian sentence.")
+            case .privateMode:
+                return .error("Not saved: private mode is on, nothing is remembered. Tell the user in one short Italian sentence.")
+            case .empty:
+                return .text("Nothing to save.")
+            }
 
         case "forget":
             guard let text = a["text"] as? String else { return .error("Missing text") }
@@ -462,6 +500,7 @@ final class AgentTools {
         case "get_text":
             let ctx = ScreenContext.capture(includeLabels: false)
             guard ctx.isEditable else { return .error("No editable text field is focused.") }
+            guard !ctx.isSecure else { return .error("The focused field is a password field: its content is never read.") }
             return .text("SELECTED_TEXT: <<<\(ctx.selectedText)>>>\nTEXT_BEFORE_CURSOR: <<<\(ctx.textBeforeCursor)>>>")
 
         case "edit_text":
@@ -609,7 +648,7 @@ final class AgentTools {
 
     private static let attrs = [
         kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute,
-        kAXChildrenAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXFocusedAttribute,
+        kAXChildrenAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXFocusedAttribute, kAXSubroleAttribute,
     ] as [String]
 
     private static let clickableRoles: Set<String> = [
@@ -738,7 +777,9 @@ final class AgentTools {
                     lastLabel = label
                     var line = "[\(id)]\(clickable ? "*" : "") \(role.replacingOccurrences(of: "AX", with: "").lowercased())"
                     if !label.isEmpty { line += " «\(label)»" }
-                    if Self.textInputRoles.contains(role), !value.isEmpty {
+                    if (v[8] as? String) == "AXSecureTextField" {
+                        line += " (password field: content never read)"
+                    } else if Self.textInputRoles.contains(role), !value.isEmpty {
                         line += " value=«\(AX.collapse(value, max: 60))»"
                     }
                     if Self.valueRoles.contains(role) {
@@ -1185,7 +1226,7 @@ final class AgentTools {
             }
             var args = step
             args.removeValue(forKey: "tool")
-            Log.debug("Agente → act \(i + 1). \(name) \(Self.compact(args))")
+            Log.debug("Agente → act \(i + 1). \(name) \(Log.isDetailed ? Self.compact(args) : Self.shape(args))")
             let r = await perform(name, args)
             lines.append("\(i + 1). \(name): \(r.isError ? "ERROR " : "ok — ")\(Self.short(r.text, max: 200))")
             if r.isError { failed = true }
@@ -1224,6 +1265,24 @@ final class AgentTools {
     static func isEmptyAnswer(_ text: String) -> Bool {
         let n = Grammar.normalize(text)
         return n.isEmpty || emptyAnswers.contains(n)
+    }
+
+    /// Arguments without their text, for the normal log: «type_text {"text":"«42 car.»"}».
+    private static let plainArgs: Set<String> = ["method", "modifiers", "keys", "direction", "mode", "browser", "count", "amount"]
+    static func shape(_ args: [String: Any]) -> String {
+        var copy: [String: Any] = [:]
+        for (k, v) in args {
+            if let s = v as? String {
+                if k == "url" { copy[k] = URL(string: s.contains("://") ? s : "https://" + s)?.host ?? "«\(s.count) car.»" }
+                else { copy[k] = plainArgs.contains(k) || k == "app" ? s : "«\(s.count) car.»" }
+            } else if let list = v as? [Any], k != "ids", k != "region" {
+                copy[k] = "\(list.count) elementi"
+            } else {
+                copy[k] = v
+            }
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: copy, options: [.sortedKeys])) ?? Data()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     private static func compact(_ args: [String: Any]) -> String {

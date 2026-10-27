@@ -614,7 +614,9 @@ final class SpeechEngine {
         let wasForced = forced || s.forced
         Task { @MainActor in
             let text = await s.finish()
-            Log.debug("Fine frase (\(wasForced ? "tasto" : "voce")): «\(text)»")
+            // Only the length: the text of a sentence goes in the log once the router accepts it.
+            Log.debug("Fine frase (\(wasForced ? "tasto" : "voce")): \(text.count) caratteri")
+            Log.detail("Sentito: «\(text)»")
             if wasForced {
                 self.resumePTT(text)
             } else {

@@ -83,6 +83,7 @@ final class Memory {
         text += "\n## Macro\n\n"
         for m in macros { text += "- \(m.name): \(m.steps.joined(separator: "; "))\n" }
         try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+        Log.protect(fileURL)
         loadedAt = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.modificationDate] as? Date) ?? Date()
     }
 
@@ -94,13 +95,26 @@ final class Memory {
 
     // MARK: Facts
 
-    func remember(_ fact: String) {
+    enum RememberOutcome { case saved, empty, sensitive, privateMode }
+
+    /// Saves a fact, unless it contains sensitive data (passwords, codes, card or bank details,
+    /// tax codes) or private mode is on.
+    @discardableResult
+    func remember(_ fact: String) -> RememberOutcome {
         reload()
         let f = fact.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !f.isEmpty, !facts.contains(f) else { return }
+        guard !f.isEmpty else { return .empty }
+        if AppSettings.shared.privateModeActive { return .privateMode }
+        if Privacy.containsSensitive(f) {
+            Log.info("Memoria: fatto non salvato, contiene dati sensibili")
+            return .sensitive
+        }
+        guard !facts.contains(f) else { return .saved }
         facts.append(f)
         save()
-        Log.info("Memoria: + \(f)")
+        Log.info("Memoria: + 1 fatto")
+        Log.detail("Memoria: + \(f)")
+        return .saved
     }
 
     /// Removes facts containing the given text. Returns how many were removed.
@@ -112,7 +126,7 @@ final class Memory {
         let before = facts.count
         facts.removeAll { Grammar.normalize($0).contains(needle) }
         let removed = before - facts.count
-        if removed > 0 { save(); Log.info("Memoria: − \(removed) fatti su «\(text)»") }
+        if removed > 0 { save(); Log.info("Memoria: − \(removed) fatti") }
         return removed
     }
 
@@ -126,7 +140,8 @@ final class Memory {
         macros.removeAll { Grammar.normalize($0.name) == Grammar.normalize(name) }
         macros.append(Macro(name: name.replacingOccurrences(of: ":", with: " "), steps: clean))
         save()
-        Log.info("Memoria: macro «\(name)» = \(clean.joined(separator: "; "))")
+        Log.info("Memoria: macro «\(name)», \(clean.count) passi")
+        Log.detail("Memoria: macro «\(name)» = \(clean.joined(separator: "; "))")
     }
 
     @discardableResult

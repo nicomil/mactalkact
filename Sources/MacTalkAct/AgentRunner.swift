@@ -220,7 +220,7 @@ final class AgentRunner {
 
     /// Composes the message every cloud engine receives.
     private func message(_ request: String, context: ScreenContext, recent: String, elements: String) -> String {
-        """
+        let screen = """
         <screen>
         APP: \(context.appName) (\(context.bundleID))
         WINDOW_TITLE: \(context.windowTitle)
@@ -232,8 +232,10 @@ final class AgentRunner {
         \(Memory.shared.promptText)
         </memory>
         \(recent)
-        REQUEST: \(request)
         """
+        // What the screen shows is masked; the request is the user's own words and stays as said.
+        let shown = settings.hideSensitiveFromCloud ? Privacy.redact(screen, forCloud: true) : screen
+        return shown + "\nREQUEST: \(request)"
     }
 
     /// The compact message of the local engine: a few hundred tokens instead of thousands.
@@ -265,8 +267,16 @@ final class AgentRunner {
         running = true
         defer { running = false }
         let level: AgentLevel = deep ? .deep : .fast
+        // Private mode, a reserved app or site: only the local engine, the data stays on the Mac.
+        let privateReason = PrivacyGuard.cloudBlockReason()
+        let chosenEngine = privateReason == nil ? self.chosenEngine : .local
+        let fallbackOn = privateReason == nil ? self.fallbackOn : false
+        let first = EngineSelector.select(chosen: chosenEngine, engines: engineStates, fallback: fallbackOn)
+        if let privateReason, first == nil {
+            throw RunError.noEngine("🔒 \(privateReason): qui non uso Claude né Codex, e il modello locale non è disponibile")
+        }
         // The elements with their ids go with the request (cloud engines): one observe less per task.
-        let elements = currentChoice()?.engine == .local ? "" : tools.initialObservation()
+        let elements = first?.engine == .local || first == nil ? "" : tools.initialObservation()
         let req = AgentRequest(message: message(request, context: context, recent: recent, elements: elements),
                                localMessage: localMessage(request, context: context, recent: recent),
                                userRequest: request, level: level)
@@ -283,12 +293,15 @@ final class AgentRunner {
             let started = Date()
             // Cloud engines get the outcome of each action (AD-19); the local engine observes on its own.
             tools.reportOutcome = engine.id != .local
+            tools.cloudEngine = engine.id.isCloud
             do {
                 let answer = try await engine.run(req)
                 lastEngine = engine.id
                 lastModel = model
+                // The answer describes the user's screen: in full only in the detailed log.
                 Log.info(String(format: "Agente (%@/%@): %d passi in %.1fs → %@", engine.id.rawValue, model,
-                                tools.callCount, Date().timeIntervalSince(started), answer))
+                                tools.callCount, Date().timeIntervalSince(started),
+                                Log.isDetailed ? answer : "risposta di \(answer.count) caratteri"))
                 return answer
             } catch let error as AgentEngineError {
                 lastEngine = engine.id

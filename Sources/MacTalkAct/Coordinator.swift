@@ -10,6 +10,8 @@ final class Coordinator {
     private var modeBeforeSession: Mode = .off
     var onModeChange: (() -> Void)?
     var onShowHelp: (() -> Void)?
+    /// Private mode switched on or off (menu bar).
+    var onPrivateModeChange: ((Bool) -> Void)?
 
     let hud: HUDController
     let settings: AppSettings
@@ -429,7 +431,7 @@ final class Coordinator {
                     Log.info("Instradamento: ignora · chiacchiera durante una domanda dell'agente · \(spoken.count) caratteri")
                     return
                 }
-                Log.speech("Risposta all'agente: \(spoken)")
+                Log.info("🎙 Risposta all'agente: \(Log.said(spoken))")
                 hud.show(.working, spoken, detail: "🤖 Ricevuto")
                 answerAgent(spoken)
             }
@@ -454,8 +456,11 @@ final class Coordinator {
         }
         let decision = await router.decide(raw, editable: { screen().isEditable }, state: routerState(pushToTalk: addressed))
         let ms = Int(Date().timeIntervalSince(started) * 1000)
-        let what = decision.logsText ? "«\(raw.trimmingCharacters(in: .whitespacesAndNewlines))»" : "\(raw.count) caratteri"
-        Log.info("Instradamento: \(decision.label) · \(decision.reason) · \(ms) ms · \(what)")
+        // Dictated text is meant for someone else: only its length, unless the detailed log is on.
+        let dictated = Self.isDictation(decision) && !Log.isDetailed
+        let what = decision.logsText && !dictated ? Log.said(raw) : "\(raw.count) caratteri"
+        let reason = dictated && decision.label == "rapido" ? "grammatica: scrivi" : decision.reason
+        Log.info("Instradamento: \(decision.label) · \(reason) · \(ms) ms · \(what)")
         if case .arm = decision {} else { conversation.disarm() }
 
         if dryRun {
@@ -464,6 +469,17 @@ final class Coordinator {
             return
         }
         await perform(decision, screen: screen)
+    }
+
+    /// Decisions that type the sentence as text.
+    private static func isDictation(_ decision: RouteDecision) -> Bool {
+        switch decision {
+        case .dictate, .askToType, .typeProposed: return true
+        case .fast(let cmd, _):
+            if case .type = cmd { return true }
+            return false
+        default: return false
+        }
     }
 
     private func perform(_ decision: RouteDecision, screen: () -> ScreenContext) async {
@@ -539,6 +555,8 @@ final class Coordinator {
             conversation.log.clear()
             conversation.closeWindow()
             done("Conversazione dimenticata")
+        case .privateMode(let on):
+            setPrivateMode(on)
         case .local(let action, let text):
             await runLocal(action, text: text, app: screen().appName)
         case .agent(let text, let deep, _):
@@ -580,8 +598,9 @@ final class Coordinator {
         if settings.cleanDictation {
             hud.show(.thinking, text, detail: "Ripulisco il testo…")
             // Claude when it is the engine in use (as before); otherwise Apple's model, on the Mac (FR-33).
-            let claudeInUse = settings.backend == .apiKey ? settings.apiKey != nil
-                : (settings.useAI && agent.currentChoice()?.engine == .claude)
+            let claudeInUse = (settings.backend == .apiKey ? settings.apiKey != nil
+                : (settings.useAI && agent.currentChoice()?.engine == .claude))
+                && PrivacyGuard.cloudBlockReason() == nil
             if claudeInUse, let c = try? await planner.cleanDictation(text, appName: context.appName, model: settings.model,
                                                                      backend: settings.backend, apiKey: settings.apiKey) {
                 out = c
@@ -590,7 +609,7 @@ final class Coordinator {
             }
         }
         await executor.insertDictation(out, context: context)
-        done(out, detail: "✍️ Scritto · «cancella quello che hai scritto» per toglierlo")
+        done(out, detail: "✍️ Scritto · «cancella quello che hai scritto» per toglierlo", logText: false)
     }
 
     /// Lane 2: a validated one-step action, run without the agent (FR-11).
@@ -668,13 +687,13 @@ final class Coordinator {
         if ending.ends || text.isEmpty {
             // «Ci vediamo domani. Fine.»: the text before the end phrase is still typed.
             if !ending.keep.isEmpty {
-                Log.speech("✍️ \(ending.keep)")
+                Log.dictation(ending.keep)
                 if !dryRun { await executor.insertDictation(ending.keep, context: ScreenContext.capture(includeLabels: false)) }
             }
             stopDictation(reason: "«\(text.isEmpty ? settings.firstWakePhrase : text)»")
             return
         }
-        Log.speech("✍️ \(text)")
+        Log.dictation(text)
         if !dryRun {
             await executor.insertDictation(text, context: ScreenContext.capture(includeLabels: false))
         } else {
@@ -719,7 +738,7 @@ final class Coordinator {
                 if mode != .off {
                     startDictation(announce: false) // keep typing what follows, pauses included
                 } else {
-                    done(text, detail: "✍️ Scritto")
+                    done(text, detail: "✍️ Scritto", logText: false)
                 }
             case .startDictation:
                 startDictation(announce: true)
@@ -770,7 +789,8 @@ final class Coordinator {
 
     /// Runs each step like a spoken command: fast command if possible, otherwise the agent.
     private func runMacro(_ macro: Memory.Macro) async {
-        Log.info("Macro «\(macro.name)»: \(macro.steps.joined(separator: "; "))")
+        Log.info("Macro «\(macro.name)»: \(macro.steps.count) passi")
+        Log.detail("Macro «\(macro.name)»: \(macro.steps.joined(separator: "; "))")
         for (i, step) in macro.steps.enumerated() {
             if cancelRequested { hud.show(.info, "Macro interrotta", autoHide: 1.5); return }
             hud.show(.working, step, detail: "Macro «\(macro.name)» · \(i + 1)/\(macro.steps.count)")
@@ -796,7 +816,8 @@ final class Coordinator {
             return
         }
 
-        if settings.backend == .subscription {
+        // Private or reserved window: the agent with the local engine, never the API planner.
+        if settings.backend == .subscription || PrivacyGuard.cloudBlockReason() != nil {
             await runAgent(text, context: ctx, deep: deep)
             return
         }
@@ -824,7 +845,10 @@ final class Coordinator {
         }
         engineNotice = nil
         defer { engineNotice = nil }
-        if deep, agent.currentChoice()?.engine == .local {
+        if settings.agentEngine.isCloud, let why = PrivacyGuard.cloudBlockReason() {
+            // Reserved: the local engine works on it, Claude and Codex never see it.
+            engineNotice = "🔒 \(why.prefix(1).uppercased() + why.dropFirst()) · resto sul Mac"
+        } else if deep, agent.currentChoice()?.engine == .local {
             // Long tasks are beyond a small model: say it before starting (Story 5.4).
             engineNotice = "💻 Col modello locale potrebbe non riuscire"
         }
@@ -919,14 +943,53 @@ final class Coordinator {
 
     // MARK: Feedback
 
-    private func done(_ title: String, detail: String = "") {
-        Log.info("✓ \(title)\(detail.isEmpty ? "" : " (\(detail))")")
+    /// `logText: false` for text written for the user (dictation): the log gets only its length.
+    private func done(_ title: String, detail: String = "", logText: Bool = true) {
+        let what = logText && !Log.isPrivate ? title : (Log.isDetailed ? "«\(title)»" : "\(title.count) caratteri")
+        Log.info("✓ \(what)\(detail.isEmpty ? "" : " (\(detail))")")
         hud.show(.success, title, detail: detail, autoHide: settings.hudSuccessSeconds)
     }
 
     private func fail(_ title: String, detail: String = "") {
         Sound.error()
         hud.show(.error, title, detail: detail, autoHide: settings.hudErrorSeconds)
-        Log.error("\(title) \(detail)")
+        Log.error(Log.isPrivate ? "errore (modalità privata: \(title.count) + \(detail.count) caratteri)" : "\(title) \(detail)")
+    }
+
+    // MARK: Private mode
+
+    private var privateModeEnd: Task<Void, Never>?
+
+    /// «modalità privata»: for a while no cloud engine, no text in the log, nothing remembered.
+    func setPrivateMode(_ on: Bool) {
+        let was = settings.privateModeActive
+        settings.setPrivateMode(on)
+        conversation.log.clear()
+        privateModeEnd?.cancel()
+        privateModeEnd = nil
+        onPrivateModeChange?(on)
+        if on {
+            let minutes = Int(settings.privateModeMinutes.rounded())
+            Log.info("Modalità privata: attiva per \(minutes) minuti")
+            hud.show(.info, "🔒 Modalità privata",
+                     detail: "\(minutes) minuti: niente Claude né Codex, niente testo nel log · «esci dalla modalità privata»",
+                     autoHide: 4)
+            let until = settings.privateModeUntil ?? Date()
+            privateModeEnd = Task { [weak self] in
+                // A second after the end, so the mode is surely over when checked.
+                try? await Task.sleep(for: .seconds(max(1, until.timeIntervalSinceNow + 1)))
+                guard let self, !Task.isCancelled, !self.settings.privateModeActive else { return }
+                self.settings.setPrivateMode(false)
+                self.conversation.log.clear()
+                self.onPrivateModeChange?(false)
+                Log.info("Modalità privata: finita")
+                self.hud.show(.info, "Modalità privata finita", autoHide: 2.5)
+            }
+        } else if was {
+            Log.info("Modalità privata: disattivata")
+            hud.show(.info, "Modalità privata finita", autoHide: 2)
+        } else {
+            hud.show(.info, "La modalità privata non era attiva", autoHide: 2)
+        }
     }
 }

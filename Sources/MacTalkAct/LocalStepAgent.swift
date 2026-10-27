@@ -228,7 +228,7 @@ struct LocalStepAgent {
         """
         let check = try await session.respond(to: prompt, generating: LocalCheck.self,
                                               options: GenerationOptions(samplingMode: .greedy)).content
-        Log.debug("Locale verifica: parti \(check.parti) · mancanti \(check.mancanti)")
+        Log.detail("Locale verifica: parti \(check.parti) · mancanti \(check.mancanti)")
         guard check.mancanti.isEmpty, !check.parti.isEmpty else { return nil }
         return check.risposta.isEmpty ? "Fatto" : check.risposta
     }
@@ -373,11 +373,11 @@ struct LocalStepAgent {
         } catch {
             // Context full or an answer cut short: once more, with the most relevant elements only.
             // Apple's model has a small context: try again with the most relevant elements only.
-            Log.debug("Locale: contesto pieno, riprovo con meno elementi")
+            Log.detail("Locale: contesto pieno, riprovo con meno elementi")
             plan = try await LanguageModelSession(model: model, instructions: Self.planInstructions)
                 .respond(to: makePrompt(10), generating: LocalPlan.self, options: Self.planOptions).content
         }
-        Log.debug("Locale piano: " + plan.passi.map { "\($0.azione) «\($0.elemento)» «\($0.valore)»" }.joined(separator: "; "))
+        Log.detail("Locale piano: " + plan.passi.map { "\($0.azione) «\($0.elemento)» «\($0.valore)»" }.joined(separator: "; "))
         guard !plan.passi.isEmpty else {
             return Outcome(answer: "Col modello locale non ci riesco: \(plan.risposta)", completed: false)
         }
@@ -389,12 +389,12 @@ struct LocalStepAgent {
             let words = Self.keywords(Self.cleanName(p.elemento))
             // Sending, deleting, buying only when the request asks for it (never «scrivi il nome» → «Invia»).
             if Safety.isRiskyLabel(Self.cleanName(p.elemento)), !Safety.isRiskyLabel(request) {
-                Log.debug("Locale: scarto «\(p.elemento)», azione rischiosa non chiesta")
+                Log.detail("Locale: scarto «\(p.elemento)», azione rischiosa non chiesta")
                 return false
             }
             if words.count <= 3, !words.isEmpty, words.allSatisfy({ !$0.first!.isNumber }), Self.commandLabel(p.elemento) { return true }
             let keep = words.contains { requestWords.contains(String($0.prefix(5))) } || !p.valore.isEmpty
-            if !keep { Log.debug("Locale: scarto «\(p.elemento)», non c'entra con la richiesta") }
+            if !keep { Log.detail("Locale: scarto «\(p.elemento)», non c'entra con la richiesta") }
             return keep
         }
         // Sending, deleting, buying go after everything else (a small model may put «Invia» first).
@@ -497,7 +497,7 @@ struct LocalStepAgent {
             actions += 1
             if result.hasPrefix("ok") { done.append((step, label)) }
             history.append("\(history.count + 1). \(describe(step, label: label)) → \(result.prefix(100).replacingOccurrences(of: "\n", with: " "))")
-            Log.debug("Locale esegue: \(history.last ?? "")")
+            Log.detail("Locale esegue: \(history.last ?? "")")
             if result.contains("non ha confermato") {
                 return Outcome(answer: "Mi fermo: non hai confermato", completed: false)
             }
@@ -550,7 +550,7 @@ struct LocalStepAgent {
             let signature = "\(choice.azione)|\(Grammar.normalize(label))|\(choice.ids.count)|\(choice.valore)|\(choice.trova)"
             repeats = signature == lastAction ? repeats + 1 : 0
             lastAction = signature
-            Log.debug("Locale passo \(step): \(signature) (id \(choice.id))")
+            Log.detail("Locale passo \(step): \(signature) (id \(choice.id))")
             switch choice.azione {
             case "fatto":
                 return Outcome(answer: choice.risposta.isEmpty ? "Fatto" : choice.risposta, completed: true)

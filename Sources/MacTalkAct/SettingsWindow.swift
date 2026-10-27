@@ -16,6 +16,8 @@ struct SettingsContext {
     var conversationCount: () -> Int = { 0 }
     var clearConversation: () -> Void = {}
     var showHelp: () -> Void = {}
+    /// Switches private mode on or off, with its message and its timer.
+    var setPrivateMode: (Bool) -> Void = { AppSettings.shared.setPrivateMode($0) }
 }
 
 /// Builds the settings window. Shared by the app and by `--settings-shot`.
@@ -84,6 +86,7 @@ private struct SectionContent: View {
         case .voice: VoiceSection(settings: settings)
         case .numbers: NumbersSection(settings: settings)
         case .memory: MemorySection(context: context)
+        case .privacy: PrivacySection(settings: settings, context: context)
         case .permissions: PermissionsSection()
         case .status: StatusSection(settings: settings, context: context)
         }
@@ -636,6 +639,72 @@ private struct MemorySection: View {
     }
 }
 
+private struct PrivacySection: View {
+    @ObservedObject var settings: AppSettings
+    let context: SettingsContext
+    @State private var deleted: Int?
+
+    private var privateBinding: Binding<Bool> {
+        Binding(get: { settings.privateModeActive }, set: { context.setPrivateMode($0) })
+    }
+
+    private var privateStatus: String {
+        guard let until = settings.privateModeUntil, settings.privateModeActive else { return "" }
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return "Attiva fino alle \(f.string(from: until))."
+    }
+
+    var body: some View {
+        Card(title: "Modalità privata",
+             footer: "A voce: «modalità privata» e «esci dalla modalità privata». Mentre è attiva l'agente usa solo il modello sul Mac, il log non contiene il testo delle frasi e l'app non ricorda niente, nemmeno la conversazione. Si spegne da sola e con il riavvio dell'app.") {
+            TimelineView(.periodic(from: .now, by: 15)) { _ in
+                ToggleRow(title: "Modalità privata attiva", help: privateStatus, isOn: privateBinding)
+            }
+            NumberRow(title: "Dura", value: $settings.privateModeMinutes, range: 5...240, step: 5, unit: "min",
+                      decimals: 0, defaultValue: D.privateModeMinutes)
+        }
+        Card(title: "App e siti riservati",
+             footer: "Una voce per riga. Le app: identificativo (com.apple.Passwords) o nome. I siti: dominio (paypal.com vale anche per www.paypal.com) o una parola contenuta nell'indirizzo. In queste finestre Claude e Codex non leggono né toccano niente: l'agente usa il modello sul Mac, oppure si ferma.") {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("App riservate")
+                TextEditor(text: $settings.reservedApps)
+                    .font(.system(.callout, design: .monospaced)).frame(height: 110)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Siti riservati")
+                TextEditor(text: $settings.reservedSites)
+                    .font(.system(.callout, design: .monospaced)).frame(height: 150)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            }
+        }
+        Card(title: "Dati inviati a Claude e Codex",
+             footer: "Le immagini (screenshot) non si possono mascherare: nelle finestre riservate non vengono fatte. La tua richiesta arriva così come l'hai detta. Le password non vengono mai lette dai campi password.") {
+            ToggleRow(title: "Nascondi numeri di carta, IBAN, codici fiscali e codici segreti",
+                      help: "Vengono sostituiti da [carta], [IBAN], [codice fiscale], [segreto] in ciò che l'agente legge dallo schermo. Email e telefoni restano visibili: servono per scrivere a qualcuno.",
+                      isOn: $settings.hideSensitiveFromCloud)
+        }
+        Card(title: "Log",
+             footer: "Nel log finiscono solo le frasi accettate come comandi; delle altre, e del testo dettato, solo la lunghezza. Email, telefoni, IBAN, carte e codici vengono sempre mascherati. Un file al giorno in ~/Library/Logs, leggibile solo dal tuo utente.") {
+            IntRow(title: "Giorni di log conservati", value: $settings.logRetentionDays, range: 1...30, unit: "giorni",
+                   defaultValue: D.logRetentionDays)
+            ToggleRow(title: "Log dettagliato (per una diagnosi)",
+                      help: "Aggiunge cosa l'agente ha letto e fatto, le sue risposte e il testo delle frasi ignorate (utile per la parola di attivazione). Mascherato anche questo; spento in modalità privata.",
+                      isOn: $settings.detailedLog)
+            HStack {
+                Button("Cancella i log ora") { deleted = Log.deleteAll() }
+                Button("Apri il log") { NSWorkspace.shared.open(Log.fileURL) }
+                if let deleted {
+                    Text(deleted == 1 ? "1 file cancellato" : "\(deleted) file cancellati").foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        }
+        ResetButton(section: .privacy, settings: settings)
+    }
+}
+
 private struct PermissionsSection: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in
@@ -717,7 +786,7 @@ private struct StatusSection: View {
         }
         .onAppear { claudePath = settings.claudeExecutable }
         Card(title: "Diagnostica",
-             footer: "Il log mostra, per ogni frase, la decisione presa e il motivo («Instradamento: …»). Le chiacchiere non vengono salvate, solo la loro lunghezza.") {
+             footer: "Il log mostra, per ogni frase, la decisione presa e il motivo («Instradamento: …»). Delle chiacchiere e del testo dettato resta solo la lunghezza (Privacy › Log).") {
             HStack {
                 Button("Apri il log") { NSWorkspace.shared.open(Log.fileURL) }
                 Button("Mostra nel Finder") { NSWorkspace.shared.activateFileViewerSelecting([Log.fileURL]) }

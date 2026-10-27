@@ -77,11 +77,33 @@ La guida completa è nel menu › Guida ai comandi.
 - Il testo letto dallo schermo viene passato a Claude come dato e mai come istruzione, per difendersi da email o pagine che cercano di dare ordini all'agente.
 - La chiave API sta nel Portachiavi. La trascrizione audio non lascia il Mac.
 
+### Privacy
+
+**Cosa resta sul Mac.** L'audio non viene mai salvato. Restano solo:
+
+| Dove | Cosa | Per quanto |
+|---|---|---|
+| `~/Library/Logs/MacTalkAct.log` | Decisioni e tempi. Il testo compare solo per le frasi accettate come comandi; delle chiacchiere e del testo dettato resta solo la lunghezza. Email, telefoni, IBAN, numeri di carta, codici fiscali e codici segreti sono sempre mascherati (`[email]`, `[telefono]`…). | Un file al giorno (`MacTalkAct-AAAA-MM-GG.log`), conservato per 7 giorni |
+| `~/Library/Application Support/MacTalkAct/memoria.md` | Fatti e macro che hai chiesto di ricordare | Finché non li cancelli |
+| Preferenze e Portachiavi | Impostazioni e chiave API | Finché non le cambi |
+
+Log e memoria sono leggibili solo dal tuo utente. La memoria della conversazione (ultime 5 interazioni) vive solo in RAM. Claude e Codex vengono avviati senza salvare le sessioni.
+
+**Cosa va a Claude e Codex.** Solo durante un compito dell'agente: la richiesta, la descrizione della finestra in primo piano ed eventuali screenshot. Prima dell'invio, numeri di carta, IBAN, codici fiscali e codici segreti letti dallo schermo diventano `[carta]`, `[IBAN]`, `[codice fiscale]`, `[segreto]`. Email e telefoni restano, perché servono per scrivere a qualcuno. I campi password non vengono mai letti.
+
+**App e siti riservati.** Gestori di password (Password, Portachiavi, 1Password, Bitwarden, KeePassXC), banche, pagamenti e siti della pubblica amministrazione sono riservati: lì Claude e Codex non leggono e non toccano niente. L'agente lavora con il modello sul Mac oppure si ferma. Se un compito arriva su una finestra riservata a metà strada, il motore cloud viene fermato. Gli elenchi si modificano in Impostazioni › Privacy.
+
+**Modalità privata.** «Modalità privata» (o dal menu ✋) attiva per 30 minuti: niente Claude né Codex, niente testo delle frasi nel log, niente memoria (né fatti né conversazione). «Esci dalla modalità privata» la chiude prima. Mentre è attiva, l'icona nella barra dei menu diventa un lucchetto.
+
+**Memoria.** L'agente non salva mai fatti che contengono password, codici, dati bancari o di carta, e lo dice.
+
+**Log dettagliato.** Per una diagnosi, Impostazioni › Privacy › «Log dettagliato» aggiunge cosa l'agente ha letto e fatto e il testo delle frasi ignorate (anche questo mascherato). «Cancella i log ora» elimina tutti i file di log.
+
 ## Impostazioni
 
-La **parola di attivazione** si sceglie in Impostazioni › Ascolto: al posto di «computer» puoi usare la parola che preferisci. L'app accetta da sola anche «ok …», «ehi …», «hey …» e le storpiature tipiche del riconoscimento («i …», «e …»), si possono aggiungere altre frasi e sotto il campo compare l'elenco completo. Conviene una parola di almeno 4 lettere che in casa non si dice per caso; se il riconoscimento la scrive in modo diverso, il log mostra come l'ha sentita e quella forma si aggiunge tra le altre.
+La **parola di attivazione** si sceglie in Impostazioni › Ascolto: al posto di «computer» puoi usare la parola che preferisci. L'app accetta da sola anche «ok …», «ehi …», «hey …» e le storpiature tipiche del riconoscimento («i …», «e …»), si possono aggiungere altre frasi e sotto il campo compare l'elenco completo. Conviene una parola di almeno 4 lettere che in casa non si dice per caso; se il riconoscimento la scrive in modo diverso, attiva il log dettagliato (Impostazioni › Privacy): mostra come l'ha sentita, e quella forma si aggiunge tra le altre.
 
-Dal menu ✋ › **Impostazioni** si apre una finestra con una barra laterale a sezioni: Ascolto, Conversazione, Comprensione, Agente, Voce e suoni, Numeri, Memoria e macro, Permessi, Stato e diagnostica. Ogni comportamento regolabile dell'app è lì, con il suo valore, una spiegazione e il valore predefinito: silenzio che chiude una frase, sensibilità del rilevatore di voce, durata della conversazione aperta, attese di conferma, modelli ed effort dell'agente, passi e tempo massimi di un compito, volume della voce e dei suoni, durata dei messaggi, numeri sullo schermo. Ogni sezione ha «Ripristina predefiniti»: i predefiniti coincidono con il comportamento dell'app prima che le impostazioni esistessero. Le modifiche valgono dall'azione successiva, senza riavviare.
+Dal menu ✋ › **Impostazioni** si apre una finestra con una barra laterale a sezioni: Ascolto, Conversazione, Comprensione, Agente, Voce e suoni, Numeri, Memoria e macro, Privacy, Permessi, Stato e diagnostica. Ogni comportamento regolabile dell'app è lì, con il suo valore, una spiegazione e il valore predefinito: silenzio che chiude una frase, sensibilità del rilevatore di voce, durata della conversazione aperta, attese di conferma, modelli ed effort dell'agente, passi e tempo massimi di un compito, volume della voce e dei suoni, durata dei messaggi, numeri sullo schermo. Ogni sezione ha «Ripristina predefiniti»: i predefiniti coincidono con il comportamento dell'app prima che le impostazioni esistessero. Le modifiche valgono dall'azione successiva, senza riavviare.
 
 La sezione **Memoria e macro** elenca fatti e macro con un pulsante per eliminarli; **Permessi** mostra lo stato aggiornato dei tre permessi di macOS; **Stato e diagnostica** dice se il modello Apple è disponibile, dove si trova `claude`, se l'agente è in pausa e apre il log.
 

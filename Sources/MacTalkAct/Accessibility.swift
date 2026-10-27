@@ -288,6 +288,8 @@ struct ScreenContext {
     var windowTitle = ""
     var focusedRole = ""
     var isEditable = false
+    /// A password field: its text is never read.
+    var isSecure = false
     var selectedText = ""
     var textBeforeCursor = ""
     var visibleLabels: [String] = []
@@ -317,9 +319,12 @@ struct ScreenContext {
             let range = AX.selectedRange(focused)
             ctx.isEditable = editableRoles.contains(ctx.focusedRole)
                 || (range != nil && AX.isSettable(focused, kAXValueAttribute))
-            ctx.selectedText = AX.string(focused, kAXSelectedTextAttribute) ?? ""
+            ctx.isSecure = AX.string(focused, kAXSubroleAttribute) == "AXSecureTextField"
+            if !ctx.isSecure {
+                ctx.selectedText = AX.string(focused, kAXSelectedTextAttribute) ?? ""
+            }
 
-            if let range, let value = AX.string(focused, kAXValueAttribute) {
+            if !ctx.isSecure, let range, let value = AX.string(focused, kAXValueAttribute) {
                 let ns = value as NSString
                 let caret = max(0, min(range.location, ns.length))
                 let before = ns.substring(to: caret)

@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hud = HUDController()
         coordinator = Coordinator(hud: hud, settings: settings)
         coordinator.onModeChange = { [weak self] in self?.updateIcon() }
+        coordinator.onPrivateModeChange = { [weak self] _ in self?.updateIcon() }
         coordinator.onShowHelp = { [weak self] in self?.showHelp() }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -123,6 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateIcon() {
+        if settings.privateModeActive {
+            statusItem.button?.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "MacTalkAct (modalità privata)")
+            return
+        }
         let symbol: String
         switch coordinator?.mode ?? .off {
         case .off: symbol = "hand.raised"
@@ -191,6 +196,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         session.state = coordinator.mode == .session ? .on : .off
         session.target = self
         menu.addItem(session)
+        let priv = NSMenuItem(title: "Modalità privata (\(Int(settings.privateModeMinutes.rounded())) min)",
+                              action: #selector(togglePrivateMode), keyEquivalent: "")
+        priv.image = NSImage(systemSymbolName: "lock", accessibilityDescription: nil)
+        priv.state = settings.privateModeActive ? .on : .off
+        priv.target = self
+        menu.addItem(priv)
         menu.addItem(.separator())
 
         // Quick settings
@@ -355,6 +366,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openUnderstandingSection() { showSettings(section: .understanding) }
     @objc private func openPermissionsSection() { showSettings(section: .permissions) }
     @objc private func openMemorySection() { showSettings(section: .memory) }
+    @objc private func togglePrivateMode() {
+        coordinator.setPrivateMode(!settings.privateModeActive)
+    }
+
     @objc private func openLog() { NSWorkspace.shared.open(Log.fileURL) }
 
     @objc private func toggleWake() {
@@ -394,6 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return self.coordinator.conversation.log.entries.count
         }
         c.clearConversation = { [weak self] in self?.coordinator.conversation.log.clear() }
+        c.setPrivateMode = { [weak self] on in self?.coordinator.setPrivateMode(on) }
         c.showHelp = { [weak self] in self?.showHelp() }
         c.engineStates = { [weak self] in self?.coordinator.agent.engines.mapValues(\.availability) ?? [:] }
         c.recheckEngines = { [weak self] in self?.coordinator.agent.refreshAvailability() }
@@ -441,6 +457,12 @@ struct HelpView: View {
             "«basta così» o «grazie» chiudono subito la conversazione",
             "L'agente ricorda le ultime 5 cose fatte (10 minuti): «rimetti com'era prima», «fai lo stesso con l'altra»",
             "«dimentica la conversazione» cancella questa memoria (non viene mai salvata su disco)",
+        ]),
+        ("Privacy", [
+            "«modalità privata»: per \(Int(settings.privateModeMinutes.rounded())) minuti niente Claude né Codex, niente testo nel log, niente memoria",
+            "«esci dalla modalità privata» la chiude prima",
+            "Nelle app e nei siti riservati (password, banche, pagamenti) l'agente usa solo il modello sul Mac",
+            "I campi password non vengono mai letti; carte, IBAN e codici vengono mascherati per Claude e Codex",
         ]),
         ("Muoversi", [
             "«giù», «su», «scorri molto giù», «pagina giù», «vai in cima», «vai in fondo»",

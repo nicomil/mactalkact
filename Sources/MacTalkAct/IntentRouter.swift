@@ -59,6 +59,8 @@ enum RouteDecision {
     case undoInsertion
     case closeConversation
     case forgetConversation
+    /// «modalità privata» (true) / «esci dalla modalità privata» (false).
+    case privateMode(Bool)
     case local(LocalAction, text: String)
     case agent(String, deep: Bool, reason: String)
     case reduced(String, reason: String)
@@ -78,6 +80,7 @@ enum RouteDecision {
         case .undoInsertion: return "annulla-scritto"
         case .closeConversation: return "chiudi-conversazione"
         case .forgetConversation: return "dimentica-conversazione"
+        case .privateMode(let on): return on ? "privata-on" : "privata-off"
         case .local: return "locale"
         case .agent: return "agente"
         case .reduced: return "ridotta"
@@ -97,6 +100,7 @@ enum RouteDecision {
         case .undoInsertion: return "richiesta esplicita"
         case .closeConversation: return "chiusura esplicita"
         case .forgetConversation: return "richiesta esplicita"
+        case .privateMode: return "richiesta esplicita"
         case .local(let a, _): return "proposta valida: \(a.summary)"
         }
     }
@@ -153,6 +157,7 @@ final class IntentRouter {
         if explicit || state.windowOpen {
             if Phrases.isUndoInsertion(text) { return .undoInsertion }
             if Phrases.isForgetConversation(text) { return .forgetConversation }
+            if let on = Phrases.privateMode(text) { return .privateMode(on) }
             if state.windowOpen && !explicit && Phrases.isCloseConversation(text) { return .closeConversation }
         }
 
@@ -276,6 +281,23 @@ enum Phrases {
         "ricominciamo da capo", "dimentica tutto quello che ci siamo detti",
     ]
     static func isForgetConversation(_ text: String) -> Bool { forget.contains(Grammar.normalize(text)) }
+
+    private static let privateOn: Set<String> = [
+        "modalita privata", "attiva la modalita privata", "entra in modalita privata", "passa in modalita privata",
+        "modalita riservata", "attiva la modalita riservata", "metti la modalita privata",
+    ]
+    private static let privateOff: Set<String> = [
+        "esci dalla modalita privata", "disattiva la modalita privata", "fine modalita privata",
+        "chiudi la modalita privata", "togli la modalita privata", "esci dalla modalita riservata",
+        "disattiva la modalita riservata", "modalita normale",
+    ]
+    /// true: switch private mode on; false: off; nil: not about private mode.
+    static func privateMode(_ text: String) -> Bool? {
+        let n = Grammar.normalize(text)
+        if privateOn.contains(n) { return true }
+        if privateOff.contains(n) { return false }
+        return nil
+    }
 
     private static let close: Set<String> = [
         "basta cosi", "grazie", "grazie mille", "a posto", "a posto cosi", "ok grazie", "va bene grazie",

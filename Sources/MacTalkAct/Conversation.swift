@@ -45,6 +45,8 @@ final class ConversationLog {
     var maxAge: TimeInterval { AppSettings.shared.conversationMemoryMinutes * 60 }
 
     func add(request: String, outcome: String, app: String, changes: [String] = []) {
+        // Private mode: nothing is remembered, not even in RAM.
+        guard !AppSettings.shared.privateModeActive else { return }
         expire()
         entries.append(Entry(time: Date(), request: request, outcome: outcome, app: app, changes: Array(changes.suffix(6))))
         if entries.count > maxEntries { entries.removeFirst(entries.count - maxEntries) }

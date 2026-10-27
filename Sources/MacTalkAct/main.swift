@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 let arguments = CommandLine.arguments
+// Debug commands (benchmarks, tests) keep the detailed log: they work on test pages, not on the user's data.
+if arguments.dropFirst().contains(where: { $0.hasPrefix("--") }) { Log.forceDetail = true }
 
 func argument(after flag: String) -> String? {
     guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
