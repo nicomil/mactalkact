@@ -146,7 +146,7 @@ Gli strumenti sono costruiti come il computer use di Claude e di Codex (studio i
 
 **Gli ID restano gli stessi per tutto il compito** finché l'elemento esiste: lo stesso pulsante ha lo stesso numero in `observe`, negli screenshot e negli esiti; se un elemento sparisce, l'ID viene rifiutato con un messaggio chiaro. Dopo uno scorrimento le coordinate dello screenshot precedente non valgono più.
 
-**Il pianto non tiene aperto l'ascolto.** Il rilevatore della voce scarta i suoni acuti e regolari (il pianto di un neonato sta intorno ai 400–600 Hz, la voce di un adulto tra 85 e 255 Hz), e una frase che dopo 4 secondi non contiene parole viene chiusa (televisione, aspirapolvere). Una frase detta mentre il bambino piange viene comunque presa.
+**Il pianto non tiene aperto l'ascolto.** Un rumore continuo (pianto, televisione, aspirapolvere) impedisce al silenzio di chiudere la frase; l'app la chiude lo stesso quando dopo 4 secondi non contiene parole, o quando le parole riconosciute non cambiano più da 2,5 secondi (3,5 in dettatura): hai finito di parlare, il rumore continua. Il rilevatore scarta anche i suoni acuti e regolari (strilli oltre i 400 Hz). Una frase detta mentre il bambino piange viene comunque presa.
 
 **La pillola dei messaggi** è larga quanto il suo testo. In posizione automatica sta in basso e sale in alto quando coprirebbe il punto in cui scrivi o il puntatore. In alternativa si può fissare in alto, in alto a destra o in basso a destra (Impostazioni › Voce e suoni › Messaggi sullo schermo). In dettatura «fine» chiude anche ripetuto («fine fine») o in coda a una frase («…a domani. Fine.»).
 
@@ -272,6 +272,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build
 .build/debug/MacTalkAct --settings-shot /tmp/shots     # un'immagine per sezione della finestra impostazioni, disegnata fuori schermo
 .build/debug/MacTalkAct --tools-test Tests/pages/prova-strumenti.html   # click_many e replace_text su una pagina di prova (agisce davvero!)
 .build/debug/MacTalkAct --hands-test               # le mani dell'agente senza modello: hover, drag, set_value, act, menu, zoom (agisce davvero!)
+.build/debug/MacTalkAct --listen-file file.wav    # un file audio attraverso tutto l'ascolto dell'app, in tempo reale: quali frasi escono e quando
 .build/debug/MacTalkAct --vad-test file.wav       # il rilevatore della voce su un file: quando apre e chiude le frasi, quanto è pianto
 .build/debug/MacTalkAct --bench-cleanup            # chiude le pagine del Banco rimaste aperte in Safari
 say -v Alice -o /tmp/t.aiff "Scorri giù"

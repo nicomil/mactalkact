@@ -142,6 +142,21 @@ if let path = argument(after: "--transcribe") {
     dispatchMain()
 }
 
+if let path = argument(after: "--listen-file") {
+    // Debug: an audio file through the whole listening chain of the app (detector + recognizer),
+    // in real time: which sentences come out and when.
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        let engine = SpeechEngine()
+        let t0 = Date()
+        engine.onUtterance = { text in print(String(format: "%6.2fs  frase: «%@»", Date().timeIntervalSince(t0), text)) }
+        do { try await engine.feedFile(URL(fileURLWithPath: path)) } catch { print("Errore: \(error.localizedDescription)") }
+        try? await Task.sleep(for: .seconds(3))
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if let path = argument(after: "--vad-test") {
     MainActor.assumeIsolated { DebugCLI.vadTest(path) }
     exit(0)

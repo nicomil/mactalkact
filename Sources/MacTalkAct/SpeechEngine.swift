@@ -275,6 +275,9 @@ final class TranscriptionSession {
 
     /// At least one word recognized so far.
     var hasWords: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// When the recognized text last changed (a new or corrected word).
+    private(set) var lastChange = Date()
+    private var lastText = ""
 
     func start(stream: AsyncStream<AnalyzerInput>, locale: Locale, format: AVAudioFormat, vocabulary: [String] = []) {
         let transcriber = SpeechEngine.makeTranscriber(locale: locale)
@@ -292,7 +295,9 @@ final class TranscriptionSession {
                     } else {
                         self.volatileText = t
                     }
-                    self.onLive?(self.text)
+                    let now = self.text
+                    if now != self.lastText { self.lastText = now; self.lastChange = Date() }
+                    self.onLive?(now)
                 }
             } catch {
                 Log.error("Trascrizione interrotta: \(error.localizedDescription)")
@@ -411,6 +416,27 @@ final class SpeechEngine {
         locale = loc
         analyzerFormat = format
         Log.info("Riconoscimento pronto: \(loc.identifier), \(format)")
+    }
+
+    // MARK: File (debug)
+
+    /// Debug: plays an audio file through the same tap, voice detector and recognizer as the
+    /// microphone, in real time (the rules that close a sentence depend on time).
+    func feedFile(_ url: URL) async throws {
+        if analyzerFormat == nil { try await prepare() }
+        guard let format = analyzerFormat else { throw SpeechError.noAudioFormat }
+        let file = try AVAudioFile(forReading: url)
+        let tap = Self.makeTap(converter: AnalyzerInputConverter(analyzerFormat: format), router: router, level: nil)
+        router.setVAD(true)
+        let size: AVAudioFrameCount = 1024
+        while file.framePosition < file.length {
+            guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: size) else { break }
+            try file.read(into: buf, frameCount: size)
+            guard buf.frameLength > 0 else { break }
+            tap(buf, AVAudioTime(sampleTime: file.framePosition, atRate: file.processingFormat.sampleRate))
+            try await Task.sleep(for: .seconds(Double(buf.frameLength) / file.processingFormat.sampleRate))
+        }
+        router.closeAny()
     }
 
     // MARK: Microphone
@@ -553,13 +579,28 @@ final class SpeechEngine {
         Log.debug("Inizio frase (\(forced ? "tasto" : "voce"))")
         if !forced {
             onSpeechStart?()
-            // Noise that is not a voice (crying, a TV, the vacuum cleaner) keeps a sentence open
-            // without words: close it after a few seconds instead of listening for up to a minute.
+            // Noise that is not a voice (crying, a TV, the vacuum cleaner) keeps a sentence open:
+            // the silence that closes it never comes. Close it when there are no words after 4 s,
+            // or when the words stopped changing (the person finished, the noise goes on).
+            let started = Date()
             Task { @MainActor [weak self, weak s] in
-                try? await Task.sleep(for: .seconds(4))
-                guard let self, let s, self.session === s, !s.forced, !s.hasWords else { return }
-                Log.info("Frase senza parole dopo 4 s: chiusa (rumore o pianto)")
-                self.router.closeAny()
+                while true {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard let self, let s, self.session === s, !s.forced else { return }
+                    let age = Date().timeIntervalSince(started)
+                    let still = Date().timeIntervalSince(s.lastChange)
+                    // Longer pauses are normal while dictating (the end silence is longer too).
+                    let stale = max(2.5, self.router.config.endSilence + 1.5)
+                    if !s.hasWords, age >= 4 {
+                        Log.info("Frase senza parole dopo 4 s: chiusa (rumore o pianto)")
+                    } else if s.hasWords, age >= 3, still >= stale {
+                        Log.info(String(format: "Parole ferme da %.1f s con rumore: frase chiusa", still))
+                    } else {
+                        continue
+                    }
+                    self.router.closeAny()
+                    return
+                }
             }
         }
     }
