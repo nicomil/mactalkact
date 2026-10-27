@@ -801,7 +801,11 @@ final class Coordinator {
         }
         engineNotice = nil
         defer { engineNotice = nil }
-        hud.show(.thinking, text, detail: deep ? "🤖 Ci penso con calma…" : "🤖 Ci penso…")
+        if deep, agent.currentChoice()?.engine == .local {
+            // Long tasks are beyond a small model: say it before starting (Story 5.4).
+            engineNotice = "💻 Col modello locale potrebbe non riuscire"
+        }
+        hud.show(.thinking, text, detail: engineNotice ?? (deep ? "🤖 Ci penso con calma…" : "🤖 Ci penso…"))
         do {
             try await agent.start()
             let answer = try await agent.run(text, context: context, recent: conversation.log.promptBlock, deep: deep)

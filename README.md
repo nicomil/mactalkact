@@ -169,6 +169,35 @@ Il motore si sceglie dal menu della barra (**Motore dell'agente**) o da Impostaz
 
 **Codex come Claude, solo con i nostri strumenti.** L'app avvia `codex exec` senza la configurazione personale (`--ignore-user-config`), senza terminale, computer use, browser, plugin né ricerca web, in sola lettura e senza salvare sessioni; il token del server degli strumenti passa solo nell'ambiente del processo. I dettagli e le misure sono in `_bmad-output/planning-artifacts/research/valutazione-motori-agente-2026-10-27.md`.
 
+## Senza abbonamenti: il motore locale
+
+Con **Locale** scelto (o quando Claude e Codex non ci sono) l'agente lavora interamente sul Mac. Per un modello piccolo il ciclo «osserva, agisci, verifica» libero funziona male, quindi l'app lo guida:
+
+1. l'app osserva la finestra e tiene solo gli elementi che c'entrano con la richiesta (al massimo 30, cercando nell'intera pagina le parole o i numeri che non vede);
+2. il modello sceglie **un solo passo** tra pochi possibili (clicca, clicca più elementi, scrivi, sostituisci, tasti, apri app o sito, scorri, fatto, impossibile), con generazione vincolata: non può inventare azioni né formati;
+3. l'app esegue il passo con gli stessi strumenti e le stesse conferme dell'agente cloud, e ricomincia, fino a «fatto» o a 8 passi.
+
+Se non ce la fa lo dice («Col modello locale non ci riesco: …») invece di dichiarare il compito riuscito.
+
+**Un modello più capace sul Mac.** In Impostazioni › Motori › Locale si può scegliere «Server sul Mac»: qualunque server compatibile con l'API OpenAI (Ollama, LM Studio, `mlx_lm.server`, Rapid-MLX). L'app legge l'elenco dei modelli dal server, il pulsante **Prova** misura il tempo al primo strumento, e il modello viene tenuto in memoria solo per il tempo indicato (10 minuti). Per Ollama:
+
+```bash
+ollama pull qwen3.5:4b        # oppure il modello consigliato dal banco di prova
+# Impostazioni › Motori › Locale › Server sul Mac › http://127.0.0.1:11434/v1
+```
+
+Se il server è spento l'app usa il modello Apple e lo dice. Un indirizzo fuori da questo Mac richiede una conferma esplicita, perché la richiesta e il contenuto dello schermo lascerebbero il Mac.
+
+**Il resto dell'app non ha bisogno del cloud.** Comandi rapidi, corsia locale, Router, numeri sullo schermo e ripulitura della dettatura (con il modello Apple quando il motore in uso non è Claude) funzionano senza rete. I passi liberi delle macro vanno al motore in uso, compreso quello locale.
+
+**Banco di prova.** `Tests/bench/agente.tsv` contiene 20 compiti su pagine HTML locali (posta, tabella con caselle, notebook, modulo, elenco lungo, sito) che scrivono il loro stato nel titolo della finestra; `--agent-bench` li esegue in Safari con un motore e verifica l'esito:
+
+```bash
+.build/debug/MacTalkAct --agent-bench --engine local                  # modello Apple (agisce davvero!)
+.build/debug/MacTalkAct --agent-bench --engine local --model qwen3.5:4b   # modello servito da Ollama
+.build/debug/MacTalkAct --agent-bench --engine claude --only posta-apri,tabella-tutti
+```
+
 ## Struttura del codice
 
 | File | Ruolo |
@@ -185,7 +214,9 @@ Il motore si sceglie dal menu della barra (**Motore dell'agente**) o da Impostaz
 | `AgentEngine.swift` | Protocollo dei motori, `EngineSelector`, lettura dei messaggi di limite di Claude e Codex |
 | `ClaudeEngine.swift`, `CodexEngine.swift`, `CodexCLI.swift` | I due motori cloud: avvio delle CLI, livelli rapido e profondo, pause per la quota |
 | `LocalEngine.swift` | Motore locale: sessione FoundationModels con gli strumenti dell'app, prompt corto, passi limitati |
+| `LocalStepAgent.swift` | Il ciclo guidato del motore locale: elementi pertinenti, un passo vincolato alla volta |
 | `OpenAICompatibleModel.swift` | Modello servito sul Mac (Ollama, LM Studio, MLX) tramite l'API compatibile OpenAI |
+| `LocalText.swift` | Ripulitura della dettatura con il modello Apple |
 | `AgentTools.swift` | Gli strumenti dell'agente: osservare, cliccare, scrivere, confermare… |
 | `MCPServer.swift` | Server MCP HTTP locale (solo 127.0.0.1, con token) |
 | `ScreenCapture.swift` | Screenshot della finestra in primo piano (ScreenCaptureKit) |

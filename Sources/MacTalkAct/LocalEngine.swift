@@ -29,8 +29,8 @@ final class LocalEngine: AgentEngine {
 
     /// How the local model works (Story 5.4): steps chosen with guided generation in a loop
     /// driven by the app, or free tool calling. Chosen with the bench.
-    enum Mode: String { case steps, tools }
-    static let defaultMode = Mode.steps
+    enum Mode: String { case plan, steps, tools }
+    static let defaultMode = Mode.plan
     private var mode: Mode { override?.mode ?? Self.defaultMode }
     var override: Override?
     private var provider: LocalProvider { override?.provider ?? settings.localProvider }
@@ -211,6 +211,9 @@ final class LocalEngine: AgentEngine {
         let task = Task<String, Error> { @MainActor in
             try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask { @MainActor in
+                    if mode == .plan {
+                        return try await stepAgent.runPlan(request: userRequest, context: prompt).answer
+                    }
                     if mode == .steps {
                         return try await stepAgent.run(request: userRequest, context: prompt).answer
                     }

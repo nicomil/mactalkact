@@ -191,6 +191,7 @@ if arguments.contains("--observe-stats") {
             let started = Date()
             let r = await tools.call("observe", query.map { ["query": $0] } ?? [:])
             let text = (r.content.first?["text"] as? String) ?? ""
+            if ProcessInfo.processInfo.environment["MTA_DUMP"] != nil { print(text) }
             let items = text.split(separator: "\n").filter { $0.hasPrefix("[") }
             var roles: [String: Int] = [:]
             for line in items {

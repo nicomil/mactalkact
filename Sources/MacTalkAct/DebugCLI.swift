@@ -223,6 +223,7 @@ enum DebugCLI {
         check("schema degli strumenti", toolSchema != nil)
         let parsedObs = LocalStepAgent.parse("APP: Safari (com.apple.Safari)\nWINDOW: Banco sito size 1440x869\n[3]* link «Prezzi» @10,20 50x16\n[4] checkbox «Anna 18:30» (checked) @1,2 3x4\n(list truncated: …)")
         check("elenco compatto", parsedObs.elements.map(\.line) == ["[3] link «Prezzi»", "[4] checkbox «Anna 18:30» (checked)"] && parsedObs.truncated)
+        check("ruolo degli elementi cliccabili", parsedObs.elements.first?.role == "link" && parsedObs.elements.last?.role == "checkbox")
         check("parole chiave", LocalStepAgent.keywords("apri l'articolo 137") == ["articolo", "137"])
         check("solo server locali senza conferma", OpenAICompatibleModel.isLocal(baseURL: "http://127.0.0.1:11434/v1")
               && !OpenAICompatibleModel.isAllowed(baseURL: "http://192.168.1.5:11434/v1", allowRemote: false))
@@ -759,7 +760,8 @@ extension DebugCLI {
             try? await Task.sleep(for: .seconds(1.2))
             let title = ScreenContext.capture(includeLabels: false).windowTitle
             let ok = task.checks.allSatisfy { $0.mustContain == title.contains($0.text) }
-            let first = agent.tools.firstCallAt.map { $0.timeIntervalSince(started) }
+            // Time to the first action: the local engine observes on its own before the model speaks.
+            let first = (agent.tools.firstEffectAt ?? agent.tools.firstCallAt).map { $0.timeIntervalSince(started) }
             rows.append(Row(task: task, ok: ok, steps: agent.tools.callCount, first: first, total: total, model: agent.lastModel, note: note))
             print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, agent.tools.callCount,
                          first.map { String(format: "%4.1f s", $0) } ?? "  — ", total, String(note.prefix(70))))

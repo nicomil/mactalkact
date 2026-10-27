@@ -26,6 +26,8 @@ final class AgentTools {
     private(set) var effectfulCalls = 0
     /// When the first tool was called in this task (time to first tool, NFR-9).
     private(set) var firstCallAt: Date?
+    /// When the first action with effects happened (local engine: the app observes first).
+    private(set) var firstEffectAt: Date?
     /// Text changes made during the current task, for the conversation memory (FR-8).
     private(set) var changes: [String] = []
     /// The app the task works in: keystrokes and clicks stop if another app takes the front
@@ -52,6 +54,7 @@ final class AgentTools {
         callCount = 0
         effectfulCalls = 0
         firstCallAt = nil
+        firstEffectAt = nil
         changes = []
         cancelled = false
         targetPID = AX.realFrontmostApplication()?.processIdentifier
@@ -166,7 +169,10 @@ final class AgentTools {
             Log.info("Agente: azione bloccata, app in primo piano cambiata")
             return .error(problem)
         }
-        if Self.effectfulTools.contains(name) { effectfulCalls += 1 }
+        if Self.effectfulTools.contains(name) {
+            effectfulCalls += 1
+            if firstEffectAt == nil { firstEffectAt = Date() }
+        }
         let result: Result
         do {
             result = try await dispatch(name, args)
@@ -272,6 +278,19 @@ final class AgentTools {
             onProgress?("Scrivo…")
             await executor.typeText(text)
             changes.append("typed «\(Self.short(text))»")
+            // Check the field when it exposes its value: pasting into an unfocused web field fails silently.
+            if let id = Self.int(a["id"]), let item = registry[id], !text.isEmpty,
+               ["AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"].contains(item.role) {
+                let want = Grammar.normalize(String(text.prefix(30)))
+                var value = AX.string(item.element, kAXValueAttribute)
+                for _ in 0..<3 where value.map({ !Grammar.normalize($0).contains(want) }) ?? false {
+                    try await Task.sleep(for: .milliseconds(200)) // web fields update their value a moment later
+                    value = AX.string(item.element, kAXValueAttribute)
+                }
+                if let value, !Grammar.normalize(value).contains(want) {
+                    return .error("Typed \(text.count) characters, but the field [\(id)] does not show them: click into the field (method 'mouse') and type again.")
+                }
+            }
             return .text("Typed \(text.count) characters.")
 
         case "press_keys":
@@ -502,7 +521,8 @@ final class AgentTools {
         let deadline: TimeInterval = needle == nil ? 1.8 : 4.0
         let maxNodes = needle == nil ? 12_000 : 40_000
         let start = Date()
-        var queue: [(AXUIElement, Int)] = [(root, 0)]
+        // Third value: inside a web page (AXWebArea), as opposed to the browser's own toolbars and sidebars.
+        var queue: [(AXUIElement, Int, Bool)] = [(root, 0, false)]
         var index = 0
         var emitted = 0
         var lastLabel = ""
@@ -515,7 +535,7 @@ final class AgentTools {
                 truncated = true
                 break
             }
-            let (el, depth) = queue[index]
+            let (el, depth, inWeb) = queue[index]
             index += 1
             let h = CFHash(el)
             if seen[h]?.contains(where: { CFEqual($0, el) }) == true { continue }
@@ -524,8 +544,9 @@ final class AgentTools {
             let role = (v[0] as? String) ?? ""
             let frame = AX.rect(position: v[5], size: v[6])
 
-            // Skip whole subtrees scrolled out of the window.
-            if let wf = windowFrame, let f = frame, f.width > 0, f.height > 0,
+            // Skip whole subtrees scrolled out of the window (a search looks everywhere:
+            // web elements can be pressed even when scrolled out of view).
+            if needle == nil, let wf = windowFrame, let f = frame, f.width > 0, f.height > 0,
                !wf.insetBy(dx: -4, dy: -4).intersects(f) {
                 continue
             }
@@ -560,6 +581,7 @@ final class AgentTools {
                         line += on.intValue == 0 ? " (unchecked)" : " (checked)"
                     }
                     if focused { line += " (focused)" }
+                    if inWeb { line += " (page)" }
                     if let f = frame, let wf = windowFrame {
                         line += " @\(Int(f.minX - wf.minX)),\(Int(f.minY - wf.minY)) \(Int(f.width))x\(Int(f.height))"
                     }
@@ -567,7 +589,8 @@ final class AgentTools {
                 }
             }
             if depth < 60, let children = v[4] as? [AXUIElement] {
-                for c in children { queue.append((c, depth + 1)) }
+                let childrenInWeb = inWeb || role == "AXWebArea"
+                for c in children { queue.append((c, depth + 1, childrenInWeb)) }
             }
         }
 
@@ -609,6 +632,12 @@ final class AgentTools {
                     }
                     current = parent
                 }
+            }
+            // Elements found by a search may be scrolled out of view: bring them in before a real click.
+            if let wf = AX.frontApp().flatMap({ AX.focusedWindow(in: $0.0) }).flatMap({ AX.frame($0) }),
+               let f0 = AX.frame(item.element), !wf.insetBy(dx: 2, dy: 2).contains(CGPoint(x: f0.midX, y: f0.midY)) {
+                AXUIElementPerformAction(item.element, "AXScrollToVisible" as CFString)
+                try await Task.sleep(for: .milliseconds(350))
             }
             guard let f = AX.frame(item.element) else { return .error("Element [\(id)] has no position: try a screenshot.") }
             point = CGPoint(x: f.midX, y: f.midY)
