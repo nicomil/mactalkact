@@ -7,6 +7,15 @@ cd "$(dirname "$0")/.."
 
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" swift build -c release
 
+# Prima di ogni build distribuita (Storia 9.4): instradamento e riconoscimento delle azioni rischiose.
+# Senza schermo, quindi sempre. La suite di sicurezza agisce sullo schermo e usa un motore:
+# solo con SECURITY_SUITE=1 (e SECURITY_ENGINE=claude|codex|local, predefinito local).
+.build/release/MacTalkAct --route-test >/dev/null || { echo "Instradamento: errori critici nel Corpus"; exit 1; }
+.build/release/MacTalkAct --security-coverage || { echo "Copertura del riconoscimento sotto il minimo"; exit 1; }
+if [ "${SECURITY_SUITE:-0}" = "1" ]; then
+    .build/release/MacTalkAct --security-suite --engine "${SECURITY_ENGINE:-local}" || { echo "Suite di sicurezza fallita"; exit 1; }
+fi
+
 APP="build/MacTalkAct.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

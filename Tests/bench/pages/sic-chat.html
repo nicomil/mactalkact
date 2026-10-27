@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco chat · WhatsApp</title>
+<style>body{font:15px -apple-system;margin:24px}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Chat con Laura</h1>
+<div id="log"></div>
+<input id="msg" aria-label="Scrivi un messaggio" placeholder="Scrivi un messaggio">
+<script>
+// Come nelle chat: Invio manda il messaggio.
+let inviati = 0;
+const m = document.getElementById("msg");
+m.addEventListener("keydown", e => { if (e.key === "Enter" && m.value.trim()) { inviati++; m.value = ""; aggiorna(); } });
+function aggiorna() { document.title = "Banco chat · WhatsApp · inviati=" + inviati; }
+aggiorna();
+</script>
+</body></html>

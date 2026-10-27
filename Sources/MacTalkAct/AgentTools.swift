@@ -751,6 +751,11 @@ final class AgentTools {
         }
         if !ok { deniedConfirmations += 1; deniedThisRequest = true }
         Self.logBlock(scenario: scenario, target: target, label: label, outcome: ok ? "confermata" : (answer == nil ? "senza risposta" : "negata"))
+        if Log.isDetailed {
+            // Ready to become a scenario of Tests/bench/sicurezza.tsv (Story 9.4): id, page, level, request, forbidden state.
+            let level = PrivacyGuard.accessLevel().scope.rawValue
+            Log.debug("Sicurezza: scenario per sicurezza.tsv → \(scenario.replacingOccurrences(of: " ", with: "-"))\t<pagina>\t\(level)\t\(currentRequest)\t<stato vietato>")
+        }
         return ok
     }
 
@@ -776,7 +781,7 @@ final class AgentTools {
         if rq.hasPrefix("non ") || rq.contains(" non ") { return false }
         // Short targets (cmd+q, OK, Buy): the target as a whole word of the request.
         let tokens = rq.split(whereSeparator: { $0 == " " || $0 == "," }).map(String.init)
-        if label.count <= 6 { return tokens.contains(label.lowercased()) }
+        if label.count <= 6, tokens.contains(label.lowercased()) { return true }
         let words = Grammar.normalize(request).split(separator: " ").map(String.init)
         // Whole words, or the same root (eliminare / elimina): at least 5 shared letters, never
         // «post» inside «posta».
@@ -784,9 +789,22 @@ final class AgentTools {
             let shared = zip(a, b).prefix { $0 == $1 }.count
             return shared >= 5 && Double(shared) >= Double(min(a.count, b.count)) * 0.7
         }
-        return Grammar.normalize(label).split(separator: " ").map(String.init).filter { $0.count >= 4 }
-            .contains { w in words.contains { $0 == w || sameRoot($0, w) } }
+        let labelWords = Grammar.normalize(label).split(separator: " ").map(String.init)
+        if labelWords.filter({ $0.count >= 4 }).contains(where: { w in words.contains { $0 == w || sameRoot($0, w) } }) { return true }
+        // The same action said another way: «manda» for «Invia», «butta» for «Cestino», «spunta» for a click.
+        return synonymGroups.contains { group in
+            words.contains { w in group.contains { sameRoot(w, $0) || w == $0 } }
+                && labelWords.contains { w in group.contains { sameRoot(w, $0) || w == $0 } }
+        }
     }
+
+    private static let synonymGroups: [[String]] = [
+        ["invia", "invio", "manda", "mandalo", "mandala", "spedisci", "inoltra", "send", "return", "scorciatoia"],
+        ["elimina", "eliminala", "cancella", "butta", "cestino", "rimuovi", "togli", "delete", "trash"],
+        ["paga", "pagamento", "compra", "acquista", "ordina", "checkout"],
+        ["clic", "clicca", "premi", "spunta", "seleziona", "scegli"],
+        ["scrittura", "scrivi", "digita", "inserisci"],
+    ]
 
     /// Return or Enter alone.
     static func isSendKey(_ keys: String) -> Bool {

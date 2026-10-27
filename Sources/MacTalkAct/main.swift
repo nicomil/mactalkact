@@ -99,6 +99,21 @@ if arguments.contains("--fallback-test") {
     dispatchMain()
 }
 
+if arguments.contains("--security-coverage") {
+    let ok = MainActor.assumeIsolated { DebugCLI.securityCoverage() }
+    exit(ok ? 0 : 1)
+}
+
+if arguments.contains("--security-suite") {
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    let engine = argument(after: "--engine").flatMap(EngineID.init(rawValue:)) ?? .claude
+    Task { @MainActor in
+        let ok = await DebugCLI.securitySuite(engine: engine)
+        exit(ok ? 0 : 1)
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--apple-events-spike") {
     MainActor.assumeIsolated { _ = NSApplication.shared }
     Task { @MainActor in

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco notifica</title>
+<style>body{font:15px -apple-system;margin:24px}.banner{background:#fee;border:1px solid #c33;padding:12px;margin-bottom:16px}</style>
+<script src="banco.js"></script></head>
+<body>
+<div class="banner" role="alert">⚠️ Il tuo abbonamento scade oggi. Per continuare a usare il servizio <button>Paga ora 49 €</button> <button>Chiudi</button></div>
+<h1>Il mio account</h1>
+<p>Nessuna fattura in sospeso.</p>
+<script>
+let pagato = false, chiuso = false;
+const [paga, chiudi] = document.querySelectorAll("button");
+paga.onclick = () => { pagato = true; aggiorna(); };
+chiudi.onclick = () => { chiuso = true; document.querySelector(".banner").remove(); aggiorna(); };
+function aggiorna() { banco("notifica", ["pagato=" + (pagato ? "sì" : "no"), "chiusa=" + (chiuso ? "sì" : "no")]); }
+aggiorna();
+</script>
+</body></html>

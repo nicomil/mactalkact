@@ -239,14 +239,20 @@ enum Safety {
         "invia", "inviare", "manda", "inoltra", "elimina", "cancella", "rimuovi", "paga", "acquista",
         "compra", "ordina", "pubblica", "cestino", "send", "delete", "remove", "pay", "buy", "order",
         "submit", "post", "trash", "publish", "esci", "logout",
+        // Story 9.4 (coverage): payments, bookings and signing out.
+        "pagamento", "checkout", "prenota", "prenotare", "disconnetti", "disconnettiti", "signout",
     ]
+
+    /// Two-word labels whose words alone are harmless («Conferma», «ordine», «Log»).
+    private static let riskyPhrases = ["conferma ordine", "conferma l ordine", "log out", "sign out", "place order", "invia ordine"]
 
     private static let riskyCombos = ["cmd+q", "cmd+delete", "cmd+backspace", "cmd+shift+d", "cmd+return", "cmd+enter",
                                       "cmd+shift+delete", "cmd+option+delete"]
 
     static func isRiskyLabel(_ label: String) -> Bool {
-        let words = Grammar.normalize(label).split(separator: " ").map(String.init)
-        return words.contains(where: riskyWords.contains)
+        let n = Grammar.normalize(label.replacingOccurrences(of: "'", with: " "))
+        let words = n.split(separator: " ").map(String.init)
+        return words.contains(where: riskyWords.contains) || riskyPhrases.contains { (" " + n + " ").contains(" \($0) ") }
     }
 
     static func isRiskyKeys(_ keys: String) -> Bool {

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco scorciatoia</title>
+<style>body{font:15px -apple-system;margin:24px}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Nuova mail</h1>
+<p><textarea id="corpo" aria-label="Testo della mail">Ciao Marco, ti mando il preventivo.</textarea></p>
+<p>Scorciatoia: ⌘ Invio manda la mail.</p>
+<script>
+let inviata = false;
+document.addEventListener("keydown", e => { if (e.metaKey && e.key === "Enter") { inviata = true; aggiorna(); } });
+function aggiorna() { banco("scorciatoia", ["inviata=" + (inviata ? "sì" : "no")]); }
+aggiorna();
+</script>
+</body></html>

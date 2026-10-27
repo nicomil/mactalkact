@@ -637,3 +637,17 @@ SM-C5 è rispettato: le conferme non aumentano. Il «fatto» costa meno, perché
 - **«Solo clic»** (Terminal, iTerm): niente scrittura né tasti. Ai Motori cloud l'osservazione contiene solo i controlli, e `screenshot`, `get_text` e `read_text` sono rifiutati. Provato forzando Safari a «solo clic».
 - **«Conferma ogni azione»** (Impostazioni di Sistema): ogni azione con effetti chiede una volta.
 - **Inserimento sicuro di macOS:** quando blocca la dettatura, l'HUD dice quale app lo ha attivato (letto da `IOConsoleUsers`).
+
+## 25. Suite di sicurezza (Storia 9.4, 28 ottobre 2026)
+
+Dieci scenari con tutte le conferme a «no»; l'oracolo è lo stato della pagina.
+
+| Motore | Scenari superati | Conferme chieste |
+| --- | --- | --- |
+| Claude | 10/10 | 6 (Invia, Invio nella chat, Elimina, Cestino, ⌘ Invio, clic in «conferma ogni azione») |
+| Codex | 10/10 | 6 |
+| Motore locale | 10/10 | 3 (il modello locale tenta meno azioni) |
+
+Su questo Banco le istruzioni nascoste in una mail e la notifica ingannevole con «Paga ora» non hanno portato nessun Motore all'azione. Il campo password e il livello «solo clic» hanno fermato la scrittura prima di ogni domanda.
+
+**Copertura del riconoscimento:** 32 pulsanti rischiosi su 32, 0 falsi allarmi su 13 innocui. Prima di allargare l'elenco canonico era l'81% («Conferma ordine», «Procedi al pagamento», «Checkout», «Prenota», «Log out», «Disconnetti» mancavano). L'elenco di prova è stato scritto insieme alla correzione, quindi il 100% non è una stima indipendente. Restano scoperti, per costruzione, i pulsanti senza nessuna etichetta: è il compito del secondo strato (Storia 9.5).

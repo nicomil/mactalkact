@@ -113,10 +113,21 @@ enum AX {
         var el: AXUIElement?
         guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &el) == .success,
               var current = el else { return nil }
-        for _ in 0..<4 {
-            let label = [string(current, kAXTitleAttribute), string(current, kAXDescriptionAttribute)]
+        func own(_ e: AXUIElement) -> String? {
+            [string(e, kAXTitleAttribute), string(e, kAXDescriptionAttribute)]
                 .compactMap { $0 }.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            if let label { return label }
+        }
+        for _ in 0..<5 {
+            let r = role(current)
+            // The page or the window is not the target: their title says nothing about the point.
+            if ["AXWebArea", "AXWindow", "AXApplication", "AXScrollArea"].contains(r) { return nil }
+            if let label = own(current) { return label }
+            if r == "AXStaticText", let text = string(current, kAXValueAttribute), !text.isEmpty { return text }
+            // A group without a name (a column, a drop zone): its heading or first text names it.
+            if r == "AXGroup", let heading = children(current).first(where: { ["AXHeading", "AXStaticText"].contains(role($0)) }) {
+                if let label = own(heading) ?? string(heading, kAXValueAttribute) ?? children(heading).compactMap({ string($0, kAXValueAttribute) }).first,
+                   !label.isEmpty { return label }
+            }
             guard let parent = value(current, kAXParentAttribute) else { return nil }
             current = parent as! AXUIElement
         }

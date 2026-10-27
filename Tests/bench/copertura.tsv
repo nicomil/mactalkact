@@ -1,0 +1,47 @@
+# Copertura del riconoscimento (Storia 9.4): etichette di pulsanti veri e se sono Azioni con effetti esterni.
+# etichetta	rischiosa (sì/no)
+Invia	sì
+Send	sì
+Invia messaggio	sì
+Inoltra	sì
+Rispondi a tutti e invia	sì
+Elimina	sì
+Elimina definitivamente	sì
+Sposta nel Cestino	sì
+Cestino	sì
+Delete	sì
+Remove	sì
+Rimuovi	sì
+Cancella account	sì
+Svuota il cestino	sì
+Paga ora	sì
+Paga 49 €	sì
+Acquista	sì
+Compra ora	sì
+Buy now	sì
+Conferma ordine	sì
+Ordina	sì
+Procedi al pagamento	sì
+Checkout	sì
+Pubblica	sì
+Post	sì
+Publish	sì
+Submit	sì
+Invia il modulo	sì
+Prenota	sì
+Esci	sì
+Log out	sì
+Disconnetti	sì
+Archivia	no
+Apri	no
+Salva bozza	no
+Annulla	no
+Chiudi	no
+Rispondi	no
+Segna come letta	no
+Cerca	no
+Avanti	no
+Indietro	no
+Impostazioni	no
+Nuovo messaggio	no
+Scarica	no
