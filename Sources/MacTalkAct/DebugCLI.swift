@@ -163,6 +163,11 @@ enum DebugCLI {
             let order = TextReader.ordered([l("C", 0, 100), l("B", 200, 4), l("A", 0, 0), l("D", 200, 103), l("E", 100, 1, 30)]).map(\.text)
             check("righe: dall'alto in basso, da sinistra a destra", order == ["A", "E", "B", "C", "D"])
         }
+        print("Spike Apple Events (Storia 8.4):")
+        check("consenso letto senza finestre", AppleEventsSpike.askUser == false)
+        check("solo con il consenso già dato si agisce", AppleEventsSpike.mayRun(noErr) && !AppleEventsSpike.mayRun(OSStatus(errAEEventWouldRequireUserConsent))
+              && !AppleEventsSpike.mayRun(OSStatus(errAEEventNotPermitted)) && !AppleEventsSpike.mayRun(OSStatus(procNotFound)) && !AppleEventsSpike.mayRun(nil))
+        check("etichette del consenso", AppleEventsSpike.consentLabel(noErr) == "concesso" && AppleEventsSpike.consentLabel(OSStatus(errAEEventWouldRequireUserConsent)).contains("-1744"))
         print("Soglie NFR-12 (Storia 7.5):")
         do {
             check("mediana pari = media dei due centrali", median([1, 2, 3, 4]) == 2.5 && median([3, 1, 2]) == 2 && median([]) == nil)

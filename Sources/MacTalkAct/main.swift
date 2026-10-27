@@ -102,7 +102,7 @@ if arguments.contains("--fallback-test") {
 if arguments.contains("--apple-events-spike") {
     MainActor.assumeIsolated { _ = NSApplication.shared }
     Task { @MainActor in
-        await AppleEventsSpike.run()
+        await AppleEventsSpike.run(launch: arguments.contains("--avvia"))
         exit(0)
     }
     dispatchMain()

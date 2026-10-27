@@ -602,4 +602,12 @@ Cosa dice:
 - Per Safari e Brave serve il consenso Automazione, che va dato a mano una volta per l'eseguibile che invia gli eventi. Un binario ricompilato o un'app firmata in modo diverso lo chiedono di nuovo.
 - Calendario e Mail vanno avviati prima: un canale Apple Events dovrebbe aprirli, e la prima richiesta costerebbe l'avvio dell'app.
 
+**Dopo la review dello spike** (23:16):
+- Il Finder risponde in **0,15 s**: senza il `delay` di prima, compilazione dello script compresa.
+- Con `--avvia`, che apre Calendario e Mail in secondo piano, anche Calendario e Mail risultano **da chiedere (−1744)**.
+- Il report ora dice a chi va il consenso. Lanciato dal terminale, il consenso è del terminale, non di MacTalkAct.
+- Nell'app la richiesta comparirà con il testo di `NSAppleEventsUsageDescription` (aggiunto a `Info.plist`; senza quella voce macOS nega con −1743 senza chiedere).
+
+Il report è in `~/Library/Logs/MacTalkAct-apple-events-2026-10-27-2316.txt`.
+
 Per completare la misura servono Nico davanti al Mac (per dare i consensi) e le due app aperte: `--apple-events-spike` va rilanciato così. **Decisione rimandata al ciclo seguente; nessuna integrazione in questo ciclo.**

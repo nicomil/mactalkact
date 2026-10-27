@@ -22,6 +22,8 @@
 	<string>27.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>MacTalkAct misura se app come Safari, Calendario e Mail rispondono ai comandi diretti (prova di sviluppo); non invia nulla senza la tua conferma.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>MacTalkAct ascolta la tua voce per scrivere e comandare il Mac al posto delle mani.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
