@@ -168,7 +168,9 @@ final class IntentRouter {
             if RouteHeuristics.isFollowUpRequest(text) {
                 return await commandRoute(text, editable: editable, state: state, why: "seguito nella finestra")
             }
-            let c = await classifier.classify(text, editable: editable(), after: state.lastExchange)
+            // The last exchange is not given to the model: with it, Apple's model takes questions to
+            // people in the room for follow-ups. Follow-ups are recognized by the rules above.
+            let c = await classifier.classify(text, editable: editable())
             guard c.kind == .command else {
                 return .ignore(reason: "finestra aperta, ma \(c.kind.rawValue) (\(c.source))")
             }

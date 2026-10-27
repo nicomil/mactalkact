@@ -95,7 +95,7 @@ final class OnDeviceClassifier: IntentClassifier {
         var prompt = editable ? "«\(text)»" : "«\(text)» (nessun campo di testo attivo)"
         if let after, !after.isEmpty {
             // Follow-ups («e che cosa sono?») only make sense next to what the computer just said.
-            prompt += "\nLa frase arriva subito dopo questo scambio col computer: \(after.prefix(300))\nSe è una domanda o una richiesta che continua quello scambio, è un comando."
+            prompt += "\n(Ultimo scambio col computer: \(after.prefix(300)))"
         }
         let limit = timeout
         let result: String? = await withTaskGroup(of: String?.self) { group in
@@ -158,11 +158,41 @@ enum RouteHeuristics {
         return !words.isDisjoint(with: screenWords)
     }
 
+    private static let pronounQuestionWords: Set<String> = [
+        "e", "ma", "che", "cosa", "cos", "come", "perche", "quale", "quali", "quanti", "quante", "sono", "significa",
+        "significano", "vuol", "vuole", "dire", "fa", "fanno", "serve", "servono", "questo", "questa", "questi",
+        "queste", "quello", "quella", "quelli", "quelle", "ci", "c", "li", "lo", "a", "di", "invece", "allora", "poi",
+    ]
+    private static let questionStarts: Set<String> = ["che", "cosa", "cos", "come", "perche", "quale", "quali", "quanti", "quante", "a", "di"]
+
+    /// «E che cosa sono?», «a cosa servono?», «perché?»: a question made only of question words and
+    /// pronouns refers to what the computer just said. «Dove sono le salviette?» names its own object.
+    static func isPronounQuestion(_ text: String) -> Bool {
+        let words = Grammar.normalize(withoutConnectives(text)).replacingOccurrences(of: "'", with: " ")
+            .split(separator: " ").map(String.init)
+        guard let first = words.first, words.count <= 6, questionStarts.contains(first) else { return false }
+        return words.allSatisfy(pronounQuestionWords.contains)
+    }
+
+    private static let referencePhrases = [
+        "quella sotto", "quello sotto", "quella sopra", "quello sopra", "quella dopo", "quello dopo", "l altra",
+        "l altro", "la seconda", "il secondo", "la terza", "il terzo", "la prossima", "il prossimo", "la precedente",
+        "il precedente", "di prima", "come prima", "lo stesso", "la stessa", "anche quella", "anche quello",
+    ]
+
+    /// «No aspetta, quella sotto», «fai lo stesso con l'altra»: a correction or a repetition that only
+    /// makes sense right after the computer acted.
+    static func isReferenceCorrection(_ text: String) -> Bool {
+        let n = " " + Grammar.normalize(text).replacingOccurrences(of: "'", with: " ") + " "
+        return referencePhrases.contains { n.contains(" \($0) ") }
+    }
+
     /// A sentence of the conversation window that continues the exchange: an action verb even after
     /// «e», «ma», «ora» («e torna a quello di prima»), a request to the computer, a question on the screen.
     static func isFollowUpRequest(_ text: String) -> Bool {
         let stripped = withoutConnectives(text)
         return Grammar.startsWithActionVerb(stripped) || isRequestToComputer(stripped) || isScreenQuestion(text)
+            || isPronounQuestion(text) || isReferenceCorrection(text)
     }
 
     /// «Mi spieghi cos'è questa app?», «dimmi cosa c'è scritto»: questions and requests to the computer
