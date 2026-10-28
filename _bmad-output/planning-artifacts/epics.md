@@ -7,8 +7,11 @@ inputDocuments:
   - _bmad-output/planning-artifacts/research/valutazione-motori-agente-2026-10-27.md
   - _bmad-output/planning-artifacts/research/computer-use-claude-codex-2026-10-27.md
   - _bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md
+  - _bmad-output/implementation-artifacts/deferred-work.md (ciclo 3)
+  - docs/come-funziona.html §9 Limiti noti (ciclo 3)
 status: final
-updated: 2026-10-27
+updated: 2026-10-28
+# Ciclo 1-2 (Epic 1-9) completato con stepsCompleted [1, 2, 3, 4]; il conteggio sotto riguarda il ciclo 3.
 stepsCompleted: [1, 2, 3, 4]
 ---
 
@@ -78,6 +81,15 @@ FR-53: Gate dell'esecutore: blocco per costruzione (Invio in composizione, scorc
 FR-54: Livelli di accesso per app su due assi (cloud sì/no; solo clic, tutto con conferma, tutto), tabella predefinita, applicati nell'AccessGate, visibili nell'HUD.
 FR-55: Classificatore on-device come secondo strato, prima dell'azione, con budget, che può solo aggiungere conferme.
 
+Ciclo 3 (28/10/2026, dai limiti noti di `docs/come-funziona.html` §9; ratificati nel PRD §4.12 il 28/10):
+
+FR-56: AccessGate unico per Agente e Corsia locale: `ActionOrigin` su ogni chiamata all'Executor (le azioni proposte da `LocalActionProposer` sono `.model`); livelli di accesso, conferma per singola azione e secondo strato vivono in un solo punto; il comportamento di 9.2, 9.3 e 9.5 non cambia.
+FR-57: Risposta composta dall'app: quando l'ultima azione ha un esito verificato (FR-46), l'app chiude il turno e compone la frase dall'esito; il modello parla solo per domande, errori e risposte informative; interruttore con ripiego al turno finale di oggi (deciso da Nico il 28/10).
+FR-58: Scalata dall'istantaneo al rapido ≤ 1 s: la sessione rapida è pronta mentre l'istantaneo lavora, ma riceve la richiesta solo al passaggio di consegne; agisce sempre un solo processo; il passaggio non ripete l'osservazione.
+FR-59: Sessione pronta all'ascolto: all'inizio di una Frase con Parola di attivazione l'app avvia la sessione del livello probabile e la connessione agli strumenti, senza inviare contenuti prima della Frase (emenda AD-6, deciso da Nico il 28/10).
+FR-60: Giudizio anticipato del secondo strato: dopo `observe` i controlli visibili non coperti dalle regole fisse sono giudicati in background e messi in cache (app, ruolo, etichetta, contesto del dialogo); al clic si legge la cache, se manca si giudica come oggi con budget 0,9 s; può solo aggiungere conferme.
+FR-61: Spike sulla ricerca in Mail: perimetro ridotto contro indice Spotlight, obiettivo ≤ 1 s su una casella da 45.915 messaggi; nessuna integrazione, Apple Events resta fuori dagli strumenti (AD-20, deciso da Nico il 28/10).
+
 ### NonFunctional Requirements
 
 NFR-1: Decisione del Router ≤ 0,8 s, azione della Corsia locale ≤ 1,5 s, primo strumento dell'Agente semplice ≤ 3 s (90° percentile).
@@ -95,6 +107,12 @@ NFR-12: Sui 25 compiti del Banco del 27/10 con Claude: primo strumento ≤ 1,5 s
 NFR-13: Compiti su app native e webmail ≥ 90% con Claude; zero Frasi spurie affidate all'Agente in una settimana d'uso.
 NFR-14: Suite di sicurezza nel Banco, bloccante prima di ogni build; l'oracolo è lo stato della pagina; ogni azione bloccata nell'uso diventa uno scenario.
 NFR-15: Reversibilità: interruttori per §4.9–§4.10 con ripiego al comportamento di oggi; in §4.11 regolabili solo gli elenchi (FR-50, FR-51, FR-53 senza interruttore).
+
+Ciclo 3 (28/10/2026):
+
+NFR-12 (rivista, decisa da Nico il 28/10): sul Banco con Claude, mediane: primo strumento ≤ 2,0 s (il primo token da solo costa circa 1,6 s), compito ≤ 4,5 s, Livello istantaneo ≤ 2,5 s; prima risposta visibile nell'HUD ≤ 0,5 s; webmail: primo token ≤ 4 s.
+NFR-16: Secondo strato sotto carico: zero timeout sui compiti positivi del Banco e al massimo 0,3 s in più per azione al 90° percentile; SM-C7 (≤ 0,9 s) resta il tetto.
+NFR-17: Nessuna regressione di sicurezza nel ciclo: suite di sicurezza (Claude 10/10 e 8/8 blocchi, Codex 8/8), `--security-coverage`, `--route-test` e `--hands-test` restano verdi dopo ogni storia.
 
 ### Additional Requirements
 
@@ -131,6 +149,16 @@ NFR-15: Reversibilità: interruttori per §4.9–§4.10 con ripiego al comportam
 - AD-24 (nuova): `TurnClock` in `AgentRunner` (pausa durante le domande); `PendingQuestion` unica nel Coordinator; `RouterState.pending` → decisione `.answer`.
 - Convenzioni: `--route-test` e la suite di sicurezza passano prima di ogni build distribuita; interruttori solo per §4.9–§4.10; nuovo file `Safety.swift` (estratto da `LLMPlanner.swift`), `OCR.swift`; versioni di classe «versione» da rileggere entro il 1° novembre 2026.
 - Nessun template di partenza: progetto esistente (brownfield).
+
+Ciclo 3 (28/10/2026), emendamenti all'architettura ratificati in `ARCHITECTURE-SPINE.md` il 28/10:
+
+- AD-6 (emendamento ciclo 3): la sessione del livello probabile si avvia all'inizio di una Frase con Parola di attivazione e la sessione rapida si avvia insieme all'istantaneo; nessun contenuto parte prima della Frase; resta un solo `run` che agisce alla volta.
+- AD-21 (allineamento): budget del classificatore 0,9 s (SM-C7 del 28/10) al posto di 0,7 s; `ActionOrigin` e `AccessGate` oggi non esistono come tipi, i controlli di 9.2, 9.3 e 9.5 sono in `AgentTools`: la Corsia locale (`LocalActionProposer` → `LocalActionValidator` → `Executor`) non ci passa.
+- AD-21 (estensione): cache dei giudizi del secondo strato per richiesta, riempita in background dopo `observe`, mai usata per togliere una conferma.
+- AD-19 (estensione): con FR-57 l'esito verificato chiude il turno e la frase la compone l'app.
+- AD-20: invariata, Apple Events solo spike in `DebugCLI`.
+- Rete di sicurezza per i rifacimenti: suite di sicurezza, `--hands-test`, `--route-test`, `--risk-classifier-test`; riga di base del Banco prima di ogni storia di velocità (AD-18).
+- Debiti aperti da valutare (`deferred-work.md`): test di `ConversationLog.expire()`, test del Coordinator per `.askIntent`, `--hands-test` instabile su «azione senza effetti», registro degli eventi della pagina per la suite, rilettura delle versioni delle CLI entro il 1° novembre 2026.
 
 ### UX Design Requirements
 
@@ -192,6 +220,12 @@ FR-52: Epic 9 — Campi sicuri (Storia 9.3)
 FR-53: Epic 9 — Gate dell'esecutore e suite di sicurezza (Storie 9.2, 9.4)
 FR-54: Epic 9 — Livelli di accesso per app (Storia 9.3)
 FR-55: Epic 9 — Classificatore on-device come secondo strato (Storia 9.5)
+FR-56: Epic 10 — AccessGate unico per Agente e Corsia locale
+FR-57: Epic 11 — Risposta composta dall'app
+FR-58: Epic 11 — Scalata dall'istantaneo al rapido ≤ 1 s
+FR-59: Epic 11 — Sessione pronta all'ascolto
+FR-60: Epic 10 — Giudizio anticipato del secondo strato
+FR-61: Epic 11 — Spike sulla ricerca in Mail
 
 ## Epic List
 
@@ -243,6 +277,18 @@ Nessuna azione verso l'esterno parte senza un «sì» legato a quell'azione, qua
 **FRs covered:** FR-50, FR-51, FR-52, FR-53, FR-54, FR-55 (NFR-14, NFR-15)
 
 *Sovrapposizione di file:* `AgentTools.swift` è toccato dai tre epic in zone diverse (ciclo e fasi in 7, osservazione e `read_text` in 8, gate in 9); la suddivisione è mantenuta perché ogni epic ha un ciclo di feedback proprio (misura sul Banco prima e dopo) e un rischio diverso; la Storia 9.1 è indipendente e può essere anticipata.
+
+### Epic 10: Un solo cancello, e veloce
+Ogni azione proposta da un modello, dall'Agente o dalla Corsia locale, passa dallo stesso controllo (livelli di accesso, conferma per singola azione, secondo strato); il secondo strato non rallenta più i clic perché giudica i pulsanti mentre il modello pensa.
+**FRs covered:** FR-56, FR-60 (NFR-16, NFR-17)
+
+*Ordine:* prima del ciclo di velocità, perché chiude un buco di sicurezza aperto e perché FR-60 presuppone il secondo strato dentro il gate. *Debito agganciato:* `--hands-test` instabile su «azione senza effetti», rete del rifacimento.
+
+### Epic 11: Risposta in un attimo
+L'utente vede la prima reazione in mezzo secondo e il compito finisce entro le soglie riviste di NFR-12: sessione pronta quando inizia a parlare, scalata sotto il secondo, frase finale scritta dall'app, webmail con primo token entro 4 s; chiudono lo spike sulla ricerca in Mail e la misura finale.
+**FRs covered:** FR-57, FR-58, FR-59, FR-61 (NFR-12 rivista)
+
+*Indipendenza:* non richiede l'Epic 10, che però resta sotto come rete. *Debiti agganciati:* rilettura delle versioni delle CLI entro il 1° novembre 2026 prima della riga di base, test di `ConversationLog.expire()` e del Coordinator per `.askIntent`. *Sovrapposizione di file:* minima con l'Epic 10 (`AgentTools` solo per l'esito che chiude il turno).
 
 ## Epic 1: Mi capisce al primo colpo
 
@@ -1364,3 +1410,189 @@ So that un pulsante che il gate non riconosce abbia un'altra possibilità di ess
 **Given** il classificatore disattivato
 **When** eseguo la suite di sicurezza
 **Then** passa comunque (NFR-14); sui compiti positivi del Banco il classificatore non aggiunge più di 0,7 s per azione e non blocca azioni legittime (SM-C7)
+
+## Epic 10: Un solo cancello, e veloce
+
+Ogni azione proposta da un modello, dall'Agente o dalla Corsia locale, passa dallo stesso controllo (livelli di accesso, conferma per singola azione, secondo strato); il secondo strato non rallenta più i clic perché giudica i pulsanti mentre il modello pensa (AD-21, AD-22, AD-24).
+
+### Story 10.1: AccessGate unico, stesso comportamento
+
+As a Nico,
+I want che livelli di accesso, conferma per singola azione e secondo strato vivano in un solo `AccessGate`, con l'origine di ogni azione dichiarata,
+So that ogni nuova strada verso l'`Executor` erediti gli stessi controlli invece di doverli ricopiare.
+
+**Acceptance Criteria:**
+
+**Given** `ActionOrigin` (`.user`, `.model`) e un nuovo `AccessGate.swift` (AD-21)
+**When** `AgentTools.perform` riceve una chiamata
+**Then** i controlli di oggi (livello di accesso, «solo clic», campo password, «conferma ogni azione», regole fisse di `Safety`, secondo strato con cache, `ConfirmationTarget` e grant) sono chiamati dall'`AccessGate` e non più scritti in `AgentTools`; le chiamate dell'Agente sono `.model` (FR-56)
+**And** nessun messaggio, domanda o riga del log cambia; il budget del secondo strato resta 0,9 s
+
+**Given** la rete del rifacimento (NFR-17)
+**When** confronto prima e dopo
+**Then** suite di sicurezza con Claude 10/10 e 8/8 blocchi e con Codex 8/8, `--security-coverage`, `--risk-classifier-test`, `--route-test` e `--hands-test` danno gli stessi risultati
+**And** prima del rifacimento `--hands-test` «azione senza effetti» (`press_keys` shift, fallisce circa una volta su tre) è reso stabile: 10 corse su 10 verdi
+
+### Story 10.2: La Corsia locale passa dal cancello
+
+As a Nico,
+I want che un tasto o un'apertura proposti dal modello nella Corsia locale abbiano gli stessi controlli dell'Agente,
+So that «manda» detto in Mail non diventi ⌘⇧D senza domanda solo perché la richiesta era semplice.
+
+**Acceptance Criteria:**
+
+**Given** una `LocalAction` proposta da `LocalActionProposer` e approvata da `LocalActionValidator`
+**When** `Coordinator.runLocal` la esegue
+**Then** prima passa dall'`AccessGate` come `.model`: in un'app «solo clic» (Terminal, iTerm) i tasti sono rifiutati, con «conferma ogni azione» (Impostazioni di Sistema) l'app chiede, le scorciatoie che inviano o eliminano (⌘⇧D in Mail, ⌘⌫ nel Finder) chiedono con un `ConfirmationTarget.shortcut` (FR-56)
+**And** la domanda usa la `PendingQuestion` del Coordinator (AD-24): «sì» esegue, qualunque altra Frase annulla, e l'annullamento non passa all'Agente
+
+**Given** Comandi rapidi, Dettatura, numeri e macro
+**When** vengono eseguiti
+**Then** restano `.user` e non passano dal gate, come oggi
+
+**Given** `Tests/bench/sicurezza.tsv`
+**When** aggiungo tre scenari per la Corsia locale («manda» in Mail, tasti in Terminal, scorciatoia nelle Impostazioni di Sistema)
+**Then** la suite li blocca tutti e l'oracolo è lo stato dell'app (NFR-14); su `--route-test` e sui comandi locali del Corpus il gate aggiunge al massimo 20 ms [ASSUMPTION] e la Corsia locale resta entro NFR-1 (≤ 1,5 s)
+
+### Story 10.3: Giudizio anticipato del secondo strato
+
+As a Nico,
+I want che il modello Apple giudichi i pulsanti mentre l'Agente pensa, non quando clicca,
+So that il secondo strato mi protegga senza far aspettare un secondo a ogni clic.
+
+**Acceptance Criteria:**
+
+**Given** un `observe` o gli elementi iniziali della richiesta, con il secondo strato attivo
+**When** l'osservazione contiene controlli premibili visibili che le regole fisse non coprono e che non sono in cache
+**Then** l'`AccessGate` li giudica in background, uno alla volta, al massimo 12 per osservazione [ASSUMPTION], partendo dai più vicini al fuoco, e mette in cache solo i verdetti validi (chiave di oggi: strumento, etichetta, ruolo, app, finestra, dialogo); timeout ed errori non entrano in cache (FR-60)
+
+**Given** un clic su un controllo
+**When** il verdetto è in cache, o il giudizio di quel controllo è in corso
+**Then** usa la cache, oppure aspetta il giudizio in corso solo per quanto resta del budget di 0,9 s; se il controllo manca, lo giudica come oggi; il log dice «dalla cache (anticipato)»
+**And** il giudizio anticipato può solo aggiungere conferme; una nuova osservazione o la fine della richiesta annullano i giudizi in coda; con il Motore locale al lavoro (stesso modello Apple) il giudizio anticipato è sospeso
+
+**Given** il Banco con Claude e il log della concorrenza
+**When** misuro sui compiti positivi
+**Then** zero timeout del secondo strato e al massimo 0,3 s in più per azione al 90° percentile (NFR-16); il rate limit o la concorrenza di FoundationModels nell'app vera è misurato e riportato nella ricerca
+**And** la suite di sicurezza passa uguale con il secondo strato acceso e spento (NFR-14)
+
+## Epic 11: Risposta in un attimo
+
+L'utente vede la prima reazione in mezzo secondo e il compito finisce entro le soglie riviste di NFR-12: sessione pronta quando inizia a parlare, scalata sotto il secondo, frase finale scritta dall'app, webmail con primo token entro 4 s; chiudono lo spike sulla ricerca in Mail e la misura finale (AD-6 emendata, AD-18, AD-19, AD-20).
+
+### Story 11.1: Riga di base del ciclo 3 e CLI riverificate
+
+As a Nico,
+I want misurare prima di cambiare, con le soglie nuove e la prima reazione visibile,
+So that ogni storia del ciclo si giudichi su numeri confrontabili.
+
+**Acceptance Criteria:**
+
+**Given** le versioni installate di `claude` e `codex`, da rileggere entro il 1° novembre 2026
+**When** controllo `CLIStatus`
+**Then** le minime di AD-14 sono riverificate con la versione attuale e il risultato è annotato nella ricerca; se cambia l'interfaccia del flusso, la storia lo segnala prima di procedere
+
+**Given** `--agent-bench` (AD-18)
+**When** eseguo il Banco completo con Claude, compresi webmail e app vere con Nico presente
+**Then** registra una fase nuova, «prima risposta visibile» (dalla fine della Frase al primo cambio dell'HUD), e il costo della scalata per compito; i criteri sono quelli di NFR-12 rivista: primo strumento ≤ 2,0 s, compito ≤ 4,5 s, istantaneo ≤ 2,5 s, prima risposta ≤ 0,5 s, primo token sulla webmail ≤ 4 s
+**And** la riga di base è scritta nella ricerca (§28) con le tabelle in `~/Library/Logs`
+
+### Story 11.2: Sessione pronta quando inizio a parlare
+
+As a Nico,
+I want che quando dico «Computer…» l'Agente sia già acceso mentre finisco la frase,
+So that la prima richiesta dopo una pausa non paghi l'avvio della sessione e la connessione agli strumenti.
+
+**Acceptance Criteria:**
+
+**Given** una Frase con Parola di attivazione riconosciuta nel testo parziale, oppure il tasto per parlare premuto (AD-6 emendata)
+**When** il Motore scelto è Claude, l'Agente è disponibile, la modalità non è privata e l'app in primo piano non è riservata
+**Then** `ClaudeCLI` avvia, se mancano, la Sessione lunga del livello rapido e, con il Livello istantaneo attivo, quella istantanea, fermandosi all'evento `init` con i server MCP connessi; nessun messaggio è inviato prima della fine della Frase; al massimo un avvio ogni 5 s, come `wakeModels()` (FR-59)
+**And** senza Parola di attivazione (Chiacchiera in ascolto continuo) non parte nulla; le sessioni avviate e mai usate si chiudono con le regole di oggi (10 minuti di inattività); interruttore con ripiego al comportamento di oggi (NFR-15)
+
+**Given** il Banco con pause tra i compiti oltre il tempo di inattività
+**When** confronto con la riga di base
+**Then** la fase «avvio o riuso sessione» più «connessione MCP» scende sotto 0,2 s di mediana anche sul primo compito dopo una pausa; sulla webmail il primo token non contiene più l'avvio del server (3,5 s nella prova del 28/10)
+
+**Given** i debiti sul ciclo di vita della sessione (`deferred-work.md`)
+**When** chiudo la storia
+**Then** c'è un test di `ConversationLog.expire()` che fa crescere la generazione e riavvia la sessione (con un orologio iniettabile), e un test del Coordinator per `.askIntent` (HUD, nessuna finestra, nessun riavvio della sessione)
+
+### Story 11.3: Scalata sotto il secondo
+
+As a Nico,
+I want che quando il livello istantaneo non ce la fa, il rapido prenda il posto subito,
+So that un comando a un passo difficile non costi 6 s in più.
+
+**Acceptance Criteria:**
+
+**Given** una richiesta al Livello istantaneo (FR-43)
+**When** il tentativo istantaneo parte
+**Then** la Sessione lunga rapida, se manca, si avvia in parallelo fino all'`init` senza ricevere messaggi; agisce sempre un solo processo (AD-6) (FR-58)
+
+**Given** un segnale di scalata (esito negativo, seconda chiamata, resa nella risposta, errore del modello)
+**When** `escalate` passa la richiesta al rapido
+**Then** l'istantaneo è interrotto al primo segnale, senza attendere la fine del suo turno; se dopo l'ultima osservazione non ci sono state Azioni con effetti, il passaggio di consegne riusa quell'osservazione invece di rifarla
+**And** la regola della resa legge tutta la risposta, non solo la prima frase, escluse le domande di cortesia (caso `menu-accessori` del §17)
+
+**Given** il Banco
+**When** misuro i compiti che scalano
+**Then** il costo della scalata ha mediana ≤ 1 s [ASSUMPTION] contro 2,4 s del §17 e 6,1 s su Gmail; nessun compito istantaneo in più fallisce; nessuna azione è ripetuta dopo la scalata (`effectfulCalls` e grant invariati)
+
+### Story 11.4: Risposta scritta dall'app
+
+As a Nico,
+I want che dopo un'azione riuscita e verificata la conferma la scriva subito l'app,
+So that io non aspetti un secondo e mezzo perché il modello mi dica «fatto».
+
+**Acceptance Criteria:**
+
+**Given** le mani dell'Agente (`act`, `click`, `type_text`, `press_keys`…) con un parametro `final` che il modello mette sull'ultima azione della richiesta, e il Livello istantaneo, dove l'unica chiamata vale sempre come finale (FR-57)
+**When** una chiamata `final` termina con un esito che prova il risultato (FR-46: elemento cambiato, testo comparso, finestra aperta)
+**Then** l'app interrompe il turno del Motore senza attendere la frase finale, compone la risposta dall'esito («Fatto: ho inviato…», «Ho aperto…») e la mostra o la pronuncia come oggi; la Memoria di conversazione registra la richiesta con l'esito
+
+**Given** un esito non verificato, un errore, una domanda o una richiesta informativa («cosa dice questa mail?»)
+**When** il turno finisce
+**Then** risponde il modello, come oggi
+
+**Given** la Sessione lunga
+**When** un turno è stato chiuso dall'app
+**Then** la richiesta successiva nella stessa sessione funziona (prova con `--session-test`) e non vede una risposta a metà
+
+**Given** l'interruttore «Risposte rapide» nelle impostazioni (NFR-15)
+**When** è spento
+**Then** il turno finale è quello di oggi
+
+**Given** il Banco
+**When** confronto con la riga di base
+**Then** la mediana del compito scende almeno della fase «turno finale» sui compiti con esito verificato; la precisione non cala (nessun «fatto» senza esito, FR-46)
+
+### Story 11.5: Spike — ricerca in Mail sotto il secondo
+
+As a Nico,
+I want sapere se una ricerca in Mail può stare sotto il secondo anche con 45.915 messaggi,
+So that la scelta su Apple Events come strumento si faccia sui numeri.
+
+**Acceptance Criteria:**
+
+**Given** `--apple-events-spike` in `DebugCLI` (AD-20: nessuno strumento dell'Agente)
+**When** eseguo 5 ricerche sulla casella di Nico, con Nico presente
+**Then** misuro due strade: (a) Apple Events su un perimetro ridotto (posta in arrivo, ultimi 30 giorni), (b) indice di Spotlight sui messaggi di Mail con apertura del messaggio per identificativo; per ognuna mediana, massimo, permessi richiesti (Automazione, accesso completo al disco) e completezza rispetto alla ricerca di Mail (FR-61)
+**And** la casella non cambia, nessuna finestra resta aperta; il report va in `~/Library/Logs` e la ricerca riceve il §29 con la raccomandazione; la decisione su AD-20 resta a Nico
+
+### Story 11.6: Misura finale del ciclo 3
+
+As a Nico,
+I want una corsa sola con tutto acceso e la pagina «Come funziona» aggiornata,
+So that sappia quali limiti sono chiusi e quali restano.
+
+**Acceptance Criteria:**
+
+**Given** Epic 10 e storie 11.1–11.5 completate
+**When** eseguo il Banco completo con Claude (pagine, app vere, webmail) e la suite di sicurezza con Claude, Codex e il Motore locale
+**Then** il report confronta riga di base e fine ciclo su ogni soglia di NFR-12 rivista e su NFR-16, con l'esito per soglia; la suite resta verde (NFR-17)
+**And** dal log d'uso conto quante volte il Router ha chiesto «scrivilo» senza Apple Intelligence (limite «comportamento previsto»)
+
+**Given** `docs/come-funziona.html`
+**When** chiudo il ciclo
+**Then** §9 «Limiti noti», i grafici dei tempi e la tabella del secondo strato riportano i numeri nuovi, con versione e data aggiornate

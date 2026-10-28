@@ -2,12 +2,13 @@
 title: MacTalkAct — Mi capisce al primo colpo, veloce e sempre disponibile
 status: final
 created: 2026-10-26
-updated: 2026-10-27
+updated: 2026-10-28
 inputs:
   - _bmad-output/planning-artifacts/research/analisi-limiti-mactalkact-2026-10-26.md
   - _bmad-output/planning-artifacts/research/valutazione-motori-agente-2026-10-27.md
   - _bmad-output/planning-artifacts/research/computer-use-claude-codex-2026-10-27.md
   - _bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md
+  - docs/come-funziona.html (§9 Limiti noti, 28/10)
   - README.md
   - Sources/MacTalkAct/
 ---
@@ -19,6 +20,8 @@ inputs:
 Questo PRD descrive il prossimo ciclo di sviluppo di MacTalkAct, l'app per macOS che permette di usare il computer con la voce quando le mani sono occupate. Non riscrive l'app: parte dalla versione attuale (dettatura, comandi rapidi, numeri sullo schermo, agente Claude con strumenti propri, memoria e macro) e ne corregge i limiti emersi dall'uso reale, documentati in `research/analisi-limiti-mactalkact-2026-10-26.md`. È scritto per Nico, unico utente e sviluppatore, e per gli agenti che realizzeranno le storie. I termini del Glossario (§3) vanno usati esattamente così. Le scelte tecniche sono in `addendum.md`.
 
 **Aggiornamento del 27/10 (sera).** Con i sei epic del primo ciclo completati, la ricerca `technical-agente-precisione-velocita-e-strumenti-2026-10-27` ha misurato dove l'Agente perde tempo e precisione e che cosa manca alla sicurezza. Questo aggiornamento aggiunge le funzionalità §4.9 (veloce dove conta), §4.10 (precisione fuori dal Banco) e §4.11 (perimetro di sicurezza), i percorsi UJ-8…UJ-10, i requisiti FR-41…FR-55, gli NFR-12…NFR-14 e le metriche SM-8…SM-10. Non cambia Motori né strumenti; cambia il ciclo di sessione (AD-6), l'osservazione (AD-19), la catena di riserva (AD-14, AD-16) e aggiunge il gate nell'esecutore: li rende più rapidi, meglio misurati e più difesi.
+
+**Aggiornamento del 28/10 (ciclo 3).** Con gli Epic 7–9 implementati, la pagina `docs/come-funziona.html` (§9) elenca cinque limiti noti: il tempo dell'Agente sopra le soglie di NFR-12, il secondo strato che costa fino a 0,9 s sotto carico, la Corsia locale che non passa dal gate, il comportamento senza Apple Intelligence e la ricerca in Mail via Apple Events oltre i 3 s. Questo aggiornamento aggiunge §4.12 (FR-56…FR-61, NFR-16, NFR-17) e rivede NFR-12 e SM-8 sulla misura del §17 della ricerca: il primo token del modello costa da solo circa 1,6 s, quindi la soglia del primo strumento sale a 2,0 s e si aggiunge una soglia sulla prima risposta visibile. Decisioni di Nico del 28/10: soglie riviste, risposte composte dall'app con interruttore, sessione avviata all'inizio dell'ascolto (emenda AD-6), Apple Events solo come spike.
 
 ## 1. Visione
 
@@ -475,7 +478,7 @@ L'app conosce la versione minima e quella verificata delle CLI `claude` e `codex
 - La base di §4.9 (`--bare`, effort, durata della cache) va riletta prima di iniziare l'epic e comunque entro il 1° novembre 2026 (scadenza delle affermazioni di classe «versione» nella ricerca).
 
 **Feature-specific NFRs:**
-- **NFR-12 Tempi del ciclo.** Sui 25 compiti del Banco del 27/10 con Claude: primo strumento ≤ 1,5 s di mediana e tempo per compito ≤ 4,5 s di mediana [ASSUMPTION: da verificare con FR-41]; per i compiti del Livello istantaneo tempo per compito ≤ 2,5 s di mediana [ASSUMPTION].
+- **NFR-12 Tempi del ciclo.** Sui 25 compiti del Banco del 27/10 con Claude: primo strumento ≤ 1,5 s di mediana e tempo per compito ≤ 4,5 s di mediana [ASSUMPTION: da verificare con FR-41]; per i compiti del Livello istantaneo tempo per compito ≤ 2,5 s di mediana [ASSUMPTION]. *Rivista il 28/10 (decisa da Nico):* primo strumento ≤ 2,0 s di mediana (il primo token da solo costa circa 1,6 s, ricerca §17), compito ≤ 4,5 s, Livello istantaneo ≤ 2,5 s per compito; prima risposta visibile nell'HUD ≤ 0,5 s dalla fine della Frase; sulla webmail primo token ≤ 4 s.
 
 ### 4.10 Precisione fuori dal Banco
 
@@ -580,6 +583,61 @@ Il Classificatore on-device valuta, prima che l'azione parta e con un budget di 
 - **NFR-14 Suite di sicurezza.** La suite di FR-53 fa parte del Banco e termina con errore alla prima Azione con effetti esterni eseguita senza conferma; viene eseguita prima di ogni build distribuita. Dimostra la tenuta sugli scenari elencati, non l'assenza di altri canali: ogni azione bloccata nell'uso reale (log di FR-53) diventa uno scenario.
 - **NFR-15 Reversibilità.** Ogni funzionalità di §4.9–§4.10 ha un interruttore nelle impostazioni e un ripiego al comportamento di oggi (per la Sessione lunga, il processo pronto). In §4.11 sono regolabili gli elenchi (app, siti, livelli), non le regole: FR-50, FR-51 e FR-53 non hanno interruttore (NFR-5).
 
+### 4.12 Un solo cancello e risposte in un attimo
+
+**Descrizione:** aggiunta il 28/10 (ciclo 3). Chiude i limiti noti di `docs/come-funziona.html` §9. Il gate di §4.11 vale anche per la Corsia locale e il secondo strato smette di rallentare i clic; il ciclo dell'Agente toglie i secondi che restano fuori dal modello (avvio della sessione, scalata, turno finale). *Perché:* alla fine dell'Epic 7 il compito ha una mediana di 6,0 s e il primo strumento di 2,7 s; su Gmail il primo token arriva a 12,7 s, di cui 6,1 s di scalata e 3,5 s di avvio del server; il secondo strato costa circa 0,9 s per clic con 3 timeout su 8; nella Corsia locale una scorciatoia proposta dal modello (⌘⇧D in Mail) parte senza gate.
+
+#### FR-56: AccessGate unico per Agente e Corsia locale
+
+Livelli di accesso, conferma per singola azione e secondo strato vivono in un solo `AccessGate`, chiamato per ogni azione di origine `.model`: dall'Agente di ogni Motore e dalla Corsia locale (le azioni proposte dal modello Apple e approvate dal Validatore). Comandi rapidi, Dettatura, numeri e macro restano `.user`. Il comportamento di FR-51…FR-55 non cambia.
+
+**Conseguenze (verificabili):**
+- Nella Corsia locale i tasti sono rifiutati in un'app «solo clic», con «conferma ogni azione» l'app chiede, e le scorciatoie che inviano o eliminano chiedono conferma.
+- La suite di sicurezza ha tre scenari per la Corsia locale e li blocca; i risultati della suite sugli scenari esistenti non cambiano.
+
+#### FR-57: Risposta composta dall'app
+
+Quando l'ultima azione della richiesta (segnalata dal modello, o l'unica chiamata del Livello istantaneo) termina con un esito che prova il risultato (FR-46), l'app chiude il turno del Motore e compone la risposta dall'esito. Il modello risponde solo per domande, errori, esiti non verificati e richieste informative. Interruttore «Risposte rapide» con ripiego al turno finale di oggi (NFR-15).
+
+**Conseguenze (verificabili):**
+- Sui compiti con esito verificato la mediana del compito scende almeno della fase «turno finale»; nessun «fatto» senza esito.
+- Dopo un turno chiuso dall'app la Sessione lunga accetta la richiesta successiva senza vedere una risposta a metà.
+
+#### FR-58: Scalata sotto il secondo
+
+Quando una richiesta parte al Livello istantaneo, la Sessione lunga rapida si prepara in parallelo senza ricevere messaggi; al primo segnale di scalata l'istantaneo è interrotto e il rapido riceve la richiesta. Agisce sempre un solo processo; nessuna Azione con effetti viene ripetuta.
+
+**Conseguenze (verificabili):**
+- Sul Banco la scalata costa al massimo 1 s di mediana [ASSUMPTION] (27/10: 2,4 s; Gmail: 6,1 s).
+- La regola della resa legge tutta la risposta del Livello istantaneo, escluse le domande di cortesia.
+
+#### FR-59: Sessione pronta all'ascolto
+
+Quando la Parola di attivazione compare nel testo parziale, o l'utente preme il tasto per parlare, l'app avvia le Sessioni lunghe di Claude che mancano (rapida e, se attivo, istantanea) fino alla connessione agli strumenti, senza inviare contenuti prima della fine della Frase. Non vale in modalità privata, su app riservate, con un Motore diverso da Claude o senza Agente disponibile. Interruttore con ripiego al comportamento di oggi.
+
+**Conseguenze (verificabili):**
+- Sul primo compito dopo una pausa, avvio della sessione e connessione agli strumenti valgono insieme meno di 0,2 s di mediana.
+- La Chiacchiera senza Parola di attivazione non avvia nulla.
+
+#### FR-60: Giudizio anticipato del secondo strato
+
+Dopo un'osservazione il Classificatore on-device giudica in background i controlli visibili che le regole fisse non coprono, e i verdetti validi entrano nella cache esistente; al clic l'`AccessGate` usa la cache o attende il giudizio in corso entro il budget di 0,9 s. Il giudizio anticipato può solo aggiungere conferme ed è sospeso mentre lavora il Motore locale.
+
+**Conseguenze (verificabili):**
+- Sui compiti positivi del Banco nessun timeout del secondo strato (NFR-16).
+- La suite di sicurezza passa uguale con il secondo strato acceso e spento.
+
+#### FR-61: Spike sulla ricerca in Mail
+
+Misura di due strade per cercare in Mail sotto il secondo su una casella grande: Apple Events su un perimetro ridotto e indice di Spotlight, con permessi richiesti e completezza. Comando di debug, nessuna integrazione; la decisione di usare Apple Events come strumento resta a Nico dopo i numeri.
+
+**Conseguenze (verificabili):**
+- Un report con mediana e massimo su 5 ricerche per strada, la casella invariata e nessuna finestra aperta.
+
+**Feature-specific NFRs:**
+- **NFR-16 Secondo strato sotto carico.** Zero timeout sui compiti positivi del Banco e al massimo 0,3 s in più per azione al 90° percentile; SM-C7 (≤ 0,9 s) resta il tetto.
+- **NFR-17 Nessuna regressione di sicurezza.** Suite di sicurezza, copertura del riconoscimento, verifica del Router e prova delle mani restano verdi dopo ogni intervento di §4.12.
+
 ## 5. Requisiti non funzionali trasversali
 
 - **NFR-1 Tempi.** Decisione del Router ≤ 0,8 s (90° percentile, modello caldo) dalla fine della Frase; azione della Corsia locale ≤ 1,5 s (90° percentile); primo strumento dell'Agente su richiesta semplice ≤ 3 s.
@@ -601,13 +659,13 @@ Il Classificatore on-device valuta, prima che l'azione parta e con un budget di 
 - Non si adottano i computer use di Claude Code, di OpenAI o di Google.
 - Niente controllo del browser via porta di debug o estensioni con token che saltano le conferme.
 - Nessun modello di grounding locale finché il Banco (FR-41) non registra un caso in cui l'albero manca l'elemento.
-- Nessuna integrazione delle azioni dirette via Apple Events oltre allo spike di FR-49.
+- Nessuna integrazione delle azioni dirette via Apple Events oltre agli spike di FR-49 e FR-61 (confermato da Nico il 28/10).
 
 ## 7. Perimetro
 
 ### 7.1 Incluso
 
-Router unico con Classificatore on-device, Finestra di conversazione, Memoria di conversazione, annullamento dell'ultimo Inserimento, Corpus e comando di verifica, Corsia locale con Validatore, modello proporzionato alla difficoltà, Modalità ridotta, strumenti dell'Agente per azioni in blocco e modifica negli editor web. (27/10, sera) Le funzionalità §4.9 Veloce dove conta, §4.10 Precisione fuori dal Banco e §4.11 Perimetro di sicurezza (FR-41…FR-55).
+Router unico con Classificatore on-device, Finestra di conversazione, Memoria di conversazione, annullamento dell'ultimo Inserimento, Corpus e comando di verifica, Corsia locale con Validatore, modello proporzionato alla difficoltà, Modalità ridotta, strumenti dell'Agente per azioni in blocco e modifica negli editor web. (27/10, sera) Le funzionalità §4.9 Veloce dove conta, §4.10 Precisione fuori dal Banco e §4.11 Perimetro di sicurezza (FR-41…FR-55). (28/10) §4.12 Un solo cancello e risposte in un attimo (FR-56…FR-61).
 
 ### 7.2 Escluso
 
@@ -626,7 +684,7 @@ Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modifica
 - **SM-5 Tempo senza Agente:** minuti in cui una richiesta per l'Agente non trova alcun Motore, da 35 minuti il 26/10 (18:25–19:00) a zero. Valida FR-27.
 - **SM-7 Mani da computer use:** sul Banco esteso almeno il 90% dei compiti riusciti con Claude e con Codex [ASSUMPTION]. Valida FR-35…FR-40.
 - **SM-6 Qualità del Motore locale:** sul Banco di prova almeno il 70% dei compiti riusciti con il modello Apple e almeno l'85% con il Modello locale esteso [ASSUMPTION]. Valida FR-30, FR-31.
-- **SM-8 Velocità del ciclo:** sui 25 compiti del Banco del 27/10 con Claude, primo strumento ≤ 1,5 s di mediana e compito ≤ 4,5 s di mediana [ASSUMPTION]. Valida FR-42, FR-43, FR-44.
+- **SM-8 Velocità del ciclo:** sui 25 compiti del Banco del 27/10 con Claude, primo strumento ≤ 1,5 s di mediana e compito ≤ 4,5 s di mediana [ASSUMPTION]. Valida FR-42, FR-43, FR-44. *Rivista il 28/10:* soglie di NFR-12 rivista (primo strumento ≤ 2,0 s, compito ≤ 4,5 s, istantaneo ≤ 2,5 s, prima risposta visibile ≤ 0,5 s, primo token sulla webmail ≤ 4 s). Valida anche FR-57, FR-58, FR-59.
 - **SM-9 Frasi spurie:** zero Frasi spurie affidate all'Agente nel log di una settimana d'uso (27/10: 2 in 5 minuti). Valida FR-48.
 - **SM-10 Suite di sicurezza:** zero Azioni con effetti esterni senza conferma sugli scenari di FR-53, a ogni build. Valida FR-50…FR-55.
 
@@ -667,7 +725,10 @@ Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modifica
 - §4.9 FR-42 — riavvio della Sessione lunga dopo 20 richieste.
 - §4.9 FR-43 — Haiku 5.5 con effort basso come Livello istantaneo; parità con il livello rapido sui compiti a un passo.
 - §4.9 FR-44 — scansione iniziale sotto 1 s su una webmail reale.
-- §4.9 NFR-12 e §8 SM-8 — primo strumento ≤ 1,5 s, compito ≤ 4,5 s, istantaneo ≤ 2,5 s.
+- §4.9 NFR-12 e §8 SM-8 — primo strumento ≤ 1,5 s, compito ≤ 4,5 s, istantaneo ≤ 2,5 s. Rivista il 28/10: primo strumento ≤ 2,0 s, prima risposta visibile ≤ 0,5 s, primo token sulla webmail ≤ 4 s (decisione di Nico, non più assunzione).
+- §4.12 FR-58 — scalata ≤ 1 s di mediana.
+- §4.12 FR-56 — il gate aggiunge al massimo 20 ms alla Corsia locale.
+- §4.12 FR-60 — al massimo 12 controlli giudicati in anticipo per osservazione.
 - §4.10 FR-47 — prima lettura OCR sotto 1 s con riscaldamento su M1.
 - §4.10 NFR-13 — 90% sui compiti su app native.
 - §4.11 FR-54 — elenco predefinito delle app a livello ridotto (Terminal, iTerm, Finder; Impostazioni di Sistema con conferma).
