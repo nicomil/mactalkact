@@ -35,7 +35,9 @@
 - ~~Scenario di FR-50~~: fatto il 28/10 (canarino obbedito, ora blocco con approvazione per impronta).
 - Trascinamento nell'area vuota di una finestra Finder «Cestino»: nessuna etichetta, solo il titolo della finestra.
 - `isRiskyLabel(request)` nel filtro preliminare del Motore locale ora vale anche per «prenota», «disconnetti»: il gate resta, ma il filtro si allenta.
-- `--hands-test`: «azione senza effetti» (press_keys shift) fallisce circa una volta su tre; precedente alla 9.4.
+- ~~`--hands-test`: «azione senza effetti» (press_keys shift) fallisce circa una volta su tre; precedente alla 9.4.~~ Storia 10.1, 28/10: la prova ora confronta con una pagina ferma (due osservazioni uguali di fila prima del tasto).
+- Esito delle azioni (AD-19): nell'uso vero i cambi di Accessibilità che arrivano tardi dopo un'azione possono finire nell'esito dell'azione successiva. Il `--hands-test` ora aspetta una pagina ferma, il prodotto no (`settle()` guarda solo titolo, fogli, fuoco e figli diretti dell'area web). Visto nella Storia 10.1.
+- cmux (`com.cmuxterm.app`) è un terminale ma non è nell'elenco «solo clic» predefinito (visto nella Storia 10.1): decidere se aggiungerlo.
 
 ## Dalla review della Storia 9.5 (28/10/2026)
 
@@ -60,3 +62,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-11-1-riga-di-base-ciclo-3.md`
   summary: Riga di base con Nico presente: webmail (primo token ≤ 4 s), Calendario e Mail sul Banco del ciclo 3.
   evidence: senza `MACTALK_BENCH_WEBMAIL` e senza Nico la soglia webmail è «non misurata» (§28); serve prima della misura finale (Storia 11.6).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-1-accessgate-unico.md`
+  summary: Test deterministico del ciclo di rilettura di `set_value` sui cursori web (letture AX dietro un punto d'iniezione).
+  evidence: oggi solo `--hands-test` lo esercita e il guasto originale compariva circa una volta su dieci.

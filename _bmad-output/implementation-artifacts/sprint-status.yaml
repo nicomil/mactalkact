@@ -90,8 +90,8 @@ development_status:
   9-5-classificatore-on-device-come-secondo-strato: done
   epic-9-retrospective: optional
 
-  epic-10: backlog
-  10-1-accessgate-unico-stesso-comportamento: backlog
+  epic-10: in-progress
+  10-1-accessgate-unico-stesso-comportamento: in-progress
   10-2-la-corsia-locale-passa-dal-cancello: backlog
   10-3-giudizio-anticipato-del-secondo-strato: backlog
   epic-10-retrospective: optional

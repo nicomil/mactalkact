@@ -10,7 +10,7 @@ import Speech
 enum DebugCLI {
 
     /// `--selftest`: checks the local grammar and helpers.
-    static func selfTest() -> Bool {
+    static func selfTest() async -> Bool {
         var failures = 0
         func check(_ name: String, _ ok: Bool) {
             print(ok ? "  ok   \(name)" : "  FAIL \(name)")
@@ -215,23 +215,23 @@ enum DebugCLI {
         """
         check("inserimento sicuro: il pid della sessione sulla console", SecureInput.securePID(in: ioreg) == 22)
         print("Bersagli della conferma (Storia 9.2):")
-        check("Invio in una sequenza", AgentTools.containsSendKey("tab return") && !AgentTools.containsSendKey("cmd+return"))
-        check("chat: app e pagine web", AgentTools.needsComposerGate(bundleID: "com.apple.MobileSMS", windowTitle: "")
-              && AgentTools.needsComposerGate(bundleID: "com.apple.Safari", windowTitle: "whatsapp")
-              && !AgentTools.needsComposerGate(bundleID: "com.apple.Safari", windowTitle: "posta in arrivo"))
-        check("richiesta negata: non conta come chiesta", !AgentTools.requestMentions("non eliminare niente", "Elimina"))
-        check("bersaglio corto: cmd+q nominato", AgentTools.requestMentions("chiudi con cmd+q", "cmd+q"))
-        check("«post» non è dentro «posta»", !AgentTools.requestMentions("apri la posta", "Post"))
-        check("stessa radice: eliminare / Elimina", AgentTools.requestMentions("eliminare la newsletter", "Elimina"))
-        check("sinonimi: «manda» per Invia, «butta» per Cestino, «spunta» per il clic", AgentTools.requestMentions("manda questa mail", "Invia")
-              && AgentTools.requestMentions("butta la scheda nel Cestino", "Cestino") && AgentTools.requestMentions("spunta la casella", "il clic in Safari")
-              && !AgentTools.requestMentions("riassumi la mail", "Elimina tutte"))
+        check("Invio in una sequenza", AccessGate.containsSendKey("tab return") && !AccessGate.containsSendKey("cmd+return"))
+        check("chat: app e pagine web", AccessGate.needsComposerGate(bundleID: "com.apple.MobileSMS", windowTitle: "")
+              && AccessGate.needsComposerGate(bundleID: "com.apple.Safari", windowTitle: "whatsapp")
+              && !AccessGate.needsComposerGate(bundleID: "com.apple.Safari", windowTitle: "posta in arrivo"))
+        check("richiesta negata: non conta come chiesta", !AccessGate.requestMentions("non eliminare niente", "Elimina"))
+        check("bersaglio corto: cmd+q nominato", AccessGate.requestMentions("chiudi con cmd+q", "cmd+q"))
+        check("«post» non è dentro «posta»", !AccessGate.requestMentions("apri la posta", "Post"))
+        check("stessa radice: eliminare / Elimina", AccessGate.requestMentions("eliminare la newsletter", "Elimina"))
+        check("sinonimi: «manda» per Invia, «butta» per Cestino, «spunta» per il clic", AccessGate.requestMentions("manda questa mail", "Invia")
+              && AccessGate.requestMentions("butta la scheda nel Cestino", "Cestino") && AccessGate.requestMentions("spunta la casella", "il clic in Safari")
+              && !AccessGate.requestMentions("riassumi la mail", "Elimina tutte"))
         check("sinonimi stretti: «inoltre», il nome dell'app, «scorciatoia», «ordina le mail» non valgono come richiesta",
-              !AgentTools.requestMentions("scrivi ciao a Laura, inoltre dimmi l'ora", "Inoltra")
-              && !AgentTools.requestMentions("apri WhatsApp e leggi l'ultimo messaggio", "Invio in WhatsApp")
-              && !AgentTools.requestMentions("chiudi la finestra con la scorciatoia", "cmd+return")
-              && !AgentTools.requestMentions("ordina le mail per data", "Acquista ora")
-              && !AgentTools.requestMentions("togli il grassetto", "Elimina documento"))
+              !AccessGate.requestMentions("scrivi ciao a Laura, inoltre dimmi l'ora", "Inoltra")
+              && !AccessGate.requestMentions("apri WhatsApp e leggi l'ultimo messaggio", "Invio in WhatsApp")
+              && !AccessGate.requestMentions("chiudi la finestra con la scorciatoia", "cmd+return")
+              && !AccessGate.requestMentions("ordina le mail per data", "Acquista ora")
+              && !AccessGate.requestMentions("togli il grassetto", "Elimina documento"))
         do {
             let dir = NSTemporaryDirectory() + "mactalkact-codex-home-\(UUID().uuidString)"
             try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -254,11 +254,11 @@ enum DebugCLI {
               && Safety.isRiskyKeys("cmd+delete", app: "com.apple.finder"))
         check("«Ordina per data» e «Metodi di pagamento» innocui, «Procedi al pagamento» no",
               !Safety.isRiskyLabel("Ordina per data") && !Safety.isRiskyLabel("Metodi di pagamento") && Safety.isRiskyLabel("Procedi al pagamento"))
-        let row = AgentTools.scenarioRow(label: "Invia a Laura", level: "normale", request: "manda\tla mail\nora")
+        let row = AccessGate.scenarioRow(label: "Invia a Laura", level: "normale", request: "manda\tla mail\nora")
         check("riga di scenario: sei campi, niente tab né a capo dentro", row.split(separator: "\t", omittingEmptySubsequences: false).count == 6
               && row.hasPrefix("blocco-invia-a-laura\t<pagina>\tnormale\tmanda la mail ora\tdomanda"))
-        check("log senza dettaglio: niente testo dello schermo", AgentTools.ConfirmationTarget.shortcut(keys: "cmd+q", window: "Segreto").kind == "scorciatoia cmd+q"
-              && AgentTools.ConfirmationTarget.menu(path: ["File", "Elimina"]).kind == "menu (2 livelli)")
+        check("log senza dettaglio: niente testo dello schermo", AccessGate.ConfirmationTarget.shortcut(keys: "cmd+q", window: "Segreto").kind == "scorciatoia cmd+q"
+              && AccessGate.ConfirmationTarget.menu(path: ["File", "Elimina"]).kind == "menu (2 livelli)")
         print("Orologio del turno (Storia 9.2):")
         do {
             let clock = TurnClock(seconds: 10)
@@ -639,6 +639,8 @@ enum DebugCLI {
               Set(Log.archivesToDelete(names, now: logNow, days: 7)) == ["MacTalkAct-2026-10-20.log", "MacTalkAct-2026-10-19-101010.log"])
         check("log: 1 giorno = solo oggi",
               Log.archivesToDelete(["MacTalkAct-2026-10-26.log", "MacTalkAct-2026-10-27.log"], now: logNow, days: 1) == ["MacTalkAct-2026-10-26.log"])
+
+        failures += await accessGateTest()
 
         print(failures == 0 ? "Tutto ok." : "\(failures) test falliti.")
         return failures == 0
@@ -1449,6 +1451,8 @@ extension DebugCLI {
         print("Conferma legata alla singola azione (Storie 7.1 e 9.2):")
         do {
             let tools = AgentTools(executor: Executor())
+            // An app «normale» in front, whatever the terminal running the test is.
+            tools.gate.environment = fakeGateEnvironment("Prova", .full)
             var questions: [String] = []
             var paused = 0
             tools.askUser = { q, confirmation in questions.append(q); return confirmation ? "no" : nil }
@@ -1468,10 +1472,37 @@ extension DebugCLI {
             check("ripetizione su un altro Motore: contatori tenuti", tools.confirmationsAsked == 2 && tools.blockedCalls == 2)
             tools.reset()
             check("richiesta nuova: contatori a zero", tools.confirmationsAsked == 0 && tools.blockedCalls == 0)
-            check("richiesta che nomina l'azione", AgentTools.requestMentions("elimina la mail della newsletter", "Elimina") && !AgentTools.requestMentions("apri la posta", "Elimina"))
-            check("Invio nelle chat", AgentTools.isSendKey("return") && AgentTools.isSendKey(" Enter ") && !AgentTools.isSendKey("cmd+return"))
-            let line = AgentTools.logLine(scenario: "prova", app: "Safari", target: .element(id: 7, action: "click"), label: "Invia", outcome: "negata")
+            check("richiesta che nomina l'azione", AccessGate.requestMentions("elimina la mail della newsletter", "Elimina") && !AccessGate.requestMentions("apri la posta", "Elimina"))
+            check("Invio nelle chat", AccessGate.isSendKey("return") && AccessGate.isSendKey(" Enter ") && !AccessGate.isSendKey("cmd+return"))
+            let line = AccessGate.logLine(scenario: "prova", app: "Safari", target: .element(id: 7, action: "click"), label: "Invia", outcome: "negata")
             check("riga di log nel formato della suite", line == "Sicurezza: blocco · scenario=prova · app=Safari · bersaglio=elemento 7 · click «Invia» · origine=model · esito=negata")
+        }
+
+        print("Le chiamate dell'Agente passano dal gate (Storia 10.1):")
+        do {
+            // Fake apps in front: every action is refused or denied before it reaches the screen.
+            let tools = AgentTools(executor: Executor())
+            tools.reportOutcome = false
+            var questions: [String] = []
+            tools.askUser = { q, confirmation in if confirmation { questions.append(q) }; return confirmation ? "no" : nil }
+            tools.gate.environment = fakeGateEnvironment("Terminal", .clickOnly)
+            let typed = await tools.call("type_text", ["text": "x"])
+            let keys = await tools.call("press_keys", ["keys": "return"])
+            check("«solo clic»: type_text e press_keys rifiutati dal gate, rifiuti 2, nessuna domanda",
+                  typed.isError && typed.text.hasPrefix("In «Terminal» the agent may only click and scroll") && keys.isError
+                  && tools.refusals == 2 && questions.isEmpty && !tools.deniedThisRequest)
+            tools.gate.environment = fakeGateEnvironment("Impostazioni di Sistema", .confirmAll)
+            let click = await tools.call("click", ["id": 5])
+            check("«conferma ogni azione»: il clic chiede, «no» → non fatto",
+                  click.isError && click.text == AccessGate.denied("il clic in Impostazioni di Sistema") && questions.count == 1
+                  && tools.confirmationsAsked == 1 && tools.blockedCalls == 1 && tools.deniedThisRequest)
+            tools.reset()
+            tools.gate.environment = fakeGateEnvironment("Prova", .full)
+            let quit = await tools.call("press_keys", ["keys": "cmd+q"])
+            let unknown = await tools.call("click", ["id": 5])
+            check("«normale»: solo le regole fisse chiedono (cmd+q sì, un id qualsiasi no)",
+                  quit.text == AccessGate.denied("cmd+q") && unknown.isError && !unknown.text.contains("NOT done")
+                  && questions.count == 2 && tools.confirmationsAsked == 1 && tools.refusals == 2)
         }
         return failures == 0
     }
@@ -1880,7 +1911,21 @@ extension DebugCLI {
             try? await Task.sleep(for: .seconds(2))
             if let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").first { await ex.bringToFront(app) }
             try? await Task.sleep(for: .seconds(0.4))
+            // The page must really be in front before anything is typed: reset() takes the app in front
+            // as the app of the task, so another app there (the user's terminal) would get the keys.
+            for attempt in 0..<6 where AX.realFrontmostApplication()?.bundleIdentifier != "com.apple.Safari" {
+                if attempt % 2 == 1, let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").first {
+                    await ex.bringToFront(app)
+                }
+                try? await Task.sleep(for: .seconds(0.5))
+            }
+            let front = AX.realFrontmostApplication()
             tools.reset()
+            if front?.bundleIdentifier != "com.apple.Safari" {
+                // Nothing of this page is done: every call returns an error until the next page.
+                check("Safari in primo piano per \(page)", false, "in primo piano: \(front?.localizedName ?? "nessuna app")")
+                tools.cancelled = true
+            }
         }
         func text(_ r: AgentTools.Result) -> String { r.text }
         func id(_ observed: String, _ containing: String) -> Int? {
@@ -1903,6 +1948,19 @@ extension DebugCLI {
                 check("clic con esito: nuovo titolo", c.contains("pagina: Accessori"), c.components(separatedBy: "\n").prefix(2).joined(separator: " | "))
             } else { check("id di Accessori nell'esito", false, r) }
         } else { check("Prodotti visibile", false) }
+        // The action without effect is judged against a quiet page: after the navigation to «Accessori»
+        // Safari may still be updating its accessibility tree (heading, focus, the open menu) when the
+        // outcome of the click is read, and those late changes would end up in the next outcome.
+        // Two equal views in a row: the reference the next outcome compares with is the settled page.
+        var settled = text(await tools.call("observe", [:]))
+        var quiet = false
+        for _ in 0..<10 {
+            try? await Task.sleep(for: .milliseconds(300))
+            let again = text(await tools.call("observe", [:]))
+            if again == settled { quiet = true; break }
+            settled = again
+        }
+        check("pagina ferma prima di shift", quiet, "la pagina cambia ancora dopo 11 osservazioni")
         let same = text(await tools.call("press_keys", ["keys": "shift"]))
         check("azione senza effetti: nothing changed", same.contains("nothing changed"), same)
 
@@ -2583,5 +2641,187 @@ extension DebugCLI {
             + "\nfalsi «fatto»: \(ran.filter(\.falseDone).count) · prova prima del «fatto»: \(AppSettings.shared.evidenceBeforeDone ? "attiva" : "spenta")\n"
         try? summary.write(to: out.deletingPathExtension().appendingPathExtension("soglie.txt"), atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")
+    }
+}
+
+extension DebugCLI {
+    /// A Mac with `app` in front at `scope` and nothing read from the screen: the gate's tests.
+    @MainActor static func fakeGateEnvironment(_ app: String, _ scope: AccessLevel.Scope, bundleID: String = "test.app") -> AccessGate.Environment {
+        AccessGate.Environment(
+            level: { AccessLevel(cloudAllowed: true, scope: scope) }, appName: { app }, frontPID: { 4242 },
+            focusedFieldIsSecure: { false }, secondLayerOn: { true }, bundleID: { bundleID }, windowTitle: { "Banco" },
+            composerApp: { nil })
+    }
+
+    /// The access gate without a screen (Story 10.1): one check per row of the story's matrix, with a
+    /// fake app in front, a fake judge and fake answers. Returns the number of failures.
+    static func accessGateTest() async -> Int {
+        var failures = 0
+        func check(_ name: String, _ ok: Bool, _ detail: String = "") {
+            print(ok ? "  ok   \(name)" : "  FAIL \(name)\(detail.isEmpty ? "" : " — \(detail)")")
+            if !ok { failures += 1 }
+        }
+        print("AccessGate unico (Storia 10.1):")
+        /// A gate in front of `app` at `scope`, with the second layer on and the answer `answer`.
+        func makeGate(_ app: String, _ scope: AccessLevel.Scope, answer: String? = "no") -> (AccessGate, Box<[String]>) {
+            let gate = AccessGate()
+            let questions = Box<[String]>([])
+            gate.environment = fakeGateEnvironment(app, scope)
+            gate.askUser = { q, confirmation in if confirmation { questions.value.append(q) }; return answer }
+            gate.riskJudge = { _ in RiskVerdict(external: false, source: "prova", seconds: 0) }
+            return (gate, questions)
+        }
+        let noFacts = AccessGate.ActionFacts(isSecureElement: { _ in false }, riskActions: { _ in [] })
+        func judging(_ label: String) -> AccessGate.ActionFacts {
+            AccessGate.ActionFacts(isSecureElement: { _ in false }, riskActions: { app in
+                [RiskAction(tool: "click", label: label, role: "AXButton", app: app, window: "Banco", request: "")]
+            })
+        }
+
+        // Solo clic: keys and typing refused with the same error as before, counted as a refusal.
+        do {
+            let (gate, questions) = makeGate("Terminal", .clickOnly)
+            var notices: [String] = []
+            gate.onAccessNotice = { notices.append($0) }
+            let typed = await gate.check("type_text", ["text": "ls"], origin: .model, facts: noFacts)
+            let keys = await gate.check("press_keys", ["keys": "return"], origin: .model, facts: noFacts)
+            check("solo clic: type_text rifiutato con lo stesso errore, rifiuti +1",
+                  typed == "In «Terminal» the agent may only click and scroll (access level set by the user). Do not type or press keys here; tell the user in one short Italian sentence."
+                  && keys != nil && gate.refusals == 2, typed ?? "nil")
+            var allowed: [String] = []
+            for (tool, args) in [("click", ["id": 3]), ("click_many", ["ids": [3]]), ("scroll", ["direction": "down"]), ("hover", ["id": 3]),
+                                 ("open_app", ["name": "Safari"])] as [(String, [String: Any])] {
+                if await gate.check(tool, args, origin: .model, facts: noFacts) == nil { allowed.append(tool) }
+            }
+            check("solo clic: passano click, click_many, scroll, hover e open_app; nessuna domanda, l'avviso una volta sola",
+                  allowed == ["click", "click_many", "scroll", "hover", "open_app"] && questions.value.isEmpty && notices == ["🔐 Terminal: solo clic"]
+                  && gate.refusals == 2, "\(allowed) · \(notices)")
+        }
+        // Password: never written, with an element or in the focused field.
+        do {
+            let (gate, _) = makeGate("Safari", .full)
+            let secure = AccessGate.ActionFacts(isSecureElement: { $0 == 5 ? true : $0 == 6 ? false : nil }, riskActions: { _ in [] })
+            let typed = await gate.check("type_text", ["id": 5, "text": "x"], origin: .model, facts: secure)
+            let other = await gate.check("type_text", ["id": 6, "text": "x"], origin: .model, facts: secure)
+            check("password: type_text su AXSecureTextField, stesso errore",
+                  typed == "That is a password field: the agent never reads or types there. Tell the user to type it themselves." && other == nil && gate.refusals == 1)
+            let unknownCalm = await gate.check("type_text", ["id": 77, "text": "x"], origin: .model, facts: secure)
+            gate.environment.focusedFieldIsSecure = { true }
+            let unknown = await gate.check("type_text", ["id": 77, "text": "x"], origin: .model, facts: secure)
+            check("password: id sconosciuto → decide il campo col fuoco", unknownCalm == nil && unknown != nil)
+            let tab = await gate.check("press_keys", ["keys": "tab"], origin: .model, facts: noFacts)
+            let letter = await gate.check("press_keys", ["keys": "a"], origin: .model, facts: noFacts)
+            check("password nel campo col fuoco: Tab esce, una lettera no", tab == nil && letter != nil)
+            let huge = await gate.check("type_text", ["id": Double.nan, "text": "x"], origin: .model, facts: secure)
+            let fraction = await gate.check("type_text", ["id": 5.7, "text": "x"], origin: .model, facts: secure)
+            check("id non intero dal modello: nessun crash, nessun 5.7 → 5 (decide il campo col fuoco)", huge != nil && fraction != nil
+                  && AccessGate.levelTarget("click", ["id": 1e300]) == .tool(name: "click"))
+        }
+        // Conferma ogni azione: one question naming the action, no answer is a no.
+        do {
+            let (gate, questions) = makeGate("Impostazioni di Sistema", .confirmAll)
+            var asking: [Bool] = []
+            gate.onQuestion = { asking.append($0) }
+            let no = await gate.check("click", ["id": 7], origin: .model, facts: noFacts)
+            check("conferma ogni azione: una domanda «Vuoi che faccia …», «no» → stesso errore di negazione",
+                  questions.value == ["Vuoi che faccia «il clic in Impostazioni di Sistema», che tu non hai chiesto?"]
+                  && no == AccessGate.denied("il clic in Impostazioni di Sistema") && gate.lastTarget == .element(id: 7, action: "click"),
+                  "\(questions.value) · \(no ?? "nil")")
+            check("la domanda apre e chiude l'attesa (orologio fermo durante la domanda)", asking == [true, false], "\(asking)")
+            gate.askUser = { _, _ in nil }
+            let silent = await gate.check("scroll", ["direction": "down"], origin: .model, facts: noFacts)
+            check("conferma ogni azione: nessuna risposta = no", silent == AccessGate.denied("lo scorrimento in Impostazioni di Sistema")
+                  && gate.confirmationsAsked == 2 && gate.deniedConfirmations == 2 && gate.deniedThisRequest && gate.lastTarget == .tool(name: "scroll"))
+            _ = await gate.check("press_keys", ["keys": "cmd+a"], origin: .model, facts: noFacts)
+            check("bersaglio di press_keys: la scorciatoia", gate.lastTarget == .shortcut(keys: "cmd+a", window: ""))
+            gate.askUser = { _, _ in "sì" }
+            var judged = 0
+            gate.riskJudge = { _ in judged += 1; return RiskVerdict(external: true, source: "on-device: invio", seconds: 0) }
+            let yes = await gate.check("click", ["id": 7], origin: .model, facts: judging("Pubblica"))
+            check("conferma ogni azione: «sì» → l'azione parte, il secondo strato non giudica", yes == nil && judged == 0 && gate.confirmationsAsked == 4)
+            gate.reset(keepCounters: true)
+            check("stessa richiesta su un altro Motore: contatori tenuti, diniego azzerato", gate.confirmationsAsked == 4 && !gate.deniedThisRequest)
+            gate.reset()
+            check("richiesta nuova: contatori a zero", gate.confirmationsAsked == 0 && gate.deniedConfirmations == 0)
+        }
+        // Fixed rules: a click on «Invia» asks about that element, a «sì» given after a change of app is not used.
+        do {
+            let (gate, questions) = makeGate("Safari", .full, answer: "sì")
+            gate.currentRequest = "invia il modulo"
+            let asked = await gate.confirmClick(id: 12, label: "Invia", container: { nil }, origin: .model)
+            check("regola fissa: domanda col bersaglio .element(id, click), richiesta che la nomina",
+                  asked == nil && gate.lastTarget == .element(id: 12, action: "click") && questions.value == ["Vuoi che clicchi «Invia»?"], "\(questions.value)")
+            var pid: pid_t = 4242
+            gate.environment.frontPID = { pid }
+            gate.askUser = { _, _ in pid = 9999; return "sì" }
+            let switched = await gate.confirmClick(id: 12, label: "Invia", container: { nil }, origin: .model)
+            check("regola fissa: cambio di app durante la domanda = no", switched == AccessGate.denied("Invia") && gate.deniedConfirmations == 1)
+            pid = 4242
+            gate.askUser = { q, _ in questions.value.append(q); return "no" }
+            let inner = await gate.confirmClick(id: 13, label: "➤", container: { "Invia" }, origin: .model)
+            let plain = await gate.confirmClick(id: 14, label: "Grassetto", container: { "Formato" }, origin: .model)
+            check("regola fissa: il testo dentro «Invia» chiede per il contenitore, un pulsante innocuo no",
+                  inner == AccessGate.denied("Invia") && plain == nil && gate.lastTarget == .element(id: 13, action: "click"))
+            let keys = await gate.confirmKeys("cmd+q", origin: .model)
+            check("regola fissa: scorciatoia rischiosa, bersaglio con la finestra", keys == AccessGate.denied("cmd+q")
+                  && gate.lastTarget == .shortcut(keys: "cmd+q", window: "Banco"))
+            let tab = await gate.confirmKeys("tab return", origin: .model)
+            gate.environment.composerApp = { "WhatsApp" }
+            let chat = await gate.confirmKeys("tab return", origin: .model)
+            let typed = await gate.confirmTypedText("ciao\n", origin: .model)
+            check("regola fissa: Invio solo in una chat, anche dentro il testo", tab == nil && chat == AccessGate.denied("Invio in WhatsApp")
+                  && typed == AccessGate.denied("Invio in WhatsApp") && gate.lastTarget == .keyInComposer(app: "WhatsApp"))
+            check("riga del log senza dettaglio: tipo di bersaglio e lunghezza dell'etichetta",
+                  AccessGate.shortLogLine(scenario: "azione con effetti esterni", app: "Safari", target: .element(id: 12, action: "click"), label: "Invia", outcome: "negata")
+                  == "Sicurezza: blocco · scenario=azione con effetti esterni · app=Safari · bersaglio=elemento 12 · click («5 caratteri») · origine=model · esito=negata")
+        }
+        // Second layer: a verdict «esterno» adds a question; a valid verdict is cached, the others are not.
+        do {
+            let (gate, questions) = makeGate("Safari", .full)
+            var judged = 0
+            gate.riskJudge = { a in
+                judged += 1
+                return RiskVerdict(external: a.label == "Chiudi", source: a.label == "Chiudi" ? "on-device: invio" : a.label, seconds: 0.01)
+            }
+            let first = await gate.check("click", ["id": 4], origin: .model, facts: judging("Chiudi"))
+            let second = await gate.check("click", ["id": 4], origin: .model, facts: judging("Chiudi"))
+            check("secondo strato: etichetta non coperta, verdetto esterno → domanda", first == AccessGate.denied("Chiudi")
+                  && questions.value.first == "Vuoi che clicchi «Chiudi», che tu non hai chiesto?", "\(questions.value)")
+            check("secondo strato: alla seconda volta il verdetto viene dalla cache", judged == 1 && second == AccessGate.denied("Chiudi") && questions.value.count == 2)
+            // The judge names its own source after the label: «timeout», «errore»… never go in the cache.
+            var notCached: [String] = []
+            for source in ["timeout", "errore", "risposta non valida", "non disponibile"] {
+                let before = judged
+                _ = await gate.check("click", ["id": 8], origin: .model, facts: judging(source))
+                _ = await gate.check("click", ["id": 8], origin: .model, facts: judging(source))
+                if judged == before + 2 { notCached.append(source) }
+            }
+            check("secondo strato: timeout, errore, risposta non valida e non disponibile non vanno in cache, nessuna domanda",
+                  notCached.count == 4 && questions.value.count == 2, "\(notCached)")
+            gate.environment.secondLayerOn = { false }
+            let before = judged
+            let off = await gate.check("click", ["id": 4], origin: .model, facts: judging("Chiudi"))
+            check("secondo strato spento: nessun giudizio", off == nil && judged == before)
+        }
+        // User origin: the gate does not step in.
+        do {
+            let (gate, questions) = makeGate("Terminal", .clickOnly)
+            let typed = await gate.check("type_text", ["text": "ls"], origin: .user, facts: noFacts)
+            gate.environment.level = { AccessLevel(cloudAllowed: true, scope: .confirmAll) }
+            let click = await gate.check("click", ["id": 1], origin: .user, facts: noFacts)
+            let confirmed = await gate.confirm(.element(id: 1, action: "click"), label: "Invia", verb: "clicchi", origin: .user)
+            let keys = await gate.confirmKeys("cmd+q", origin: .user)
+            check("origine utente: il gate non interviene", typed == nil && click == nil && confirmed && keys == nil && questions.value.isEmpty
+                  && gate.refusals == 0 && gate.confirmationsAsked == 0)
+        }
+        // Cloud engines in a «solo clic» app: no text nor images of the window.
+        do {
+            let (gate, _) = makeGate("Terminal", .clickOnly)
+            check("solo clic, Motori cloud: screenshot, get_text e read_text rifiutati, observe no",
+                  gate.cloudReadRefusal("screenshot", cloud: true) != nil && gate.cloudReadRefusal("read_text", cloud: true) != nil
+                  && gate.cloudReadRefusal("observe", cloud: true) == nil && gate.cloudReadRefusal("screenshot", cloud: false) == nil
+                  && gate.showsOnlyControls(cloud: true) && !gate.showsOnlyControls(cloud: false))
+        }
+        return failures
     }
 }

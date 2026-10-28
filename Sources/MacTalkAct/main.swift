@@ -16,8 +16,11 @@ func argument(after flag: String) -> String? {
 }
 
 if arguments.contains("--selftest") {
-    let ok = MainActor.assumeIsolated { DebugCLI.selfTest() }
-    exit(ok ? 0 : 1)
+    Task { @MainActor in
+        let ok = await DebugCLI.selfTest()
+        exit(ok ? 0 : 1)
+    }
+    dispatchMain()
 }
 
 if arguments.contains("--agent-bench") {

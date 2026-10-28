@@ -12,8 +12,13 @@ final class AgentTools {
 
     /// Progress line for the HUD ("Clicco «Invia»").
     var onProgress: ((String) -> Void)?
+    /// The access gate (AD-21): every action of the agent is `.model` and passes through it.
+    let gate = AccessGate()
     /// Asks the user something by voice. `confirmation` = yes/no question. Returns nil on timeout.
-    var askUser: ((String, Bool) async -> String?)?
+    var askUser: ((String, Bool) async -> String?)? {
+        get { gate.askUser }
+        set { gate.askUser = newValue }
+    }
     /// Add «what changed» to the result of every action (AD-19). The local engine observes on its own.
     var reportOutcome = true
     /// The engine calling the tools runs in the cloud: reserved windows are off limits and
@@ -40,10 +45,9 @@ final class AgentTools {
     /// When the first action with effects happened (local engine: the app observes first).
     private(set) var firstEffectAt: Date?
     /// Bench counters (FR-41): confirmations asked, and actions stopped without a «sì».
-    private(set) var confirmationsAsked = 0
+    var confirmationsAsked: Int { gate.confirmationsAsked }
     /// Actions with external effects not done because the user did not say «sì».
-    var blockedCalls: Int { deniedConfirmations }
-    private var deniedConfirmations = 0
+    var blockedCalls: Int { gate.deniedConfirmations }
     /// Start (`true`) and end (`false`) of every tool call, settling included: the phases of the Bench.
     var onCall: ((Bool) -> Void)?
     /// Instant level (FR-43): one tool call; an action without effect, or a second call, escalates.
@@ -82,14 +86,11 @@ final class AgentTools {
         callCount = 0
         escalation = nil
         instantGuard = false
-        deniedThisRequest = false
+        // The same request retried on another engine keeps what the first one asked (AD-15).
+        gate.reset(keepCounters: keepElements)
         if !keepElements {
-            lastAccessNotice = ""
             callLog = []
             readTextSeconds = []
-            // The same request retried on another engine keeps what the first one asked (AD-15).
-            confirmationsAsked = 0
-            deniedConfirmations = 0
         }
         effectfulCalls = 0
         firstCallAt = nil
@@ -274,9 +275,7 @@ final class AgentTools {
             Log.info("Agente: \(name) bloccato, \(why)")
             return Self.privateWindowError(why)
         }
-        if cloudEngine, ["screenshot", "get_text", "read_text"].contains(name), PrivacyGuard.accessLevel().scope == .clickOnly {
-            return .error("In this app (access level «solo clic») the cloud engines get no text or images of the window: use observe, which shows the controls.")
-        }
+        if let refusal = gate.cloudReadRefusal(name, cloud: cloudEngine) { return .error(refusal) }
         var result = await perform(name, args)
         if reportOutcome, Self.outcomeTools.contains(name), !result.readOnly, !cancelled,
            !result.text.hasPrefix("MacTalkAct does not have"), !result.text.hasPrefix("The frontmost app changed") {
@@ -290,7 +289,7 @@ final class AgentTools {
         }
         // «Solo clic» app, cloud engine: only the controls, never text of the window (FR-54). Before the
         // call log, so the level that takes over after a scalata does not receive it either.
-        if cloudEngine, PrivacyGuard.accessLevel().scope == .clickOnly {
+        if gate.showsOnlyControls(cloud: cloudEngine) {
             result.content = result.content.compactMap { item in
                 guard (item["type"] as? String) == "text", let t = item["text"] as? String else { return nil }
                 var copy = item
@@ -348,57 +347,9 @@ final class AgentTools {
             Log.info("Agente: azione bloccata, app in primo piano cambiata")
             return .error(problem)
         }
-        // Access level of the app in front (FR-54, AD-22): the same rules for every engine.
-        let level = PrivacyGuard.accessLevel()
-        let app = AX.frontmostApplication()?.localizedName ?? "questa app"
-        if level.scope != .full, "\(app)|\(level.scope)" != lastAccessNotice {
-            lastAccessNotice = "\(app)|\(level.scope)"
-            onAccessNotice?("🔐 \(app): \(level.scope.rawValue)")
-        }
-        if level.scope == .clickOnly, Self.effectfulTools.contains(name), !Self.clickOnlyTools.contains(name) {
-            Log.info("Agente: \(name) bloccato, \(app) è «solo clic»")
-            refusals += 1
-            return .error("In «\(app)» the agent may only click and scroll (access level set by the user). Do not type or press keys here; tell the user in one short Italian sentence.")
-        }
-        // Never write in a password field, with any tool (FR-52).
-        if Self.writingTools.contains(name), passwordTarget(name, args) {
-            refusals += 1
-            Log.info("Agente: \(name) bloccato, campo password")
-            return .error("That is a password field: the agent never reads or types there. Tell the user to type it themselves.")
-        }
-        // «Conferma ogni azione»: one question for the action; the specific checks (Elimina, Invio in
-        // a chat) still ask on their own, with their own target.
-        if level.scope == .confirmAll, Self.effectfulTools.contains(name),
-           !(await gate(Self.levelTarget(name, args), label: "\(Self.toolWords[name] ?? "l'azione") in \(app)",
-                        verb: "faccia", scenario: "app con conferma per ogni azione")) {
-            return Self.denied("\(Self.toolWords[name] ?? name) in \(app)")
-        }
-        // Second layer (Story 9.5, FR-55): where the fixed rules do not ask, the on-device model may
-        // add a confirmation. «Conferma ogni azione» already asked for this call.
-        if level.scope != .confirmAll, AppSettings.shared.riskClassifier, riskJudge != nil || OnDeviceRiskClassifier.isAvailable {
-            for action in riskActions(name, args, app: app) {
-                let verdict: RiskVerdict
-                if let cached = riskCache[action.cacheKey] {
-                    verdict = cached
-                    Log.debug("Sicurezza: secondo strato · \(name) · \(cached.external ? "esterno" : "interno") · dalla cache")
-                } else {
-                    verdict = await (riskJudge ?? riskClassifier.judge)(action)
-                    // Greedy: the same prompt gives the same verdict, so it is kept across requests (the
-                    // dialog text is in the key). Timeouts and errors are never kept.
-                    if verdict.source.hasPrefix("on-device") {
-                        if riskCache.count > 500 { riskCache.removeAll() }
-                        riskCache[action.cacheKey] = verdict
-                    }
-                    onClassified?(verdict.seconds)
-                    Log.info(String(format: "Sicurezza: secondo strato · %@ «%d caratteri» · %@ · %@ · %.2f s", name, action.label.count,
-                                    verdict.external ? "esterno" : "interno", verdict.source, verdict.seconds))
-                }
-                if verdict.external,
-                   !(await gate(Self.levelTarget(name, args), label: action.label, verb: Self.riskVerb[name] ?? "faccia",
-                                scenario: "secondo strato")) {
-                    return Self.denied(action.label)
-                }
-            }
+        // Access level, password fields, «conferma ogni azione» and second layer: the gate decides (AD-21).
+        if let refusal = await gate.check(name, args, origin: .model, facts: facts(name, args)) {
+            return .error(refusal)
         }
         if Self.effectfulTools.contains(name) {
             effectfulCalls += 1
@@ -411,16 +362,26 @@ final class AgentTools {
         }
     }
 
-    // MARK: Second layer (Story 9.5)
+    // MARK: Facts for the gate
 
-    let riskClassifier = OnDeviceRiskClassifier()
+    var riskClassifier: OnDeviceRiskClassifier { gate.riskClassifier }
     /// Replaces the model in the tests: a fixed verdict, so the gate around it is what is tested.
-    var riskJudge: ((RiskAction) async -> RiskVerdict)?
+    var riskJudge: ((RiskAction) async -> RiskVerdict)? {
+        get { gate.riskJudge }
+        set { gate.riskJudge = newValue }
+    }
     /// Seconds spent judging, for the «classificatore» phase of the Banco.
-    var onClassified: ((Double) -> Void)?
-    /// One verdict per action (tool, label, role, app, window), across requests; emptied at 500.
-    private var riskCache: [String: RiskVerdict] = [:]
-    private static let riskVerb = ["click": "clicchi", "click_many": "clicchi", "perform_action": "esegua", "menu": "scelga"]
+    var onClassified: ((Double) -> Void)? {
+        get { gate.onClassified }
+        set { gate.onClassified = newValue }
+    }
+
+    /// What the gate needs to know about this call, read only when it asks (in the order of its checks).
+    private func facts(_ name: String, _ args: [String: Any]) -> AccessGate.ActionFacts {
+        AccessGate.ActionFacts(
+            isSecureElement: { [unowned self] id in (try? self.resolve(id)).map { AX.isSecureField($0.element) } },
+            riskActions: { [unowned self] app in self.riskActions(name, args, app: app) })
+    }
 
     /// The actions as the second layer sees them: none when there is nothing to judge (a tool
     /// without external effects of its own, or an action the fixed rules already stop).
@@ -444,13 +405,13 @@ final class AgentTools {
                 // Text or an icon inside a control: the control is what gets pressed, so it is judged.
                 if ["AXStaticText", "AXImage"].contains(role), let outer = Self.pressableAncestor(item.element) {
                     let name = Self.ownLabel(outer)
-                    if Safety.isRiskyLabel(name) { return nil } // click() asks for it
+                    if AccessGate.fixedRuleAsks(name) { return nil } // click() asks for it
                     (label, role) = (name.isEmpty ? label : "\(name) (\(label))", AX.role(outer))
                 }
             } else if let x = Self.double(a["x"]), let y = Self.double(a["y"]), let shot = lastShot {
                 label = AX.labelAt(shot.screenPoint(imageX: x, imageY: y)) ?? ""
             } else { return nil }
-            if Safety.isRiskyLabel(label) { return nil }
+            if AccessGate.fixedRuleAsks(label) { return nil }
         case "perform_action":
             // The action that will really run (as performAction resolves it), and only actions that act.
             guard let id = Self.int(a["id"]), let item = try? resolve(id), let wanted = a["action"] as? String else { return nil }
@@ -458,14 +419,14 @@ final class AgentTools {
             guard let raw = AX.actions(item.element).first(where: { Grammar.normalize(Self.actionName($0)) == w }) else { return nil }
             let passive: Set<String> = ["AXShowMenu", "AXScrollToVisible", "AXIncrement", "AXDecrement", "AXRaise", "AXCancel", "AXShowDefaultUI", "AXShowAlternateUI"]
             if passive.contains(raw) { return nil }
-            if Safety.isRiskyLabel(item.label) || Safety.isRiskyLabel(Self.actionName(raw)) { return nil }
+            if AccessGate.fixedRuleAsks(item.label) || AccessGate.fixedRuleAsks(Self.actionName(raw)) { return nil }
             (label, role) = ("\(item.label) → \(Self.actionName(raw))", AX.role(item.element))
         case "menu":
             // The item the menu tool will really choose, not the words the model wrote.
             let path = (a["path"] as? String) ?? ""
             guard !AppMenu.split(path).isEmpty, let front = AX.frontApp(),
                   case .item(let walked, let item) = AppMenu.resolve(path, in: front.app), item.enabled else { return nil }
-            if walked.contains(where: Safety.isRiskyLabel) || Safety.isRiskyLabel(item.title) { return nil }
+            if walked.contains(where: AccessGate.fixedRuleAsks) || AccessGate.fixedRuleAsks(item.title) { return nil }
             (label, role) = ((walked.dropLast() + [item.title]).joined(separator: " > "), "menu")
         default:
             return nil
@@ -527,44 +488,15 @@ final class AgentTools {
         return String(texts.joined(separator: " ").prefix(160))
     }
 
-    /// The tools a «solo clic» app allows.
-    private static let clickOnlyTools: Set<String> = ["click", "click_many", "scroll", "hover", "open_app"]
-    /// Tools that write text or change a value: never in a password field.
-    private static let writingTools: Set<String> = ["type_text", "replace_text", "edit_text", "set_value", "select_text", "press_keys"]
-    private static let toolWords: [String: String] = [
-        "click": "il clic", "click_many": "i clic", "type_text": "la scrittura", "replace_text": "la modifica del testo",
-        "edit_text": "la modifica del testo", "press_keys": "i tasti", "drag": "il trascinamento", "menu": "la voce di menu",
-        "set_value": "la modifica del valore", "perform_action": "l'azione", "select_text": "la selezione", "scroll": "lo scorrimento",
-        "hover": "il passaggio del mouse", "open_app": "l'apertura dell'app", "open_url": "l'apertura dell'indirizzo",
-        "save_macro": "il salvataggio della macro", "delete_macro": "l'eliminazione della macro", "act": "la serie di azioni",
-    ]
     /// Calls refused by the access level or by a password field (read by the security suite).
-    var refusals = 0
-    /// The access level shown last in the HUD, to show a change of app once.
-    private var lastAccessNotice = ""
-    /// «🔐 Terminal: solo clic», when the app in front has a level (FR-54).
-    var onAccessNotice: ((String) -> Void)?
-
-    /// The target of the «conferma ogni azione» question, from the tool and its arguments.
-    private static func levelTarget(_ name: String, _ a: [String: Any]) -> ConfirmationTarget {
-        if let id = int(a["id"]) { return .element(id: id, action: name) }
-        if name == "press_keys", let keys = a["keys"] as? String { return .shortcut(keys: keys, window: "") }
-        return .tool(name: name)
+    var refusals: Int {
+        get { gate.refusals }
+        set { gate.refusals = newValue }
     }
-
-    /// The tool would write in a password field: its target, or the focused field when it has none.
-    private func passwordTarget(_ name: String, _ a: [String: Any]) -> Bool {
-        if let id = Self.int(a["id"]) {
-            guard let item = try? resolve(id) else { return false } // resolve reports its own error later
-            return AX.isSecureField(item.element)
-        }
-        guard ScreenContext.capture(includeLabels: false).isSecure else { return false }
-        // In a password field only moving away is allowed: Tab, Escape, arrows.
-        if name == "press_keys", let keys = a["keys"] as? String {
-            let moves: Set<String> = ["tab", "shift+tab", "escape", "esc", "up", "down", "left", "right"]
-            return !keys.lowercased().split(separator: " ").allSatisfy { moves.contains(String($0)) }
-        }
-        return true
+    /// «🔐 Terminal: solo clic», when the app in front has a level (FR-54).
+    var onAccessNotice: ((String) -> Void)? {
+        get { gate.onAccessNotice }
+        set { gate.onAccessNotice = newValue }
     }
 
     /// For the cloud engines in a «solo clic» app: only roles and labels of the controls, never
@@ -636,10 +568,7 @@ final class AgentTools {
         case "type_text":
             guard let text = a["text"] as? String else { return .error("Missing text") }
             // A line break typed in a chat sends the message, like Enter (FR-51).
-            if text.contains("\n") || text.contains("\r"), let app = Self.composerApp(),
-               !(await gate(.keyInComposer(app: app), label: "Invio in \(app)", verb: "prema", scenario: "invio in un campo di composizione")) {
-                return Self.denied("Invio in \(app)")
-            }
+            if let refusal = await gate.confirmTypedText(text, origin: .model) { return .error(refusal) }
             var target: (element: AXUIElement, label: String, role: String)?
             if let id = Self.int(a["id"]) {
                 let item = try resolve(id)
@@ -695,13 +624,7 @@ final class AgentTools {
 
         case "press_keys":
             guard let keys = a["keys"] as? String else { return .error("Missing keys") }
-            if Safety.isRiskyKeys(keys, app: AX.frontmostApplication()?.bundleIdentifier), !(await gate(.shortcut(keys: keys, window: Self.frontWindowTitle()), label: keys, verb: "prema")) {
-                return Self.denied(keys)
-            }
-            if Self.containsSendKey(keys), let app = Self.composerApp(),
-               !(await gate(.keyInComposer(app: app), label: "Invio in \(app)", verb: "prema", scenario: "invio in un campo di composizione")) {
-                return Self.denied("Invio in \(app)")
-            }
+            if let refusal = await gate.confirmKeys(keys, origin: .model) { return .error(refusal) }
             onProgress?("Premo \(keys)")
             try await executor.pressSequence(keys)
             try await Task.sleep(for: .milliseconds(250))
@@ -834,162 +757,19 @@ final class AgentTools {
         }
     }
 
-    // MARK: Access gate (FR-51, FR-53, AD-21)
-
-    /// What a «sì» is for: one action on one target, in this request and this window. Never a time window.
-    enum ConfirmationTarget: Equatable, CustomStringConvertible {
-        case element(id: Int, action: String)
-        case shortcut(keys: String, window: String)
-        case keyInComposer(app: String)
-        case drop(onto: Int?, label: String)
-        case menu(path: [String])
-        /// A tool without a precise element («conferma ogni azione»): open_url, scroll, act…
-        case tool(name: String)
-
-        var description: String {
-            switch self {
-            case .element(let id, let action): return "elemento \(id) · \(action)"
-            case .shortcut(let keys, let window): return "scorciatoia \(keys) · \(window)"
-            case .keyInComposer(let app): return "Invio nella composizione · \(app)"
-            case .drop(let id, let label): return "trascinamento su \(id.map(String.init) ?? "x/y") «\(label)»"
-            case .menu(let path): return "menu \(path.joined(separator: " > "))"
-            case .tool(let name): return "strumento \(name)"
-            }
-        }
-
-        /// For the log without detail: the kind of target, no text read on screen (AD-9).
-        var kind: String {
-            switch self {
-            case .element(let id, let action): return "elemento \(id) · \(action)"
-            case .shortcut(let keys, _): return "scorciatoia \(keys)"
-            case .keyInComposer: return "Invio nella composizione"
-            case .drop(let id, _): return "trascinamento su \(id.map(String.init) ?? "x/y")"
-            case .menu(let path): return "menu (\(path.count) livelli)"
-            case .tool(let name): return "strumento \(name)"
-            }
-        }
-    }
+    // MARK: Confirmations (FR-51, FR-53, AD-21)
 
     /// The request of this task, to tell the user when an action was not asked for.
-    var currentRequest = ""
+    var currentRequest: String {
+        get { gate.currentRequest }
+        set { gate.currentRequest = newValue }
+    }
     /// The user said «no» (or did not answer) to an action in this request: no level retries it.
-    private(set) var deniedThisRequest = false
+    var deniedThisRequest: Bool { gate.deniedThisRequest }
     /// Start (`true`) and end of a question to the user: the turn's clock waits (AD-24).
-    var onQuestion: ((Bool) -> Void)?
-
-    /// The call stops here, asks the user about this target and goes on only with a «sì»: the grant
-    /// is used by this action and ends with it. No extra round trip to the engine.
-    private func gate(_ target: ConfirmationTarget, label: String, verb: String,
-                      scenario: String = "azione con effetti esterni") async -> Bool {
-        confirmationsAsked += 1
-        let notAsked = !Self.requestMentions(currentRequest, label)
-        let question = "Vuoi che \(verb) «\(label)»\(notAsked ? ", che tu non hai chiesto" : "")?"
-        let front = AX.realFrontmostApplication()?.processIdentifier
-        let levelBefore = PrivacyGuard.accessLevel().scope.rawValue
-        let answer: String?
-        do {
-            onQuestion?(true)
-            defer { onQuestion?(false) }
-            answer = await askUser?(question, true)
-        }
-        var ok = answer.map(Grammar.isYes) ?? false
-        // The «sì» is for the window the question was about: if the user changed app meanwhile, no.
-        if ok, AX.realFrontmostApplication()?.processIdentifier != front {
-            ok = false
-            Log.info("Sicurezza: «sì» non usato, l'app in primo piano è cambiata durante la domanda")
-        }
-        if !ok { deniedConfirmations += 1; deniedThisRequest = true }
-        Self.logBlock(scenario: scenario, target: target, label: label, outcome: ok ? "confermata" : (answer == nil ? "senza risposta" : "negata"))
-        if !ok, Log.isDetailed {
-            // A blocked action, ready to become a row of Tests/bench/sicurezza.tsv (Story 9.4): copy what
-            // follows «→». Page and allowed changes depend on the test page, so they stay to fill in.
-            Log.debug("Sicurezza: riga per sicurezza.tsv →\n" + Self.scenarioRow(label: label, level: levelBefore, request: currentRequest))
-        }
-        return ok
-    }
-
-    /// id · pagina · livello · richiesta · blocco atteso · cambi ammessi, with no tab or newline inside a field.
-    static func scenarioRow(label: String, level: String, request: String) -> String {
-        func clean(_ s: String) -> String { s.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ") }
-        let slug = Grammar.normalize(label).split(separator: " ").prefix(3).joined(separator: "-")
-        return ["blocco-" + (slug.isEmpty ? "azione" : slug), "<pagina>", level, clean(request), "domanda", ""].joined(separator: "\t")
-    }
-
-    private static func denied(_ what: String) -> Result {
-        .error("The user did not confirm «\(what)»: it was NOT done. Do not try it another way; tell the user it was cancelled.")
-    }
-
-    /// One line per blocked action, in the format the security suite reuses (Story 9.4).
-    static func logLine(scenario: String, app: String, target: ConfirmationTarget, label: String, outcome: String) -> String {
-        "Sicurezza: blocco · scenario=\(scenario) · app=\(app) · bersaglio=\(target) «\(label)» · origine=model · esito=\(outcome)"
-    }
-
-    private static func logBlock(scenario: String, target: ConfirmationTarget, label: String, outcome: String) {
-        let app = AX.frontmostApplication()?.localizedName ?? "?"
-        Log.info(Log.isDetailed ? logLine(scenario: scenario, app: app, target: target, label: label, outcome: outcome)
-                 : "Sicurezza: blocco · scenario=\(scenario) · app=\(app) · bersaglio=\(target.kind) («\(label.count) caratteri») · origine=model · esito=\(outcome)")
-    }
-
-    /// Whether the request names the target (otherwise the question says «che tu non hai chiesto»).
-    static func requestMentions(_ request: String, _ label: String) -> Bool {
-        let rq = request.lowercased()
-        // A negated request («non eliminare niente») never counts as asking for it.
-        if rq.hasPrefix("non ") || rq.contains(" non ") { return false }
-        // Short targets (cmd+q, OK, Buy): the target as a whole word of the request.
-        let tokens = rq.split(whereSeparator: { $0 == " " || $0 == "," }).map(String.init)
-        if label.count <= 6, tokens.contains(label.lowercased()) { return true }
-        let words = Grammar.normalize(request).split(separator: " ").map(String.init)
-        // Whole words, or the same root (eliminare / elimina): at least 5 shared letters, never
-        // «post» inside «posta».
-        func sameRoot(_ a: String, _ b: String) -> Bool {
-            let shared = zip(a, b).prefix { $0 == $1 }.count
-            // The shorter word whole at the start of the other (elimina / eliminare): «inoltra» and
-            // «inoltre» share 6 letters but are different words.
-            return shared >= 5 && shared == min(a.count, b.count)
-        }
-        // «Invio in WhatsApp», «il clic in Safari»: the app name is not the target.
-        let target = label.components(separatedBy: " in ").first ?? label
-        let labelWords = Grammar.normalize(target).split(separator: " ").map(String.init)
-        if labelWords.filter({ $0.count >= 4 }).contains(where: { w in words.contains { $0 == w || sameRoot($0, w) } }) { return true }
-        // The same action said another way: «manda» for «Invia», «butta» for «Cestino». Exact words
-        // only: a shared root would let «inoltre» stand for «inoltra».
-        return synonymGroups.contains { group in
-            words.contains(where: group.contains) && labelWords.contains(where: group.contains)
-        }
-    }
-
-    private static let synonymGroups: [Set<String>] = [
-        ["invia", "invio", "inviala", "invialo", "manda", "mandala", "mandalo", "mandagli", "mandale", "spedisci", "spediscila", "send", "return"],
-        ["elimina", "eliminala", "eliminalo", "butta", "buttala", "buttalo", "cestino", "delete", "trash"],
-        ["paga", "pagala", "compra", "acquista", "checkout"],
-        ["clic", "clicca", "cliccaci", "premi", "spunta", "seleziona"],
-        ["scrittura", "scrivi", "digita", "inserisci"],
-    ]
-
-    /// Return or Enter alone.
-    static func isSendKey(_ keys: String) -> Bool {
-        ["return", "enter", "invio"].contains(keys.lowercased().trimmingCharacters(in: .whitespaces))
-    }
-
-    /// A sequence with a plain Return or Enter in it («tab return»), not cmd+return (that one is a shortcut).
-    static func containsSendKey(_ keys: String) -> Bool {
-        keys.split(separator: " ").contains { isSendKey(String($0)) }
-    }
-
-    /// Apps where Enter in the text field sends the message (chats): their name, or nil.
-    private static let chatApps: Set<String> = ["com.apple.MobileSMS", "net.whatsapp.WhatsApp", "com.tinyspeck.slackmacgap",
-                                                "ru.keepcoder.Telegram", "com.hnc.Discord", "com.microsoft.teams2", "org.whispersystems.signal-desktop"]
-    static func composerApp() -> String? {
-        guard let app = AX.frontmostApplication(), let id = app.bundleIdentifier else { return nil }
-        let title = Grammar.normalize(ScreenContext.capture(includeLabels: false).windowTitle)
-        return needsComposerGate(bundleID: id, windowTitle: title) ? (app.localizedName ?? id) : nil
-    }
-
-    /// Chat apps, and chats open in a browser, where Enter sends (pure, tested by `--selftest`).
-    static func needsComposerGate(bundleID: String, windowTitle: String) -> Bool {
-        if chatApps.contains(bundleID) { return true }
-        let webChats = ["whatsapp", "telegram", "messenger", "slack", "discord", "teams", "signal"]
-        return webChats.contains { windowTitle.contains($0) }
+    var onQuestion: ((Bool) -> Void)? {
+        get { gate.onQuestion }
+        set { gate.onQuestion = newValue }
     }
 
     private static func frontWindowTitle() -> String { ScreenContext.capture(includeLabels: false).windowTitle }
@@ -1165,7 +945,7 @@ final class AgentTools {
         lastView = view
         generation += 1
         let text = render(view, query: nil)
-        return cloudEngine && PrivacyGuard.accessLevel().scope == .clickOnly ? Self.controlsOnly(text) : text
+        return gate.showsOnlyControls(cloud: cloudEngine) ? Self.controlsOnly(text) : text
     }
 
     private func observe(query: String?) -> String {
@@ -1577,16 +1357,15 @@ final class AgentTools {
         if let id = Self.int(a["id"]) {
             let item = try resolve(id)
             label = item.label
-            if Safety.isRiskyLabel(label), !(await gate(.element(id: id, action: "click"), label: label, verb: "clicchi")) {
-                return Self.denied(label)
-            }
             // Text or an icon inside a control: the control is what gets pressed (FR-51), «➤» inside «Invia».
             // Also any element that cannot be pressed itself: the click goes to the container.
-            if !Safety.isRiskyLabel(label),
-               ["AXStaticText", "AXImage", "AXGroup"].contains(AX.role(item.element)) || !AX.actions(item.element).contains(kAXPressAction),
-               let outer = Self.pressableAncestor(item.element), case let name = Self.ownLabel(outer), Safety.isRiskyLabel(name),
-               !(await gate(.element(id: id, action: "click"), label: name, verb: "clicchi")) {
-                return Self.denied(name)
+            let container: () -> String? = {
+                guard ["AXStaticText", "AXImage", "AXGroup"].contains(AX.role(item.element)) || !AX.actions(item.element).contains(kAXPressAction),
+                      let outer = Self.pressableAncestor(item.element) else { return nil }
+                return Self.ownLabel(outer)
+            }
+            if let refusal = await gate.confirmClick(id: id, label: label, container: container, origin: .model) {
+                return .error(refusal)
             }
             if !quiet { onProgress?("Clicco «\(label)»") }
             if method == "auto" {
@@ -1617,9 +1396,9 @@ final class AgentTools {
             point = shot.screenPoint(imageX: x, imageY: y)
             label = "\(Int(x)),\(Int(y))"
             // A click by coordinates is judged on what is under the point (FR-51): «Invia» stays «Invia».
-            if let p = point, let hit = AX.labelAt(p), Safety.isRiskyLabel(hit),
-               !(await gate(.element(id: 0, action: "click x/y"), label: hit, verb: "clicchi")) {
-                return Self.denied(hit)
+            if let p = point, let hit = AX.labelAt(p),
+               let refusal = await gate.confirmIfRiskyLabel(hit, target: .element(id: 0, action: "click x/y"), verb: "clicchi", origin: .model) {
+                return .error(refusal)
             }
             onProgress?("Clicco nel punto indicato")
         } else {
@@ -1666,17 +1445,33 @@ final class AgentTools {
            abs(start - target) > 0.001 {
             let actions = AX.actions(item.element)
             if actions.contains("AXIncrement"), actions.contains("AXDecrement") {
+                // Safari may report the new value a moment later: read again (4 × 50 ms) while the value
+                // is missing or still the old one, before taking it as the end.
+                func fresh(after old: Double) async -> Double? {
+                    var read = (AX.value(item.element, kAXValueAttribute) as? NSNumber)?.doubleValue
+                    for _ in 0..<4 where read == nil || read == old {
+                        try? await Task.sleep(for: .milliseconds(50))
+                        if Task.isCancelled { break }
+                        read = (AX.value(item.element, kAXValueAttribute) as? NSNumber)?.doubleValue
+                    }
+                    return read
+                }
                 var value = start
+                var steppedBackFrom: Double?
                 for _ in 0..<500 where abs(value - target) > 0.001 {
+                    if Task.isCancelled { break }
                     AXUIElementPerformAction(item.element, (value < target ? "AXIncrement" : "AXDecrement") as CFString)
-                    guard let next = (AX.value(item.element, kAXValueAttribute) as? NSNumber)?.doubleValue, next != value else { break }
+                    guard let next = await fresh(after: value), next != value else { break }
                     // Overshoot with big steps: stop at the closest value.
                     if (value < target) != (next < target), abs(next - target) > abs(value - target) {
                         AXUIElementPerformAction(item.element, (next < target ? "AXIncrement" : "AXDecrement") as CFString)
+                        steppedBackFrom = next
                         break
                     }
                     value = next
                 }
+                // The value shown after the step back, not the one before it.
+                if let from = steppedBackFrom { _ = await fresh(after: from) }
             }
         }
         let now = AX.value(item.element, kAXValueAttribute)
@@ -1745,9 +1540,9 @@ final class AgentTools {
         guard let raw = actions.first(where: { Grammar.normalize(Self.actionName($0)) == w }) else {
             return .error("[\(id)] «\(item.label)» has no action «\(wanted)». Its actions: \(actions.map(Self.actionName).joined(separator: ", ")).")
         }
-        if Safety.isRiskyLabel(Self.actionName(raw)) || Safety.isRiskyLabel(item.label),
-           !(await gate(.element(id: id, action: Self.actionName(raw)), label: item.label, verb: "esegua «\(Self.actionName(raw))» su")) {
-            return Self.denied(item.label)
+        if let refusal = await gate.confirmIfRiskyLabel(item.label, also: [Self.actionName(raw)], target: .element(id: id, action: Self.actionName(raw)),
+                                                        verb: "esegua «\(Self.actionName(raw))» su", origin: .model) {
+            return .error(refusal)
         }
         onProgress?("\(Self.actionName(raw)) «\(item.label)»")
         let err = AXUIElementPerformAction(item.element, raw as CFString)
@@ -1759,10 +1554,9 @@ final class AgentTools {
     private func drag(_ a: [String: Any]) async throws -> Result {
         let (from, fromLabel) = try target(a, id: "from_id", x: "from_x", y: "from_y")
         let (to, toLabel) = try target(a, id: "to_id", x: "to_x", y: "to_y")
-        if Safety.isRiskyLabel(toLabel),
-           !(await gate(.drop(onto: Self.int(a["to_id"]), label: toLabel), label: toLabel, verb: "trascini «\(fromLabel)» su",
-                        scenario: "trascinamento verso un bersaglio rischioso")) {
-            return Self.denied(toLabel)
+        if let refusal = await gate.confirmIfRiskyLabel(toLabel, target: .drop(onto: Self.int(a["to_id"]), label: toLabel), verb: "trascini «\(fromLabel)» su",
+                                                        scenario: "trascinamento verso un bersaglio rischioso", origin: .model) {
+            return .error(refusal)
         }
         onProgress?("Trascino «\(fromLabel)» su «\(toLabel)»")
         let flags = KeyCombo.modifiers([(a["modifiers"] as? String) ?? ""])
@@ -1793,9 +1587,8 @@ final class AgentTools {
                 r.readOnly = true
                 return r
             }
-            if Safety.isRiskyLabel(item.title),
-               !(await gate(.menu(path: walked), label: item.title, verb: "scelga dal menu")) {
-                return Self.denied(item.title)
+            if let refusal = await gate.confirmIfRiskyLabel(item.title, target: .menu(path: walked), verb: "scelga dal menu", origin: .model) {
+                return .error(refusal)
             }
             onProgress?("Menu \(walked.joined(separator: " › "))")
             guard AX.press(item.element) else { return .error("The app did not accept «\(walked.joined(separator: " > "))».") }
@@ -1844,7 +1637,7 @@ final class AgentTools {
 
     private static func int(_ v: Any?) -> Int? {
         if let i = v as? Int { return i }
-        if let d = v as? Double { return Int(d) }
+        if let d = v as? Double { return Int(exactly: d) } // NaN or a huge id from the model must not crash
         if let s = v as? String { return Int(s) }
         return nil
     }

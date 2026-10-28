@@ -747,3 +747,27 @@ Cosa dice:
 4. **La corsa ha avuto due interferenze.** In `posta-riunione` l'app in primo piano è passata al terminale durante il compito, e in `finder-apri` il clic è finito su Safari (una scheda Gmail aperta). Sono due dei tre fallimenti. In `posta-elimina` la somma delle fasi differisce dal totale di 0,5 s (la conferma e il secondo strato nello stesso compito), unico caso su 30. Va guardato nella Storia 11.6 prima della misura finale.
 
 Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-28-1240-claude.tsv`, esito delle soglie in `…-1240-claude.soglie.txt`.
+
+## 30. AccessGate unico, stesso comportamento (Storia 10.1, 28 ottobre 2026)
+
+**Che cosa è cambiato.** I controlli sono usciti da `AgentTools` e ora stanno in `AccessGate.swift`. Si tratta del livello di accesso dell'app, del campo password, di «conferma ogni azione», del secondo strato con la sua cache e della domanda di conferma con il suo bersaglio, insieme ai conteggi e alle righe del log. `AgentTools` raccoglie i fatti (l'elemento risolto, le azioni da giudicare) e passa al gate ogni chiamata con origine `.model`. Anche le regole fisse (Invia, Elimina, scorciatoie, Invio in una chat) si decidono nel gate: `AgentTools` gli passa le etichette lette sullo schermo. Messaggi, domande e righe del log non cambiano.
+
+**La rete prima e dopo.**
+
+| Verifica | Prima | Dopo |
+| --- | --- | --- |
+| `--selftest` | tutto ok | tutto ok, più 25 controlli del gate senza schermo (ogni riga della matrice della storia, più i rami di contorno) |
+| `--fallback-test` | — | tutto ok, più 3 controlli: le chiamate dell'Agente passano dal gate («solo clic», «conferma ogni azione», «normale» finti) |
+| `--security-coverage` | 47/47, 0 falsi allarmi | identico |
+| `--route-test` | 164/164, 0 errori critici | 164/164, 0 errori critici |
+| `--risk-classifier-test` | 10/10 esterni, 0/7 falsi allarmi | 10/10, 0/7 (i tempi variano da una corsa all'altra) |
+| `--hands-test` | 3/3 verdi | vedi sotto |
+| suite di sicurezza Claude e Codex | 10/10 e 8/8 (§25) | **da rifare** con Nico presente |
+
+**`--hands-test` e «azione senza effetti».** In 3 corse prima e in 12 giri isolati, anche con la CPU satura, l'errore non si è ripresentato. Dopo un avvio a freddo di Safari, però, l'esito del clic su «Accessori» cambiava ancora (il campo dell'indirizzo selezionato, il fuoco). Quelle modifiche tardive finivano nell'esito dell'azione successiva. Ora la prova confronta con una pagina ferma: aspetta due osservazioni uguali di fila prima di premere il tasto. Il controllo resta quello di prima, cioè che nell'esito ci sia «nothing changed».
+
+Nelle serie di 10 corse sono emersi altri due problemi:
+- **`set_value` su un cursore web** (1 corsa su 10). Safari aggiorna il valore letto con l'Accessibilità un attimo dopo AXIncrement/AXDecrement, quindi il ciclo si fermava su una lettura vecchia («30» chiesto, «65» mostrato). Ora rilegge fino a 4 volte, a 50 ms di distanza, prima di considerare finito il ciclo.
+- **App in primo piano diversa da Safari** (corse con Nico al Mac). Se all'apertura della pagina un'altra app era davanti (cmux, Centro di Controllo, la finestra di login), `reset()` la prendeva come app del compito. Nella sezione «solo clic» il test ha così scritto una «x» nel terminale di Nico. Ora la prova aspetta che Safari sia davvero in primo piano. Se non ci riesce, segna FAIL e sospende le azioni su quella pagina.
+
+**Da notare:** cmux (`com.cmuxterm.app`) è un terminale, ma non compare nell'elenco «solo clic» predefinito.
