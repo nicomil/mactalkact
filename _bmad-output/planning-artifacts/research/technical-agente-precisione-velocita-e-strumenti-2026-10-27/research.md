@@ -1023,3 +1023,29 @@ Cosa dice:
 Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-28-2217-claude.tsv` (Banco completo) e `…-2219-claude.tsv` (`--cold --prepare`).
 
 **Decisione per `finder-rinomina` (28 ottobre, 23:30).** Si fanno due cose insieme. La prima è una regola dell'app: il testo scritto in un campo che sta dentro una riga, una cella, un elenco o una tabella non vale come prova (`AgentTools.isInlineEditor`, risalendo al massimo 4 livelli e fermandosi alla finestra o alla pagina web), e in quel caso risponde il modello. La seconda è una riga nel prompt: non mettere `final` su un testo che va ancora confermato con Invio o con un clic fuori. Un `act` che scrive e poi preme Invio resta verificabile dall'Invio. Sullo schermo `finder-apri`, `finder-rinomina` e `finder-cartella` passano 3/3, con 0 falsi «fatto». Il modello ha messo `final` sull'Invio, che nel Finder non cambia la finestra, quindi ha risposto lui. Il controllo sul campo vero del Finder resta da vedere nel Banco completo della 11.6.
+
+## 36. Spike: giudicare più controlli con una domanda sola (Storia 10.3, 28 ottobre 2026, 23:45)
+
+**L'idea.** Il giudizio anticipato (§32, §35) perde la gara con il Motore perché il modello Apple giudica un controllo alla volta, a circa 0,75 s l'uno. Se una sola domanda giudicasse tutti i controlli della finestra, i verdetti potrebbero essere pronti prima del clic.
+
+**Che cosa è stato provato.** `OnDeviceRiskClassifier.judgeBatch` manda le righe numerate (lo stesso testo del giudizio singolo per ogni controllo) e chiede una risposta per riga. La prova è `--risk-classifier-test --batch n`, sulle 17 righe di `Tests/bench/classificatore.tsv` (le due che aprono solo una bozza non si giudicano), mescolate sempre nello stesso ordine.
+- **Risposta per esteso** (numero e categoria per ogni riga): 5 righe in 3,6 s e 12 righe oltre i 4 s, cioè circa 0,7 s per riga, come il giudizio singolo. Il tempo è nello scrivere la risposta, non nel leggere la domanda.
+- **Una lettera per riga** (`N`, `I`, `P`, `G`, `E`, `D`, scelte da un insieme fisso; il vincolo con un'espressione regolare dà `UnsupportedGuide`):
+
+| Righe per domanda | Tempo per domanda | Per controllo | Esterni presi | Falsi allarmi |
+| --- | --- | --- | --- | --- |
+| 1 (giudizio singolo, oggi) | 0,75 s | 0,75 s | 10/10 (8/10 con 2 timeout in una corsa) | 0/7 |
+| 3 | 0,95–1,2 s | ~0,35 s | 9/10 | 1/7 |
+| 4 | 1,1–1,7 s | ~0,3 s | 7/10 | 2/7 |
+| 6 | 1,8–2,5 s | ~0,35 s | 9/10 | 1/7 |
+| 12 | 2,6 s | ~0,2 s | 9/10 | 1/7 |
+
+**Cosa dice.**
+1. **A gruppi il modello è più veloce per controllo, ma meno preciso, e sbaglia nel verso pericoloso.** In ogni corsa a gruppi «Svuota» nel Cestino è giudicato innocuo, e con gruppi da 4 anche «OK» nel dialogo «Eliminare definitivamente 12 elementi?». La precisione cambia con la composizione del gruppo. Un verdetto «interno» dato a gruppi non vale quanto uno dato da solo.
+2. **Neanche il più veloce arriva in tempo per tutta la finestra.** 12 controlli costano 2,6 s, mentre il Motore clicca dopo 1,5–2 s.
+3. **Per questo il gate non usa il giudizio a gruppi.** Il codice resta solo nella prova, per rimisurare con un modello Apple futuro.
+
+**Le strade che restano per NFR-16 (da decidere con Nico).**
+- Accettare il costo: tenere il giudizio anticipato singolo (che aiuta sulle pagine piccole, §35) e rivedere NFR-16 sul costo misurato, circa 0,9 s per azione giudicata al 90° percentile. Restano da guardare i timeout al clic (da 2 a 5 per Banco), perché un timeout lascia passare il clic senza verdetto.
+- Iniziare il giudizio prima, quando il Motore sta ancora scrivendo la chiamata allo strumento (lo stream di Claude mostra il bersaglio qualche centinaio di millisecondi prima che la chiamata arrivi al server degli strumenti). Il guadagno è incerto e vale solo per Claude.
+- Usare i gruppi solo per dire «esterno» (una domanda in più all'utente, mai un clic in meno) e giudicare comunque da solo ciò che il gruppo dice «interno». Non fa risparmiare tempo sui clic normali, quindi non serve a NFR-16.

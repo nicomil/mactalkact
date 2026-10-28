@@ -32,6 +32,14 @@ struct OnDeviceRiskJudgement {
     var effetto: String
 }
 
+/// Several actions judged with one prompt, one letter per line so the answer costs a few tokens
+/// (spike of Story 10.3, ricerca §36: faster per action, but less accurate; not used by the gate).
+@Generable
+struct OnDeviceRiskCodes {
+    @Guide(description: "una lettera per riga, nell'ordine delle righe", .element(.anyOf(["N", "I", "P", "G", "E", "D"])))
+    var codici: [String]
+}
+
 /// Apple's on-device model as a second layer behind the fixed rules of the gate (AD-21): it may
 /// only add a confirmation, never remove one. Offline and free; the text stays on the Mac.
 @MainActor
@@ -121,6 +129,69 @@ final class OnDeviceRiskClassifier {
             return RiskVerdict(external: false, source: "risposta non valida", seconds: seconds())
         }
         return RiskVerdict(external: categories.contains(answer), source: "on-device: \(answer)", seconds: seconds())
+    }
+}
+
+extension OnDeviceRiskClassifier {
+    static let codeInstructions = instructions + " Rispondi con una lettera per ogni riga numerata, nell'ordine: N nessun effetto fuori, I invio, P pubblicazione, G pagamento, E eliminazione, D disiscrizione."
+    static let codeNames: [Character: String] = ["N": "nessun effetto fuori", "I": "invio", "P": "pubblicazione", "G": "pagamento",
+                                                 "E": "eliminazione", "D": "disiscrizione"]
+
+
+    static func batchPrompt(_ actions: [RiskAction]) -> String {
+        actions.enumerated().map { "\($0.offset + 1). " + prompt($0.element) }.joined(separator: "\n")
+    }
+
+    /// Several actions with one prompt (`--risk-classifier-test --batch n`): one verdict per action, in
+    /// order. A line without a valid answer gets «risposta non valida»; past `budget` every line is
+    /// «timeout». `seconds` is the time of the whole prompt. Its own session: the single verdicts keep
+    /// theirs warm.
+    func judgeBatch(_ actions: [RiskAction], budget: Duration) async -> [RiskVerdict] {
+        let clock = ContinuousClock()
+        let start = clock.now
+        func seconds() -> Double {
+            let d = clock.now - start
+            return Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
+        }
+        guard !actions.isEmpty else { return [] }
+        guard Self.isAvailable else { return actions.map { _ in RiskVerdict(external: false, source: "non disponibile", seconds: 0) } }
+        let session = LanguageModelSession(instructions: Self.codeInstructions)
+        let prompt = Self.batchPrompt(actions)
+        enum Outcome: Sendable { case answer([Int: String]), failed, late }
+        let working = CancellableWork()
+        let outcome: Outcome = await withTaskCancellationHandler { await withCheckedContinuation { (done: CheckedContinuation<Outcome, Never>) in
+            let once = OnceFlag()
+            let work = Task { @MainActor in
+                do {
+                    var byLine: [Int: String] = [:]
+                    let r = try await session.respond(to: prompt, generating: OnDeviceRiskCodes.self,
+                                                      options: GenerationOptions(samplingMode: .greedy))
+                    for (i, c) in r.content.codici.enumerated() { if let ch = c.first { byLine[i + 1] = Self.codeNames[ch] } }
+                    if once.claim() { done.resume(returning: .answer(byLine)) }
+                } catch {
+                    Log.debug("Sicurezza: secondo strato a gruppi · errore: \(error)")
+                    if once.claim() { done.resume(returning: .failed) }
+                }
+            }
+            working.set(work)
+            Task {
+                try? await Task.sleep(for: budget)
+                if once.claim() { work.cancel(); done.resume(returning: .late) }
+            }
+        } } onCancel: { working.cancel() }
+        let elapsed = seconds()
+        switch outcome {
+        case .late: return actions.map { _ in RiskVerdict(external: false, source: "timeout", seconds: elapsed) }
+        case .failed: return actions.map { _ in RiskVerdict(external: false, source: "errore", seconds: elapsed) }
+        case .answer(let byLine):
+            let categories = ["invio", "pubblicazione", "pagamento", "eliminazione", "disiscrizione"]
+            return actions.indices.map { i in
+                guard let a = byLine[i + 1], a == "nessun effetto fuori" || categories.contains(a) else {
+                    return RiskVerdict(external: false, source: "risposta non valida", seconds: elapsed)
+                }
+                return RiskVerdict(external: categories.contains(a), source: "on-device: \(a)", seconds: elapsed)
+            }
+        }
     }
 }
 
