@@ -78,6 +78,7 @@ context:
 
 - 28/10 sera, Mac libero: 24 risposte composte su 30 compiti con azioni, 0 falsi «fatto», turno finale 1,87 → 0,01 s, compito 8,5 → 4,4 s; suite Claude 15/15 e 12/12. Ricerca §34.
 - 28/10, 22:17: il falso «fatto» di `modulo-citta` è corretto (in un `act` ogni scrittura deve restare visibile), ma ne è comparso uno nuovo, `finder-rinomina`: `final` su `set_value` nel campo del nome senza Invio. Torna in review: serve una decisione con Nico (§35).
+- 28/10, 23:30, deciso con Nico: il testo scritto in un campo dentro una riga, una cella, un elenco o una tabella non vale come prova (`AgentTools.isInlineEditor`), e il prompt chiede di non mettere `final` su un testo che va ancora confermato. Selftest con `finder-rinomina`; sullo schermo `finder-apri`, `finder-rinomina` e `finder-cartella` 3/3. In quella corsa il modello ha messo `final` sull'Invio e non sulla scrittura, quindi il controllo sul campo vero del Finder non è ancora scattato. Resta in review fino al Banco completo della 11.6.
 
 ## Spec Change Log
 

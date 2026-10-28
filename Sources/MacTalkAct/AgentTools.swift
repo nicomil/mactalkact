@@ -606,6 +606,21 @@ final class AgentTools {
 
     /// The first ancestor (up to 6 levels) that can be pressed. Safari gives a press action to the
     /// text inside a clickable div too: pressing the text presses the div.
+    /// A text field inside a row, a cell, a list or a table: an editor in place (a file name in the Finder, a
+    /// cell), whose text counts only after Invio or a click elsewhere (Story 11.4, ricerca §35).
+    static func isInlineEditor(_ el: AXUIElement) -> Bool {
+        guard ["AXTextField", "AXTextArea"].contains(AX.role(el)) else { return false }
+        var current = el
+        for _ in 0..<4 {
+            guard let parent = AX.element(current, kAXParentAttribute) else { return false }
+            let role = AX.role(parent)
+            if ["AXRow", "AXCell", "AXOutline", "AXTable", "AXList", "AXBrowser", "AXGrid"].contains(role) { return true }
+            if role == "AXWindow" || role == "AXWebArea" { return false }
+            current = parent
+        }
+        return false
+    }
+
     static func pressableAncestor(_ el: AXUIElement) -> AXUIElement? {
         var current = el
         for _ in 0..<6 {
@@ -999,6 +1014,7 @@ final class AgentTools {
         let registry = self.registry
         guard let reply = Self.quickReply(tool: name, args: args, resultText: result.text, isError: result.isError,
                                           windowIsDialog: frontWindowIsDialog(),
+                                          inlineEditor: { id in registry[id].map { Self.isInlineEditor($0.element) } ?? false },
                                           // No label for an element registered under its role, nor for a password field.
                                           label: { id in registry[id].flatMap { item in
                                               item.label == item.role || Self.isSecure(item.element) ? nil : item.label } }) else {
@@ -1067,9 +1083,11 @@ final class AgentTools {
     /// without evidence). `label` gives the label of an element id (nil for password fields).
     /// Pure, tested by `--selftest`.
     static func quickReply(tool: String, args: [String: Any], resultText: String, isError: Bool,
-                           windowIsDialog: Bool = false, label: (Int) -> String?) -> String? {
+                           windowIsDialog: Bool = false, inlineEditor: (Int) -> Bool = { _ in false },
+                           label: (Int) -> String?) -> String? {
         guard !isError, finalTools.contains(tool),
-              let evidence = verifiedEvidence(tool: tool, args: args, resultText: resultText, windowIsDialog: windowIsDialog)
+              let evidence = verifiedEvidence(tool: tool, args: args, resultText: resultText, windowIsDialog: windowIsDialog,
+                                              inlineEditor: inlineEditor)
         else { return nil }
         return "Fatto: ho \(actionPhrase(tool: tool, args: args, label: label)); \(evidence)."
     }
@@ -1123,7 +1141,11 @@ final class AgentTools {
     ///   change of the element they aimed at (a clock or a badge changing elsewhere proves nothing).
     /// - Writing needs the text on screen: in the target field, or (at least 4 characters) in a text field,
     ///   an element that appeared or the title. The evidence never repeats the text.
-    static func verifiedEvidence(tool: String, args: [String: Any], resultText: String, windowIsDialog: Bool = false) -> String? {
+    /// `inlineEditor`: the element id is a text field inside a row, a cell, a list or a table (a file name
+    /// in the Finder, a spreadsheet cell): what is written there counts only after Invio or a click elsewhere,
+    /// so seeing the text is no evidence (Banco `finder-rinomina`, ricerca §35).
+    static func verifiedEvidence(tool: String, args: [String: Any], resultText: String, windowIsDialog: Bool = false,
+                                 inlineEditor: (Int) -> Bool = { _ in false }) -> String? {
         let lines = resultText.components(separatedBy: "\n")
         let at = lines.firstIndex(where: { $0.hasPrefix("RESULT: ") })
         func failing(_ s: String) -> Bool {
@@ -1177,12 +1199,14 @@ final class AgentTools {
         }
 
         if let typed = typedText(tool: last.tool, args: last.args) {
+            if targets.contains(where: inlineEditor) { return nil }
             let want = String(Grammar.normalize(typed).split(separator: " ").joined(separator: " ").prefix(24))
             guard !want.isEmpty else { return nil }
             let long = want.count >= 4
             func has(_ s: String?) -> Bool { s.map { Grammar.normalize($0).split(separator: " ").joined(separator: " ").contains(want) } ?? false }
             let visible = (changed + added).filter { !$0.secure }
             if let e = visible.first(where: { has($0.value) && (targets.contains($0.id) || long && textInputLineRoles.contains($0.role)) }) {
+                if inlineEditor(e.id) { return nil }
                 return e.label.isEmpty || e.label == e.value ? "il testo ora compare nel campo" : "il testo ora compare in «\(short(e.label, max: 40))»"
             }
             if long, added.contains(where: { !$0.secure && has($0.label) }) { return "il testo è comparso sullo schermo" }

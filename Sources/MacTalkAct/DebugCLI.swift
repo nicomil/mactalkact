@@ -213,8 +213,10 @@ enum DebugCLI {
         print("Risposte rapide (Storia 11.4):")
         do {
             let labels: [Int: String] = [4: "Invia", 7: "Nome", 9: "Newsletter", 12: "Volume", 40: "Promemoria"]
-            func reply(_ tool: String, _ args: [String: Any], _ result: String, error: Bool = false, dialog: Bool = false) -> String? {
-                AgentTools.quickReply(tool: tool, args: args, resultText: result, isError: error, windowIsDialog: dialog, label: { labels[$0] })
+            func reply(_ tool: String, _ args: [String: Any], _ result: String, error: Bool = false, dialog: Bool = false,
+                       inline: Set<Int> = []) -> String? {
+                AgentTools.quickReply(tool: tool, args: args, resultText: result, isError: error, windowIsDialog: dialog,
+                                      inlineEditor: { inline.contains($0) }, label: { labels[$0] })
             }
             let sent = "Clicked «Invia».\nRESULT: window «Posta inviata» (was «Nuovo messaggio») · elements +3 −5 ~0\n+ [20] statictext «Messaggio inviato»"
             check("clic con finestra cambiata → «Fatto: ho cliccato «Invia»; ora la finestra è «Posta inviata».»",
@@ -231,6 +233,16 @@ enum DebugCLI {
             let typedName = "Typed 13 characters.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [7] textfield «Nome» value=«Mario Bianchi» (focused) @1,2 3x4"
             check("testo comparso nel campo, mai citato", reply("type_text", ["id": 7, "text": "Mario Bianchi"], typedName)
                   == "Fatto: ho scritto il testo in «Nome»; il testo ora compare in «Nome».")
+            let renamed = "Set.\nRESULT: window «Banco MacTalkAct» · elements +0 −0 ~1\n~ [31] textfield «» value=«finale.txt» (focused) @1,2 3x4"
+            check("finder-rinomina (§35): testo in un campo dentro una riga → risponde il modello",
+                  reply("set_value", ["id": 31, "value": "finale.txt"], renamed, inline: [31]) == nil
+                    && reply("type_text", ["text": "finale.txt"], renamed, inline: [31]) == nil)
+            check("lo stesso campo fuori da righe ed elenchi vale come prova",
+                  reply("set_value", ["id": 31, "value": "finale.txt"], renamed) != nil)
+            check("campo dentro una riga, poi Invio che cambia la finestra → l'Invio vale come prova",
+                  reply("act", ["steps": [["tool": "set_value", "id": 31, "value": "finale.txt"], ["tool": "press_keys", "keys": "return"]]],
+                        "1. set_value: ok — Set.\n2. press_keys: ok — Pressed return.\nRESULT: window «Banco MacTalkAct · finale.txt» (was «Banco MacTalkAct») · elements +0 −0 ~1\n~ [31] statictext «finale.txt»",
+                        inline: [31]) != nil)
             check("testo scritto che non compare → risponde il modello", reply("type_text", ["id": 7, "text": "Mario Bianchi"],
                   "Typed 13 characters.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [3] button «Salva» (page)") == nil)
             check("testo di 2 caratteri in un campo non bersaglio → risponde il modello", reply("type_text", ["text": "ok"],

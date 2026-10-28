@@ -98,7 +98,8 @@ final class AgentRunner {
 
     - Put `final: true` on the action that completes the request (the last one). If its RESULT proves the \
     change, the app tells the user and ends your turn; otherwise go on and answer as usual. Never use it when \
-    the user asks you to read, explain or tell them something.
+    the user asks you to read, explain or tell them something, nor on text that still needs Invio or a click \
+    elsewhere to take effect (a file name being edited, a cell): put it on that last key or click.
     """
 
     /// The prompt of the cloud engines; part of the Long session's configuration (changing it restarts it).
