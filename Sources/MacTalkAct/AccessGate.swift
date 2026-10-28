@@ -502,7 +502,7 @@ final class AccessGate {
     }
 
     static let passwordSentence = "Campo password: qui non scrivo, fallo tu"
-    static let genericRefusalSentence = "Qui non posso farlo: fallo tu o chiedilo all'Agente"
+    static let genericRefusalSentence = "Qui non posso farlo: fallo tu"
 
     /// The HUD sentence for a refusal of the Corsia locale.
     static func refusalSentence(_ reason: Refusal) -> String {
@@ -525,7 +525,7 @@ final class AccessGate {
 
     /// The HUD sentence for a key refused by a «solo clic» app.
     static func clickOnlySentence(_ app: String) -> String {
-        "In \(app) posso solo cliccare: fallo tu o chiedilo all'Agente"
+        "In \(app) posso solo cliccare: fallo tu"
     }
 
     /// Cloud engines in a «solo clic» app see only the controls, never text or images (FR-54).

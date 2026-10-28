@@ -549,7 +549,7 @@ final class AgentTools {
         let place = (window: Self.frontWindowTitle(), dialog: Self.frontDialogText())
         var out: [RiskAction] = []
         var seen: Set<String> = []
-        for id in Self.anticipationOrder(view.controls, focus: view.focusFrame) where out.count < AccessGate.anticipationLimit {
+        for id in Self.anticipationOrder(view.controls, focus: view.focusFrame, request: currentRequest) where out.count < AccessGate.anticipationLimit {
             if let action = riskAction("click", ["id": id], app: app, place: place), wanted(action), seen.insert(action.cacheKey).inserted {
                 out.append(action)
             }
@@ -557,16 +557,33 @@ final class AgentTools {
         return out
     }
 
-    /// The ids to judge in advance, in order (pure, tested by `--selftest`): inert roles dropped,
-    /// nearest to the focus first, the same distance in reading order; without a focus, reading order.
-    static func anticipationOrder(_ controls: [(id: Int, role: String, frame: CGRect)], focus: CGRect?) -> [Int] {
+    /// The ids to judge in advance, in order (pure, tested by `--selftest`): inert roles dropped;
+    /// first the controls whose label shares more words with the request (the model usually clicks
+    /// what the user named: «archivia tutto» → «Archivia tutto»); then nearest to the focus, the same
+    /// distance in reading order; without a focus, reading order.
+    static func anticipationOrder(_ controls: [Control], focus: CGRect?, request: String = "") -> [Int] {
+        let wanted = significantWords(request)
         let kept = controls.enumerated().filter { !inertRoles.contains($0.element.role) }
-        guard let focus else { return kept.map(\.element.id) }
-        func distance(_ r: CGRect) -> CGFloat { hypot(r.midX - focus.midX, r.midY - focus.midY) }
-        return kept.sorted { a, b in
-            let (da, db) = (distance(a.element.frame), distance(b.element.frame))
-            return da == db ? a.offset < b.offset : da < db
-        }.map(\.element.id)
+        func score(_ c: Control) -> Int { wanted.isEmpty ? 0 : significantWords(c.label).intersection(wanted).count }
+        func distance(_ r: CGRect) -> CGFloat {
+            guard let focus else { return 0 }
+            return hypot(r.midX - focus.midX, r.midY - focus.midY)
+        }
+        return kept.map { (offset: $0.offset, id: $0.element.id, score: score($0.element), distance: distance($0.element.frame)) }
+            .sorted { a, b in
+                if a.score != b.score { return a.score > b.score }
+                return a.distance == b.distance ? a.offset < b.offset : a.distance < b.distance
+            }.map(\.id)
+    }
+
+    /// Words of at least four letters that can name a control, without the verbs and nouns of every
+    /// request («clicca», «pulsante»…). Pure.
+    static func significantWords(_ text: String) -> Set<String> {
+        let generic: Set<String> = ["clicca", "cliccare", "premi", "premere", "apri", "aprire", "seleziona", "spunta", "sulla", "sullo",
+                                    "nella", "nello", "della", "dello", "dalla", "quella", "quello", "questa", "questo", "voce",
+                                    "pulsante", "bottone", "tasto", "link", "pagina", "click", "press", "open", "button", "please"]
+        let words = Grammar.normalize(text).split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        return Set(words.filter { $0.count >= 4 && !generic.contains($0) })
     }
 
     /// The fallback chain moved to another cloud engine: the queue of the last observation starts
@@ -930,11 +947,14 @@ final class AgentTools {
     static let strongGiveUpSigns = ["non trovo", "non ho trovato", "non sono riuscito", "non sono riuscita", "non riesco",
                                     "non ho potuto", "non e stato possibile", "impossibile", "i couldn", "i can t", "unable",
                                     // «il clic su Accessori non l'ho ancora fatto» (menu-accessori, ricerca §17).
-                                    "non ho ancora", "non l ho ancora"]
+                                    "non ho ancora", "non l ho ancora",
+                                    // «l'Articolo 137 non è ancora visibile. Dimmi di continuare a scorrere» (elenco-articolo, ricerca §33).
+                                    "non e ancora visibile", "non sono ancora visibili", "dimmi di continuare"]
     /// Signs that count only in the first sentence: later they usually describe the result
     /// («Non c'è più niente dentro», «Non vedo altri messaggi», «Purtroppo ci ha messo un po'»).
     static let allGiveUpSigns = strongGiveUpSigns + ["non posso", "non si e aperto", "non vedo",
-                                                     "non c e", "non ce", "purtroppo", "non esiste"]
+                                                     "non c e", "non ce", "purtroppo", "non esiste",
+                                                     "non e visibile", "non sono visibili"]
 
     /// The sentences of an answer: split on «.», «!» and «?» followed by a space or the end, never inside
     /// «…» or quotes (a label such as «Serve aiuto?»), so «18.30» and «www.sito.it» stay whole. Pure.
@@ -1140,6 +1160,21 @@ final class AgentTools {
             return ["open_app", "open_url"].contains(last.tool) ? "ora è in primo piano «\(short(app, max: 40))»" : nil
         }
         let targets = targetIDs(tool: last.tool, args: last.args)
+
+        // `act` that writes and then does something else (Invio, a click): the last step's change does not
+        // prove the text landed («scegli Torino» → clic, testo, Invio, modulo inviato vuoto; Banco
+        // `modulo-citta`, ricerca §34). Every earlier writing step must leave its text in sight.
+        if tool == "act", let steps = args["steps"] as? [[String: Any]] {
+            let lastIndex = steps.lastIndex { ($0["tool"] as? String) != "wait" }
+            let visible = (changed + added).filter { !$0.secure }
+            for (i, step) in steps.enumerated() where i != lastIndex {
+                guard let name = step["tool"] as? String, let typed = typedText(tool: name, args: step) else { continue }
+                let want = String(Grammar.normalize(typed).split(separator: " ").joined(separator: " ").prefix(24))
+                func has(_ s: String?) -> Bool { s.map { Grammar.normalize($0).split(separator: " ").joined(separator: " ").contains(want) } ?? false }
+                let seen = !want.isEmpty && (visible.contains { has($0.value) } || want.count >= 4 && (visible.contains { has($0.label) } || has(window)))
+                if !seen { return nil }
+            }
+        }
 
         if let typed = typedText(tool: last.tool, args: last.args) {
             let want = String(Grammar.normalize(typed).split(separator: " ").joined(separator: " ").prefix(24))
@@ -1434,6 +1469,9 @@ final class AgentTools {
     // MARK: Observe
 
     /// What the agent saw: header and one line per element, in reading order.
+    /// A clickable control of the window, for the judgement in advance (Story 10.3).
+    typealias Control = (id: Int, role: String, frame: CGRect, label: String)
+
     private struct View {
         var app = ""
         var title = ""
@@ -1445,7 +1483,7 @@ final class AgentTools {
         /// Long containers showed only their visible part (fixed cost): what is on screen is complete.
         var capped = false
         /// Clickable controls inside the window, for the judgement in advance (Story 10.3).
-        var controls: [(id: Int, role: String, frame: CGRect)] = []
+        var controls: [Control] = []
         /// Where the focus is, in screen coordinates.
         var focusFrame: CGRect?
     }
@@ -1635,7 +1673,7 @@ final class AgentTools {
                     if inWeb { line += " (page)" }
                     if let f = frame, let wf = windowFrame {
                         line += " @\(Int(f.minX - wf.minX)),\(Int(f.minY - wf.minY)) \(Int(f.width))x\(Int(f.height))"
-                        if anticipating, clickable, f.width > 0, f.height > 0, wf.intersects(f) { view.controls.append((id, role, f)) }
+                        if anticipating, clickable, f.width > 0, f.height > 0, wf.intersects(f) { view.controls.append((id, role, f, label)) }
                     }
                     view.items.append((id, line))
                 }

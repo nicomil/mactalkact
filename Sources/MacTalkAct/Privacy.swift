@@ -170,6 +170,7 @@ struct AccessLevel: Equatable {
     com.mitchellh.ghostty = solo clic
     net.kovidgoyal.kitty = solo clic
     org.alacritty = solo clic
+    com.cmuxterm.app = solo clic
     com.apple.keychainaccess = solo clic
     com.1password.1password = solo clic
     com.bitwarden.desktop = solo clic

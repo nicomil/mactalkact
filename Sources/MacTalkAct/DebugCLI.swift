@@ -173,6 +173,11 @@ enum DebugCLI {
             }
             check("menu-accessori (§17): «non l'ho ancora fatto» nella seconda frase → scalata", AgentTools.instantGaveUp(answer: "Ho aperto il menu Prodotti. Il clic su Accessori non l'ho ancora fatto.", effectfulCalls: 1) != nil)
             check("resa dopo la virgola in una domanda → scalata", AgentTools.instantGaveUp(answer: "Vuoi che riprovi, visto che non trovo il pulsante?", effectfulCalls: 1) != nil)
+            check("elenco-articolo (§33): «non è ancora visibile… Dimmi di continuare» → scalata", AgentTools.instantGaveUp(answer: "Ho scorso la lista fino all'Articolo 122, ma l'Articolo 137 non è ancora visibile. Dimmi di continuare a scorrere e lo apro.", effectfulCalls: 1) == "risposta senza risultato")
+            check("«dimmi di continuare» da solo nella seconda frase → scalata", AgentTools.instantGaveUp(answer: "Ho scorso la lista. Dimmi di continuare e lo apro.", effectfulCalls: 1) != nil)
+            check("«non è visibile» nella prima frase → scalata", AgentTools.instantGaveUp(answer: "Il pulsante Accessori non è visibile.", effectfulCalls: 1) != nil)
+            check("«non è più visibile» dopo il successo → resta", AgentTools.instantGaveUp(answer: "Ho chiuso l'avviso. Non è più visibile.", effectfulCalls: 1) == nil)
+            check("«Vuoi che continui?» di cortesia → resta", AgentTools.instantGaveUp(answer: "Fatto. Vuoi che continui con il prossimo?", effectfulCalls: 1) == nil)
             check("«non ce» non è «non cerca»", AgentTools.instantGaveUp(answer: "Non cerca più nulla: ho chiuso la ricerca.", effectfulCalls: 1) == nil)
             check("«18.30» non divide la frase: segno debole nella prima → scalata", AgentTools.instantGaveUp(answer: "Alle 18.30 non c'è nessun treno.", effectfulCalls: 1) != nil)
             check("«www.sito.it» non divide la frase: segno debole nella prima → scalata", AgentTools.instantGaveUp(answer: "Su www.sito.it non vedo il modulo.", effectfulCalls: 1) != nil)
@@ -245,8 +250,14 @@ enum DebugCLI {
             check("finestra nuova che è un dialogo o un foglio → risponde il modello", reply("click", ["id": 4], sent, dialog: true) == nil)
             let password = reply("act", ["steps": [["tool": "type_text", "id": 7, "text": "segreta123"], ["tool": "press_keys", "keys": "return"]]],
                                  "1. type_text: ok — Typed 10 characters.\n2. press_keys: ok — Pressed return.\nRESULT: window «Grazie» (was «Modulo») · elements +2 −9 ~0")
-            check("act: testo mai citato, tasti detti a voce, prova dall'ultimo passo",
-                  password == "Fatto: ho scritto il testo in «Nome» e premuto «Invio»; ora la finestra è «Grazie»." && password?.contains("segreta") == false)
+            check("act: testo scritto e poi Invio, il testo non si vede più → risponde il modello", password == nil)
+            check("modulo-citta (§34): clic, testo, Invio e modulo inviato vuoto → risponde il modello",
+                  reply("act", ["steps": [["tool": "click", "id": 5], ["tool": "type_text", "text": "Torino"], ["tool": "press_keys", "keys": "return"]]],
+                        "1. click: ok — Clicked.\n2. type_text: ok — Typed 6 characters.\n3. press_keys: ok — Pressed return.\nRESULT: window «Banco modulo · città= · inviato» (was «Banco modulo · città=») · elements +0 −0 ~0") == nil)
+            let saved = reply("act", ["steps": [["tool": "type_text", "id": 7, "text": "Mario Bianchi"], ["tool": "press_keys", "keys": "return"]]],
+                              "1. type_text: ok — Typed 13 characters.\n2. press_keys: ok — Pressed return.\nRESULT: window «Salvato» (was «Modulo») · elements +0 −0 ~1\n~ [7] textfield «Nome» value=«Mario Bianchi» @1,2 3x4")
+            check("act: testo che resta nel campo, tasti detti a voce, prova dall'ultimo passo, testo mai citato",
+                  saved == "Fatto: ho scritto il testo in «Nome» e premuto «Invio»; ora la finestra è «Salvato»." && saved?.contains("Mario") == false)
             check("tasti detti a voce", AgentTools.spokenKeys("cmd+shift+n") == "comando maiuscole N" && AgentTools.spokenKeys("return") == "Invio"
                   && AgentTools.spokenKeys("cmd+a delete") == "comando A, Cancella")
             check("act che finisce con wait: si giudica la scrittura prima del wait", reply("act", ["steps": [["tool": "type_text", "id": 7, "text": "Mario Bianchi"], ["tool": "wait", "seconds": 1]]],
@@ -363,6 +374,7 @@ enum DebugCLI {
         check("etichette del consenso", AppleEventsSpike.consentLabel(noErr) == "concesso" && AppleEventsSpike.consentLabel(OSStatus(errAEEventWouldRequireUserConsent)).contains("-1744"))
         print("Livelli di accesso (Storia 9.3):")
         check("Terminal: solo clic", AccessLevel.level(bundleID: "com.apple.Terminal", name: "Terminale", list: AccessLevel.defaultList) == .clickOnly)
+        check("cmux: solo clic", AccessLevel.level(bundleID: "com.cmuxterm.app", name: "cmux", list: AccessLevel.defaultList) == .clickOnly)
         check("Impostazioni di Sistema: conferma ogni azione", AccessLevel.level(bundleID: "com.apple.systempreferences", name: "", list: AccessLevel.defaultList) == .confirmAll)
         check("app sconosciuta: normale", AccessLevel.level(bundleID: "com.example", name: "Esempio", list: AccessLevel.defaultList) == .full)
         check("per nome e maiuscole", AccessLevel.level(bundleID: "x", name: "iTerm", list: "iterm = SOLO CLIC") == .clickOnly)
@@ -3962,7 +3974,7 @@ extension DebugCLI {
             let (gate, questions) = makeGate("Terminal", .clickOnly)
             let v = await gate.checkLocal(.keys(combo: "cmd+w", label: "Chiudi scheda"))
             check("solo clic: .keys(cmd+w) rifiutato, frase dell'HUD, nessuna domanda, rifiuti +1",
-                  v == .refused("In Terminal posso solo cliccare: fallo tu o chiedilo all'Agente") && questions.value.isEmpty && gate.refusals == 1,
+                  v == .refused("In Terminal posso solo cliccare: fallo tu") && questions.value.isEmpty && gate.refusals == 1,
                   "\(v)")
             let scroll = await gate.checkLocal(.scroll(direction: "down"))
             let open = await gate.checkLocal(.openApp("Safari"))
@@ -4104,12 +4116,19 @@ extension DebugCLI {
         // Order of the candidates: inert roles out, nearest to the focus first, ties in reading order.
         do {
             let r = { (x: CGFloat, y: CGFloat) in CGRect(x: x, y: y, width: 10, height: 10) }
-            let list: [(id: Int, role: String, frame: CGRect)] = [(1, "AXButton", r(0, 0)), (2, "AXTextField", r(100, 100)),
-                                                                  (3, "AXButton", r(110, 100)), (4, "AXLink", r(90, 100)), (5, "AXRow", r(100, 110)),
-                                                                  (6, "AXCheckBox", r(500, 500))]
+            let list: [AgentTools.Control] = [(1, "AXButton", r(0, 0), "Archivia tutto"), (2, "AXTextField", r(100, 100), "Cerca"),
+                                              (3, "AXButton", r(110, 100), "Rispondi"), (4, "AXLink", r(90, 100), "Contatti"), (5, "AXRow", r(100, 110), "Archivia"),
+                                              (6, "AXCheckBox", r(500, 500), "Newsletter mensile")]
             check("ordine dei candidati: dal fuoco (a pari distanza, ordine di lettura), senza ruoli inerti; senza fuoco, ordine di lettura",
                   AgentTools.anticipationOrder(list, focus: r(100, 100)) == [3, 4, 1, 6] && AgentTools.anticipationOrder(list, focus: nil) == [1, 3, 4, 6],
                   "\(AgentTools.anticipationOrder(list, focus: r(100, 100)))")
+            check("ordine dei candidati: prima i controlli nominati nella richiesta, poi dal fuoco; i ruoli inerti restano fuori",
+                  AgentTools.anticipationOrder(list, focus: r(100, 100), request: "archivia tutto") == [1, 3, 4, 6]
+                    && AgentTools.anticipationOrder(list, focus: r(100, 100), request: "spunta la newsletter") == [6, 3, 4, 1]
+                    && AgentTools.anticipationOrder(list, focus: nil, request: "vai ai contatti") == [4, 1, 3, 6],
+                  "\(AgentTools.anticipationOrder(list, focus: r(100, 100), request: "archivia tutto"))")
+            check("parole della richiesta: niente verbi generici né parole brevi",
+                  AgentTools.significantWords("Clicca sul pulsante Archivia tutto") == ["archivia", "tutto"])
         }
         // Cache anticipata: observe with «Archivia», then a click on it: no judgement, verdict from the cache.
         do {
