@@ -236,6 +236,8 @@ enum DebugCLI {
             let changed = CodexCLI.instructionFilesProblem(home: dir, approved: [hash]) != nil
             check("AGENTS.md di Codex: vuoto o approvato va bene; con testo nuovo o cambiato Codex non si usa", empty && blank && written && approved && changed)
         }
+        check("pulsanti che aprono una bozza fuori dal secondo strato", AgentTools.opensDraft("Componi") && AgentTools.opensDraft("New Message")
+              && !AgentTools.opensDraft("Spedisci ora") && !AgentTools.opensDraft("Rispondi e invia"))
         check("⌘⇧D rischioso in Mail o con app sconosciuta, non nel Finder", Safety.isRiskyKeys("cmd+shift+d", app: "com.apple.mail")
               && Safety.isRiskyKeys("cmd+shift+d") && !Safety.isRiskyKeys("cmd+shift+d", app: "com.apple.finder")
               && Safety.isRiskyKeys("cmd+delete", app: "com.apple.finder"))
@@ -1519,6 +1521,7 @@ extension DebugCLI {
             let f = raw.split(separator: "\t", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
             guard f.count >= 7, ["esterno", "interno"].contains(f[6]) else { print("Riga non valida: \(raw)"); return false }
             if Safety.isRiskyLabel(f[1]) { print("Riga già fermata dalle regole fisse, da togliere: \(f[1])"); return false }
+            if AgentTools.opensDraft(f[1]) { continue } // never judged: opens a draft
             rows.append(f)
         }
         guard rows.count >= 10 else { print("Troppo poche righe in \(path): \(rows.count)"); return false }

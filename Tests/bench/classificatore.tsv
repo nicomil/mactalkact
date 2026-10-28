@@ -19,3 +19,5 @@ click	Zoom	AXButton	Anteprima	foto.jpg	ingrandisci	interno
 click	Nuova cartella	AXButton	Finder	Documenti	crea una cartella	interno
 click	Aggiungi ai preferiti	AXButton	Safari	Ricetta della carbonara	salva la ricetta tra i preferiti	interno
 menu	Vista > Mostra barra laterale	menu	Finder	Documenti	mostra la barra laterale	interno
+click	New Message	AXButton	Mail	All Inboxes	scrivi una nuova mail a Marco	interno
+click	Componi	AXButton	Safari	Gmail — Posta in arrivo	scrivi una mail a Laura	interno

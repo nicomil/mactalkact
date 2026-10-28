@@ -73,14 +73,6 @@ enum AppleEventsSpike {
                      set m to make new outgoing message with properties {subject:"Banco MacTalkAct spike", content:"prova", visible:false}
                      tell m to make new to recipient with properties {address:"prova@example.invalid"}
                      close m saving no
-                     -- Mail saves the draft in the account by itself: remove it, one message at a time.
-                     repeat with a in accounts
-                         try
-                             repeat with d in (every message of (mailbox "Drafts" of a) whose subject is "Banco MacTalkAct spike")
-                                 delete d
-                             end repeat
-                         end try
-                     end repeat
                  on error msg number n
                      try
                          delete (every outgoing message whose subject is "Banco MacTalkAct spike")
@@ -119,6 +111,8 @@ enum AppleEventsSpike {
             o.proof = proof
             outcomes.append(o)
         }
+        // Mail saves the closed draft in the account a few seconds later: the Bench cleanup removes it.
+        if outcomes.contains(where: { $0.app == "Mail" && $0.seconds != nil }) { BenchFixtures.osascript(BenchFixtures.mailCleanup) }
         // The Automation consent belongs to the responsible process: the terminal for a bare binary.
         let who = Bundle.main.bundleIdentifier.map { "app \($0)" } ?? "binario lanciato dal terminale (il consenso va al terminale, non all'app)"
         var report = ["Spike Apple Events (macOS \(ProcessInfo.processInfo.operatingSystemVersionString)) · chi chiede: \(who)"]

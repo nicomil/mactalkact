@@ -88,6 +88,7 @@ enum BenchFixtures {
         if FileManager.default.fileExists(atPath: folder.path) {
             return "sulla Scrivania c'è già una cartella «Banco MacTalkAct» che non è del Banco"
         }
+        if case .app("Mail", _) = kind { rememberMailWindows() }
         let reason = await prepare(kind, checks: checks)
         if reason != nil { await tearDown(kind, checks: checks) }
         return reason
@@ -138,31 +139,41 @@ enum BenchFixtures {
         }
         if name == "Mail" {
             // Drafts and compose windows of the Bench only, never sent.
+            await closeMailWindows()
+            mailTaskRunning = false
             osascript(mailCleanup)
 
         }
     }
 
-    /// Drafts and compose windows of the Bench only, never sent. One message at a time: on Mail 16
-    /// (macOS 27) `delete (every message whose …)` does nothing and reports no error, and Mail saves
-    /// a compose window as a draft of the account by itself.
+    /// Drafts and compose windows of the Bench only, never sent. One message at a time and by id: on
+    /// Mail 16 (macOS 27) `delete (every message whose …)` does nothing and reports no error, and Mail
+    /// saves a closed compose window as a draft of the account a few seconds later.
     static let mailCleanup = """
     tell application "Mail"
+        set closed to false
         repeat with w in (every window whose name contains "\(marker)")
             try
                 close w saving no
+                set closed to true
             end try
         end repeat
         repeat with m in (every outgoing message whose subject contains "\(marker)")
             try
                 close m saving no
+                set closed to true
             end try
         end repeat
+        -- Mail saves the closed compose window as a draft a few seconds later.
+        if closed then delay 3
         repeat with a in accounts
             try
-                repeat with m in (every message of (mailbox "Drafts" of a) whose subject contains "\(marker)")
+                set box to mailbox "Drafts" of a
+                -- By id: a filtered reference changes under the loop as messages go (-1728).
+                set ids to id of (every message of box whose subject contains "\(marker)")
+                repeat with i in ids
                     try
-                        delete m
+                        delete (first message of box whose id is (contents of i))
                     end try
                 end repeat
             end try
@@ -212,7 +223,7 @@ enum BenchFixtures {
         }
     }
 
-    private static func osascript(_ script: String) {
+    static func osascript(_ script: String) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         p.arguments = ["-e", script]
@@ -228,6 +239,73 @@ enum BenchFixtures {
         } else if p.terminationStatus != 0 {
             print("      ! pulizia di Mail non riuscita (codice \(p.terminationStatus))")
         }
+    }
+
+    /// Compose windows open before the Bench task (title and frame): never closed by the cleanup.
+    /// AX elements of Mail are not equal between two reads, so they cannot be compared directly.
+    private static var mailWindowsBefore: [(title: String, frame: CGRect?)] = []
+
+    private static func mailWindows() -> [AXUIElement] {
+        guard let mail = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.mail").first else { return [] }
+        return (AX.value(AX.app(mail.processIdentifier), kAXWindowsAttribute) as? [AXUIElement]) ?? []
+    }
+
+    /// Set between the start of a Mail task and its cleanup: only then a window not open before is the Bench's.
+    private static var mailTaskRunning = false
+
+    /// Records the Mail windows already open (Nico's): only the others are the Bench's.
+    static func rememberMailWindows() {
+        mailWindowsBefore = mailWindows().filter(isComposeWindow).map { (AX.string($0, kAXTitleAttribute) ?? "", AX.frame($0)) }
+        mailTaskRunning = true
+    }
+
+    /// Closes the compose windows of the Bench: those with the marker in the title and those opened
+    /// during the task. On Mail 16 AppleScript `close … saving no` only shows «Salvare come bozza?»,
+    /// so the window is closed with its button and the sheet answered with «Elimina».
+    static func closeMailWindows() async {
+        for w in mailWindows() {
+            let title = AX.string(w, kAXTitleAttribute) ?? ""
+            if ProcessInfo.processInfo.environment["MACTALK_DEBUG_MAIL"] == "1" {
+                print("      · Mail «\(title)» nuova=\(mailTaskRunning && !mailWindowsBefore.contains { $0.title == title && $0.frame == AX.frame(w) }) scrittura=\(isComposeWindow(w))")
+            }
+            // Before a task (leftovers of an interrupted run) only the marked ones: an unknown window is Nico's.
+            let frame = AX.frame(w)
+            let new = mailTaskRunning && !mailWindowsBefore.contains { $0.title == title && $0.frame == frame }
+            // A viewer (All Inboxes, a mailbox) is never closed: only compose windows have a To field.
+            guard title.contains(marker) || new, isComposeWindow(w) else { continue }
+            func stillOpen() -> Bool { mailWindows().contains { AX.string($0, kAXTitleAttribute) == title && AX.frame($0) == frame } }
+            for _ in 0..<2 where stillOpen() {
+                if let close = AX.value(w, kAXCloseButtonAttribute) { AX.press(close as! AXUIElement) }
+                // The sheet «Save changes?» comes a moment later: wait for it up to 2 s.
+                for _ in 0..<10 {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    guard stillOpen() else { break }
+                    guard let sheet = AX.children(w).first(where: { AX.role($0) == "AXSheet" }) else { continue }
+                    // «Don’t Save» has a typographic apostrophe: compare letters only.
+                    let discard = AX.children(sheet).filter { AX.role($0) == "AXButton" }.first { b in
+                        let t = (AX.string(b, kAXTitleAttribute) ?? "").lowercased().filter(\.isLetter)
+                        return ["elimina", "eliminabozza", "delete", "deletedraft", "nonsalvare", "dontsave"].contains(t)
+                    }
+                    if let discard { AX.press(discard) }
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+        }
+    }
+
+    /// A compose window has a Send button (a viewer has none).
+    private static func isComposeWindow(_ w: AXUIElement) -> Bool {
+        var queue = [w], seen = 0
+        while !queue.isEmpty, seen < 400 {
+            let el = queue.removeFirst(); seen += 1
+            if AX.role(el) == "AXButton" {
+                let names = [AX.string(el, kAXDescriptionAttribute), AX.string(el, kAXTitleAttribute)].compactMap { $0?.lowercased() }
+                if names.contains(where: { ["send", "invia"].contains($0) }) { return true }
+            }
+            queue += AX.children(el)
+        }
+        return false
     }
 
     /// Closes the Finder windows showing the Bench folder: a window left open would make

@@ -475,10 +475,19 @@ final class AgentTools {
         let inert: Set<String> = ["AXTextField", "AXTextArea", "AXTab", "AXRow", "AXPopUpButton", "AXComboBox", "AXSlider",
                                   "AXDisclosureTriangle", "AXSearchField", "AXScrollBar"]
         if inert.contains(role) { return nil }
+        // Buttons that only open a draft: the send comes later and the fixed rules stop it (Invia,
+        // ⌘Invio, Invio in a composer). The on-device model takes «Componi» for «invio».
+        if Self.opensDraft(label) { return nil }
         // An icon without a name: the window and the dialog may still say what it does.
         if label.trimmingCharacters(in: .whitespaces).isEmpty { label = "(senza etichetta)" }
         return RiskAction(tool: name, label: label, role: role, app: app, window: Self.frontWindowTitle(),
                           dialog: Self.frontDialogText(), request: currentRequest)
+    }
+
+    static func opensDraft(_ label: String) -> Bool {
+        let n = Grammar.normalize(label)
+        return ["nuovo messaggio", "nuova mail", "nuova email", "new message", "new email", "componi", "compose", "scrivi",
+                "rispondi", "rispondi a tutti", "reply", "reply all", "write"].contains(n)
     }
 
     private static func ownLabel(_ el: AXUIElement) -> String {
