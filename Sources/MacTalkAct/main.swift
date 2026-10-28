@@ -134,6 +134,16 @@ if arguments.contains("--security-suite") {
     dispatchMain()
 }
 
+if arguments.contains("--mail-search-spike") {
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        let terms = argument(after: "--terms").map { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+        await MailSearchSpike.run(terms: terms ?? MailSearchSpike.defaultTerms)
+        exit(0)
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--apple-events-spike") {
     MainActor.assumeIsolated { _ = NSApplication.shared }
     Task { @MainActor in

@@ -1073,3 +1073,33 @@ Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-28-2217-claude.tsv` (Banco com
 Con il budget più largo quasi tutti i giudizi anticipati arrivano a un verdetto (prima 24 finivano in timeout) e 5 clic lo trovano già pronto. La mediana del costo per azione scende. Il compito resta appena sotto la soglia di 4,5 s: come visto al §35, tra una corsa e l'altra oscilla di circa mezzo secondo.
 
 L'unico fallimento, `elenco-articolo`, non dipende da questa modifica. L'istantaneo ha fatto una domanda all'utente, che nel Banco nessuno risponde, ed è salito al rapido senza azioni. Il rapido ha poi risposto «non hai risposto alla mia domanda. Dimmi se devo cercarlo o fermarmi.» senza scorrere l'elenco. Va guardato nella 11.6, insieme alla variabilità di questo compito, che già nelle corse precedenti era il più instabile.
+
+## 38. Spike: ricerca in Mail, e Banco su Mail, Calendario e webmail (Storia 11.5, 29 ottobre 2026, 00:00–00:10, con Nico presente)
+
+**Ricerca in Mail (`--mail-search-spike`).** Si fanno cinque ricerche per strada nella casella di Nico, in sola lettura: nessun messaggio aperto, spostato o segnato. Il report riporta solo tempi, conteggi e permessi. I termini sono generici: «fattura», «riunione», «preventivo», «ordine», «conferma», e in una seconda serie «banco», «offerta», «newsletter», «appuntamento», «ricevuta».
+
+| Strada | Permesso | Mediana | Massimo | Entro 3 s | Note |
+| --- | --- | --- | --- | --- | --- |
+| (a) Apple Events, posta in arrivo, ultimi 30 giorni | Automazione verso Mail (già concessa) | 0,60–0,62 s | 1,0–1,9 s | 5/5 in tre corse | 0, 0, 0, 9 e 1 messaggi nella prima serie |
+| (b) Spotlight (`mdfind`) | accesso completo al disco | 0,12–0,13 s | 0,19 s | 5/5 | 0 messaggi di Mail visibili: senza accesso completo al disco l'indice di Mail non si legge |
+
+Con Mail chiusa la strada (a) non parte («app non avviata», -600) e lo spike non apre Mail da solo. La parola `since` è riservata in AppleScript: la prima corsa è fallita per questo.
+
+Cosa dice:
+1. **Apple Events su un perimetro ridotto sta sotto i 3 s.** Lo spike 8.4 (§21) misurava 3,43 s su tutta la casella (45.915 messaggi). Limitando alla posta in arrivo degli ultimi 30 giorni la mediana è 0,6 s e il caso peggiore 1,9 s. Lo strumento potrebbe allargare il perimetro solo su richiesta esplicita.
+2. **Spotlight non è una strada praticabile per l'app.** Senza accesso completo al disco non vede nessun messaggio, e chiedere quel permesso per cercare la posta è troppo per il beneficio. L'apertura per identificativo non è stata provata, perché non c'erano risultati.
+3. **Raccomandazione per AD-20 (la decisione resta a Nico):** se nel prossimo ciclo si apre un canale Apple Events, il primo strumento sia la ricerca in Mail in sola lettura (posta in arrivo, 30 giorni, solo conteggi e oggetti mostrati all'utente), con Mail già aperta e il consenso Automazione già dato.
+
+**Banco su Mail, Calendario e webmail (Gmail, account personale: `MACTALK_BENCH_WEBMAIL_PERSONAL=1`, solo compiti di osservazione).**
+
+| Compito | Esito | Compito | Note |
+| --- | --- | --- | --- |
+| `calendario-evento` | riuscito | 29,5 s, 13 passi, profondo | evento creato e poi rimosso dal Banco |
+| `mail-bozza` | riuscito | 14,4 s, 6 passi | bozza non inviata, rimossa dal Banco |
+| `webmail-cerca` | saltato | — | con l'account personale il Banco fa solo compiti di osservazione |
+| `webmail-inviata` | **non riuscito** | 6,0–6,5 s | vedi sotto |
+| primo token sulla webmail | 4,5 s nella prima corsa, **3,0 s** nella seconda | — | soglia ≤ 4 s |
+
+`webmail-inviata` ha mostrato due cose:
+- **Falso allarme del secondo strato.** Nella prima corsa il clic su «[Gmail]/Posta inviata» è stato giudicato un «invio» (per la parola «inviata»), con una domanda a cui il Banco risponde «no». Allungare l'istruzione del classificatore con le cartelle di posta lo correggeva, ma rendeva il modello più lento (da 1 a 3 timeout in tre corse con il budget di 1,2 s). Si è scelta invece la stessa via dei pulsanti che aprono una bozza: le cartelle di posta («Posta inviata», «Bozze», «Sent», «Drafts», «Spam»… come etichetta intera) non passano dal secondo strato (`AgentTools.opensMailFolder`). I pulsanti «Invia» o «Cestino» restano giudicati. `--risk-classifier-test` torna a 10/10 e 0/7 (mediana 0,73 s), e `--security-coverage` resta 47/47.
+- **Ambiguità dell'account.** Nella seconda corsa il clic passa senza domanda, ma il modello apre l'etichetta importata «[Gmail]/Posta inviata» (`#label/…`) invece della cartella di sistema (`#sent`), che il Banco si aspetta. Su questo account le due cartelle hanno lo stesso nome. Non è un errore dell'app; con una webmail di prova (non personale) il compito andrebbe rifatto.

@@ -9,7 +9,7 @@ enum TestKillSwitch {
     /// The commands that click, type or bring apps to the front.
     static let screenFlags: Set<String> = [
         "--agent-bench", "--hands-test", "--security-suite", "--tools-test", "--agent-test",
-        "--phase3-test", "--apple-events-spike", "--local-vision-test", "--activate-test",
+        "--phase3-test", "--apple-events-spike", "--mail-search-spike", "--local-vision-test", "--activate-test",
     ]
 
     static func needed(for arguments: [String]) -> Bool {

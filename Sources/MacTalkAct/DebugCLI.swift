@@ -381,6 +381,23 @@ enum DebugCLI {
         }
         print("Spike Apple Events (Storia 8.4):")
         check("consenso letto senza finestre", AppleEventsSpike.askUser == false)
+        check("cartelle di posta mai giudicate dal secondo strato, i pulsanti sì",
+              AgentTools.opensMailFolder("[Gmail]/Posta inviata has menu") && AgentTools.opensMailFolder("Bozze") && AgentTools.opensMailFolder("Sent Mail")
+                && !AgentTools.opensMailFolder("Invia") && !AgentTools.opensMailFolder("Cestino") && !AgentTools.opensMailFolder("Sposta in Posta inviata"))
+        // Story 11.5: the mail search spike reports numbers only, never the content of a message.
+        do {
+            typealias S = MailSearchSpike.Search
+            let a = [S(term: "fattura", seconds: 1.2, count: 4), S(term: "riunione", seconds: 3.4, count: 0), S(term: "x", seconds: nil, count: nil, error: "non eseguita: negato (-1743)")]
+            let b = [S(term: "fattura", seconds: 0.1, count: 3), S(term: "riunione", seconds: 0.05, count: 0), S(term: "x", seconds: 0.04, count: 0)]
+            let r = MailSearchSpike.report(roadA: a, roadB: b, consent: "concesso", indexed: 1200).joined(separator: "\n")
+            check("spike Mail: mediana, massimo ed entro 3 s per strada", r.contains("mediana 2.30 s · massimo 3.40 s · entro 3 s 1/2 · errori 1"))
+            check("spike Mail: completezza come numeri", r.contains("rispetto ad (a): 3/4"))
+            check("spike Mail: indice vuoto spiegato", MailSearchSpike.report(roadA: a, roadB: b.map { var s = $0; s.count = 0; return s }, consent: "concesso", indexed: 0)
+                    .joined().contains("indice assente o non leggibile senza accesso completo al disco"))
+            check("spike Mail: solo la posta in arrivo", MailSearchSpike.isInboxPath("/Users/x/Library/Mail/V10/ABC/INBOX.mbox/Messages/1.emlx")
+                    && !MailSearchSpike.isInboxPath("/Users/x/Library/Mail/V10/ABC/Sent Messages.mbox/Messages/1.emlx"))
+            check("spike Mail: virgolette del termine escluse dallo script", MailSearchSpike.appleScript(term: "a\"b").contains("contains \"a\\\"b\""))
+        }
         check("solo con il consenso già dato si agisce", AppleEventsSpike.mayRun(noErr) && !AppleEventsSpike.mayRun(OSStatus(errAEEventWouldRequireUserConsent))
               && !AppleEventsSpike.mayRun(OSStatus(errAEEventNotPermitted)) && !AppleEventsSpike.mayRun(OSStatus(procNotFound)) && !AppleEventsSpike.mayRun(nil))
         check("etichette del consenso", AppleEventsSpike.consentLabel(noErr) == "concesso" && AppleEventsSpike.consentLabel(OSStatus(errAEEventWouldRequireUserConsent)).contains("-1744"))
@@ -2573,7 +2590,7 @@ extension DebugCLI {
             let f = raw.split(separator: "\t", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
             guard f.count >= 7, ["esterno", "interno"].contains(f[6]) else { print("Riga non valida: \(raw)"); return false }
             if Safety.isRiskyLabel(f[1]) { print("Riga già fermata dalle regole fisse, da togliere: \(f[1])"); return false }
-            if AgentTools.opensDraft(f[1]) { continue } // never judged: opens a draft
+            if AgentTools.opensDraft(f[1]) || AgentTools.opensMailFolder(f[1]) { continue } // never judged: opens a draft or a folder
             rows.append(f)
         }
         guard rows.count >= 10 else { print("Troppo poche righe in \(path): \(rows.count)"); return false }

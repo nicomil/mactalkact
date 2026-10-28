@@ -2,7 +2,7 @@
 title: 'Storia 11.5 — Spike: ricerca in Mail sotto il secondo'
 type: 'chore'
 created: '2026-10-28'
-status: 'ready-for-dev'
+status: 'done'
 baseline_commit: ''
 route: 'dispatch'
 review_loop_iteration: 0
@@ -46,10 +46,10 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `Sources/MacTalkAct/AppleEventsSpike.swift` (o file nuovo `MailSearchSpike.swift`) -- le due strade, sola lettura, report senza contenuti.
-- [ ] `Sources/MacTalkAct/main.swift` -- comando `--mail-search-spike` e stop con Esc.
-- [ ] `Sources/MacTalkAct/DebugCLI.swift` -- selftest delle funzioni pure.
-- [ ] ricerca -- §34 con tabella e raccomandazione (dopo la corsa con Nico).
+- [x] `Sources/MacTalkAct/AppleEventsSpike.swift` (o file nuovo `MailSearchSpike.swift`) -- le due strade, sola lettura, report senza contenuti.
+- [x] `Sources/MacTalkAct/main.swift` -- comando `--mail-search-spike` e stop con Esc.
+- [x] `Sources/MacTalkAct/DebugCLI.swift` -- selftest delle funzioni pure.
+- [x] ricerca -- §34 con tabella e raccomandazione (dopo la corsa con Nico).
 
 **Acceptance Criteria:**
 - Given `--mail-search-spike` con Nico presente, when finisce, then il report ha mediana e massimo per strada, permessi e completezza, e la casella non è cambiata.
@@ -66,6 +66,7 @@ context:
 
 - Spec approvata in autonomia (Nico, 28/10: «builda tutto fin quando non finiscono»).
 - La corsa vera richiede Nico presente (casella personale): il codice si scrive e si prova senza eseguire ricerche nella casella.
+- 29/10, 00:00, con Nico presente: file nuovo `MailSearchSpike.swift`. Strada (a) Apple Events mediana 0,60–0,62 s, massimo 1,9 s, 5/5 entro 3 s in tre corse; strada (b) Spotlight non vede la posta senza accesso completo al disco. Il paragrafo è il §38 della ricerca (la spec diceva §34, già usato).
 
 ## Spec Change Log
 

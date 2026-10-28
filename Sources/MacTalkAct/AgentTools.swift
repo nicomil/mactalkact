@@ -530,7 +530,7 @@ final class AgentTools {
         if Self.inertRoles.contains(role) { return nil }
         // Buttons that only open a draft: the send comes later and the fixed rules stop it (Invia,
         // ⌘Invio, Invio in a composer). The on-device model takes «Componi» for «invio».
-        if Self.opensDraft(label) { return nil }
+        if Self.opensDraft(label) || Self.opensMailFolder(label) { return nil }
         // An icon without a name: the window and the dialog may still say what it does.
         if label.trimmingCharacters(in: .whitespaces).isEmpty { label = "(senza etichetta)" }
         return RiskAction(tool: name, label: label, role: role, app: app, window: place?.window ?? Self.frontWindowTitle(),
@@ -593,6 +593,18 @@ final class AgentTools {
         gate.anticipate { [weak self] app, wanted in self?.anticipationCandidates(view, app: app, wanted: wanted) ?? [] }
     }
 
+    /// A mail folder: opening it sends nothing. The on-device model takes «Posta inviata» for «invio»
+    /// (Banco `webmail-inviata`, ricerca §38). Whole labels only, with Gmail's «[Gmail]/» prefix and the
+    /// «has menu» of Safari dropped: a button «Invia» or «Cestino» is still judged. Pure.
+    static func opensMailFolder(_ label: String) -> Bool {
+        var n = Grammar.normalize(label)
+        if n.hasSuffix(" has menu") { n = String(n.dropLast(" has menu".count)) }
+        if n.hasPrefix("gmail ") { n = String(n.dropFirst("gmail ".count)) }
+        return ["posta inviata", "inviata", "inviati", "messaggi inviati", "sent", "sent mail", "sent messages", "sent items",
+                "bozze", "drafts", "posta in arrivo", "inbox", "speciali", "starred", "importanti", "important", "spam",
+                "tutti i messaggi", "all mail", "posta indesiderata", "junk"].contains(n)
+    }
+
     static func opensDraft(_ label: String) -> Bool {
         let n = Grammar.normalize(label)
         return ["nuovo messaggio", "nuova mail", "nuova email", "new message", "new email", "componi", "compose", "scrivi",
@@ -604,8 +616,6 @@ final class AgentTools {
             .compactMap { $0 }.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
     }
 
-    /// The first ancestor (up to 6 levels) that can be pressed. Safari gives a press action to the
-    /// text inside a clickable div too: pressing the text presses the div.
     /// A text field inside a row, a cell, a list or a table: an editor in place (a file name in the Finder, a
     /// cell), whose text counts only after Invio or a click elsewhere (Story 11.4, ricerca §35).
     static func isInlineEditor(_ el: AXUIElement) -> Bool {
@@ -621,6 +631,8 @@ final class AgentTools {
         return false
     }
 
+    /// The first ancestor (up to 6 levels) that can be pressed. Safari gives a press action to the
+    /// text inside a clickable div too: pressing the text presses the div.
     static func pressableAncestor(_ el: AXUIElement) -> AXUIElement? {
         var current = el
         for _ in 0..<6 {
