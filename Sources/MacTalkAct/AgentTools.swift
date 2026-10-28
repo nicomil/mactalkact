@@ -576,6 +576,30 @@ final class AgentTools {
             }.map(\.id)
     }
 
+    /// Words of the app's own sentences («Fatto: ho cliccato…; ora la finestra è…»): they say nothing
+    /// about the request.
+    static let replyTemplateWords: Set<String> = ["fatto", "cliccato", "scritto", "testo", "premuto", "impostato", "aperto",
+        "finestra", "compare", "comparso", "campo", "casella", "spuntata", "vuota", "primo", "piano", "sparito", "selezionato",
+        "cambiato", "vale", "scelto", "acceso", "spento", "riletto", "nuovo", "compilato", "elemento", "indicato", "punto",
+        "trascinato", "schermo", "titolo", "scelta", "spunta", "togli", "tutto", "tutti", "cancella", "scrivi", "porta",
+        "metti", "imposta", "scegli", "cambia", "sposta", "compila", "crea", "scorri", "rinomina", "elimina", "segna", "segnala",
+        "mail", "email", "messaggio", "cella", "scheda", "cartella", "menu", "parla", "fino", "fondo", "alle"]
+
+    /// The answer composed by the app names something of the request (the label clicked, the new
+    /// window, the element changed). A request without words that can name a target always matches.
+    /// Pure, tested by `--selftest`.
+    static func replyMatchesRequest(_ reply: String, request: String) -> Bool {
+        let wanted = significantWords(request).subtracting(replyTemplateWords)
+        guard !wanted.isEmpty else { return true }
+        let said = significantWords(reply).subtracting(replyTemplateWords)
+        // Italian endings: «invia» and «inviata», «contatti» and «contatto» are the same word here.
+        func same(_ a: String, _ b: String) -> Bool {
+            let common = zip(a, b).prefix { $0 == $1 }.count
+            return common >= max(4, min(a.count, b.count) - 2)
+        }
+        return wanted.contains { w in said.contains { same(w, $0) } }
+    }
+
     /// Words of at least four letters that can name a control, without the verbs and nouns of every
     /// request («clicca», «pulsante»…). Pure.
     static func significantWords(_ text: String) -> Set<String> {
@@ -1031,6 +1055,12 @@ final class AgentTools {
                                           label: { id in registry[id].flatMap { item in
                                               item.label == item.role || Self.isSecure(item.element) ? nil : item.label } }) else {
             Log.debug("Agente: azione finale (\(name)) senza esito che la provi, risponde il modello")
+            return
+        }
+        // A wrong target proves nothing: «apri i contatti» → «Chi siamo» changes the page too. The model
+        // sees the outcome and corrects itself (Banco `sito-contatti`, ricerca §39).
+        guard Self.replyMatchesRequest(reply, request: currentRequest) else {
+            Log.debug("Agente: azione finale (\(name)) con un esito che non nomina la richiesta, risponde il modello")
             return
         }
         closing = cloudEngine && AppSettings.shared.hideSensitiveFromCloud ? Privacy.redact(reply, forCloud: true) : reply

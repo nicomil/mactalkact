@@ -1831,7 +1831,7 @@ extension DebugCLI {
             let maskWas = settings.hideSensitiveFromCloud
             settings.hideSensitiveFromCloud = true
             let iban = "IT60X0542811101000000123456"
-            let (a17, _, ans17) = await quickRun {
+            let (a17, _, ans17) = await quickRun("invia il bonifico") {
                 $0.finalCall = ("click", ["id": 4, "final": true],
                                 .text("Clicked.\nRESULT: window «Bonifico a \(iban)» (was «Nuovo bonifico») · elements +0 −1 ~0"))
             }
@@ -3671,7 +3671,17 @@ extension DebugCLI {
             if case .phrase = kind {
                 ok = phraseOK && (!ranAgent || agent.tools.effectfulCalls == 0)
             } else {
-                ok = BenchFixtures.passes(task.checks, title: title, url: BenchFixtures.frontURL())
+                var passed = BenchFixtures.passes(task.checks, title: title, url: BenchFixtures.frontURL())
+                // Calendar saves the event a moment after the editor closes, and EventKit keeps what it
+                // read: up to 4 s more, reading again each time (ricerca §39).
+                if !passed, task.checks.contains(where: { if case .event = $0.target { return true }; return false }) {
+                    for _ in 0..<4 where !passed {
+                        try? await Task.sleep(for: .seconds(1))
+                        BenchFixtures.store.reset()
+                        passed = BenchFixtures.passes(task.checks, title: title, url: BenchFixtures.frontURL())
+                    }
+                }
+                ok = passed
             }
             // Time to the first action: the local engine observes on its own before the model speaks.
             let first = ranAgent ? (agent.tools.firstEffectAt ?? agent.tools.firstCallAt).map { $0.timeIntervalSince(started) } : nil
@@ -4200,6 +4210,16 @@ extension DebugCLI {
                     && AgentTools.anticipationOrder(list, focus: r(100, 100), request: "spunta la newsletter") == [6, 3, 4, 1]
                     && AgentTools.anticipationOrder(list, focus: nil, request: "vai ai contatti") == [4, 1, 3, 6],
                   "\(AgentTools.anticipationOrder(list, focus: r(100, 100), request: "archivia tutto"))")
+            check("risposta dell'app solo se nomina la richiesta",
+                  !AgentTools.replyMatchesRequest("Fatto: ho cliccato «Chi siamo»; ora la finestra è «Banco sito · pagina: Chi siamo».", request: "apri i contatti")
+                    && AgentTools.replyMatchesRequest("Fatto: ho cliccato «Contatti»; ora la finestra è «Banco sito · pagina: Contatti».", request: "apri i contatti")
+                    && AgentTools.replyMatchesRequest("Fatto: ho impostato «Volume» a 30; «Volume» ora vale 30.", request: "porta il volume a 30")
+                    && AgentTools.replyMatchesRequest("Fatto: ho cliccato «Anna 21:30»; la casella «Anna 21:30» ora è vuota.", request: "togli la spunta ad Anna alle 21:30")
+                    && AgentTools.replyMatchesRequest("Fatto: ho cliccato il punto indicato; ora la finestra è «Banco lavagna · cliccato=cerchio rosso».", request: "clicca il cerchio rosso")
+                    && AgentTools.replyMatchesRequest("Fatto: ho cliccato «Salva»; ora la finestra è «Documento».", request: "cancella tutto il testo")
+                    && AgentTools.replyMatchesRequest("Fatto: ho cliccato «OK»; ora la finestra è «Altro».", request: "clicca ok")
+                    && AgentTools.replyMatchesRequest("Fatto: ho cliccato l'elemento indicato; ora la finestra è «Posta inviata».", request: "clicca Invia")
+                    && !AgentTools.replyMatchesRequest("Fatto: ho cliccato «Prezzi»; ora la finestra è «Prezzi».", request: "vai al preventivo"))
             check("parole della richiesta: niente verbi generici né parole brevi",
                   AgentTools.significantWords("Clicca sul pulsante Archivia tutto") == ["archivia", "tutto"])
         }
