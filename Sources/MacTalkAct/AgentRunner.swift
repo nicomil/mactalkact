@@ -330,6 +330,8 @@ final class AgentRunner {
             tools.instantGuard = false
             tools.onEscalate = nil
             tools.onQuestion = nil
+            // End of the request: the judgements in advance still in queue are cancelled (Story 10.3).
+            tools.gate.anticipationAllowed = false
             for engine in engines.values { engine.onPhase = nil }
             let (phases, total) = timer.finish()
             lastPhases = phases
@@ -350,6 +352,9 @@ final class AgentRunner {
         }
         // The access level in force, shown while the agent works and when the app in front changes (FR-54).
         tools.onAccessNotice = { [weak self] text in self?.onNotice?(text) }
+        // The second layer judges in advance only for a cloud engine: the local engine uses the same Apple
+        // model (Story 10.3).
+        tools.gate.anticipationAllowed = first?.engine.isCloud == true
         // The elements with their ids go with the request (cloud engines): one observe less per task.
         let elements = first?.engine == .local || first == nil ? "" : tools.initialObservation()
         var req = AgentRequest(message: message(request, context: context, recent: recent, elements: elements),
@@ -404,6 +409,10 @@ final class AgentRunner {
             // Cloud engines get the outcome of each action (AD-19); the local engine observes on its own.
             tools.reportOutcome = engine.id != .local
             tools.cloudEngine = engine.id.isCloud
+            // The fallback chain reached the local engine: no judgement in advance while it works.
+            tools.gate.anticipationAllowed = engine.id.isCloud
+            // Another cloud engine after a fallback: the reset cancelled the queue, it starts again.
+            if engine.id.isCloud, !tried.isEmpty { tools.anticipateCurrentView() }
             /// A scalata: the same engine goes on at `.fast` with what was done and the current elements.
             func escalate(_ reason: String) {
                 let cost = Date().timeIntervalSince(started)

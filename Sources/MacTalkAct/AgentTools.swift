@@ -393,7 +393,9 @@ final class AgentTools {
         return riskAction(name, a, app: app).map { [$0] } ?? []
     }
 
-    private func riskAction(_ name: String, _ a: [String: Any], app: String) -> RiskAction? {
+    /// `place`: the window title and dialog text when the caller already read them (judgement in
+    /// advance, many controls of the same window).
+    private func riskAction(_ name: String, _ a: [String: Any], app: String, place: (window: String, dialog: String)? = nil) -> RiskAction? {
         var label = "", role = ""
         switch name {
         case "click":
@@ -433,16 +435,53 @@ final class AgentTools {
         }
         // Fields, tabs, rows and pop-ups send nothing out by themselves: no verdict, no latency.
         // Boxes, radio buttons and cells stay: a «Profilo pubblico» switch, an «Approva» cell.
-        let inert: Set<String> = ["AXTextField", "AXTextArea", "AXTab", "AXRow", "AXPopUpButton", "AXComboBox", "AXSlider",
-                                  "AXDisclosureTriangle", "AXSearchField", "AXScrollBar"]
-        if inert.contains(role) { return nil }
+        if Self.inertRoles.contains(role) { return nil }
         // Buttons that only open a draft: the send comes later and the fixed rules stop it (Invia,
         // ⌘Invio, Invio in a composer). The on-device model takes «Componi» for «invio».
         if Self.opensDraft(label) { return nil }
         // An icon without a name: the window and the dialog may still say what it does.
         if label.trimmingCharacters(in: .whitespaces).isEmpty { label = "(senza etichetta)" }
-        return RiskAction(tool: name, label: label, role: role, app: app, window: Self.frontWindowTitle(),
-                          dialog: Self.frontDialogText(), request: currentRequest)
+        return RiskAction(tool: name, label: label, role: role, app: app, window: place?.window ?? Self.frontWindowTitle(),
+                          dialog: place?.dialog ?? Self.frontDialogText(), request: currentRequest)
+    }
+
+    /// Fields, tabs, rows and pop-ups send nothing out by themselves: the second layer does not judge them.
+    private static let inertRoles: Set<String> = ["AXTextField", "AXTextArea", "AXTab", "AXRow", "AXPopUpButton", "AXComboBox", "AXSlider",
+                                                  "AXDisclosureTriangle", "AXSearchField", "AXScrollBar"]
+
+    /// The controls of a view the second layer may judge in advance (Story 10.3): visible pressable
+    /// controls, nearest to the focus first, as the click on each would be judged (same filters: fixed
+    /// rules, inert roles, buttons that open a draft), keeping only those `wanted` accepts (not in the
+    /// cache, not in progress) and stopping at `AccessGate.anticipationLimit`.
+    private func anticipationCandidates(_ view: View, app: String, wanted: (RiskAction) -> Bool) -> [RiskAction] {
+        let place = (window: Self.frontWindowTitle(), dialog: Self.frontDialogText())
+        var out: [RiskAction] = []
+        var seen: Set<String> = []
+        for id in Self.anticipationOrder(view.controls, focus: view.focusFrame) where out.count < AccessGate.anticipationLimit {
+            if let action = riskAction("click", ["id": id], app: app, place: place), wanted(action), seen.insert(action.cacheKey).inserted {
+                out.append(action)
+            }
+        }
+        return out
+    }
+
+    /// The ids to judge in advance, in order (pure, tested by `--selftest`): inert roles dropped,
+    /// nearest to the focus first, the same distance in reading order; without a focus, reading order.
+    static func anticipationOrder(_ controls: [(id: Int, role: String, frame: CGRect)], focus: CGRect?) -> [Int] {
+        let kept = controls.enumerated().filter { !inertRoles.contains($0.element.role) }
+        guard let focus else { return kept.map(\.element.id) }
+        func distance(_ r: CGRect) -> CGFloat { hypot(r.midX - focus.midX, r.midY - focus.midY) }
+        return kept.sorted { a, b in
+            let (da, db) = (distance(a.element.frame), distance(b.element.frame))
+            return da == db ? a.offset < b.offset : da < db
+        }.map(\.element.id)
+    }
+
+    /// The fallback chain moved to another cloud engine: the queue of the last observation starts
+    /// again (the reset of the request cancelled it).
+    func anticipateCurrentView() {
+        guard let view = lastView, !view.controls.isEmpty else { return }
+        gate.anticipate { [weak self] app, wanted in self?.anticipationCandidates(view, app: app, wanted: wanted) ?? [] }
     }
 
     static func opensDraft(_ label: String) -> Bool {
@@ -906,6 +945,10 @@ final class AgentTools {
         var truncated = false
         /// Long containers showed only their visible part (fixed cost): what is on screen is complete.
         var capped = false
+        /// Clickable controls inside the window, for the judgement in advance (Story 10.3).
+        var controls: [(id: Int, role: String, frame: CGRect)] = []
+        /// Where the focus is, in screen coordinates.
+        var focusFrame: CGRect?
     }
 
     /// Observation at fixed cost (FR-44): children per container, roles with nothing useful below.
@@ -941,17 +984,30 @@ final class AgentTools {
     /// The elements of the window for the request itself, like the initial state Codex sends with
     /// every app: the engine can act at once instead of calling observe first.
     func initialObservation() -> String {
-        let view = scan(query: nil)
+        let anticipating = gate.anticipationWouldRun
+        let view = scan(query: nil, anticipating: anticipating)
         lastView = view
         generation += 1
+        if anticipating {
+            gate.anticipate { [weak self] app, wanted in self?.anticipationCandidates(view, app: app, wanted: wanted) ?? [] }
+        }
         let text = render(view, query: nil)
         return gate.showsOnlyControls(cloud: cloudEngine) ? Self.controlsOnly(text) : text
     }
 
     private func observe(query: String?) -> String {
         generation += 1
-        let view = scan(query: query)
-        if query == nil { lastView = view }
+        let anticipating = query == nil && gate.anticipationWouldRun
+        let view = scan(query: query, anticipating: anticipating)
+        if query == nil {
+            lastView = view
+            // A new observation: the second layer judges its controls while the engine thinks.
+            if anticipating {
+                gate.anticipate { [weak self] app, wanted in self?.anticipationCandidates(view, app: app, wanted: wanted) ?? [] }
+            } else {
+                gate.cancelAnticipation()
+            }
+        }
         return render(view, query: query)
     }
 
@@ -969,7 +1025,8 @@ final class AgentTools {
         return lines.joined(separator: "\n")
     }
 
-    private func scan(query: String?) -> View {
+    /// `anticipating`: also collect the controls and the focus position for the judgement in advance.
+    private func scan(query: String?, anticipating: Bool = false) -> View {
         var view = View()
         guard let (app, running) = AX.frontApp() else {
             view.header = ["No frontmost application."]
@@ -980,8 +1037,10 @@ final class AgentTools {
         let windowFrame = window.flatMap { AX.frame($0) }
         view.app = running.localizedName ?? ""
         view.title = ctx.windowTitle
-        view.focus = Self.describeFocus(in: app)
-        view.selection = AX.focusedElement(in: app).flatMap { AX.string($0, kAXSelectedTextAttribute) }
+        let focused = AX.focusedElement(in: app)
+        view.focus = Self.describeFocus(focused)
+        if anticipating { view.focusFrame = focused.flatMap { AX.frame($0) } }
+        view.selection = focused.flatMap { AX.string($0, kAXSelectedTextAttribute) }
             .map { AX.collapse($0, max: 60) } ?? ""
         view.header = [
             "APP: \(running.localizedName ?? "") (\(running.bundleIdentifier ?? ""))",
@@ -1073,6 +1132,7 @@ final class AgentTools {
                     if inWeb { line += " (page)" }
                     if let f = frame, let wf = windowFrame {
                         line += " @\(Int(f.minX - wf.minX)),\(Int(f.minY - wf.minY)) \(Int(f.width))x\(Int(f.height))"
+                        if anticipating, clickable, f.width > 0, f.height > 0, wf.intersects(f) { view.controls.append((id, role, f)) }
                     }
                     view.items.append((id, line))
                 }
@@ -1117,8 +1177,8 @@ final class AgentTools {
     }
 
     /// «textfield «Nome»», «webarea», «none»: the focused element in a few words.
-    private static func describeFocus(in app: AXUIElement) -> String {
-        guard let f = AX.focusedElement(in: app) else { return "" }
+    private static func describeFocus(_ focused: AXUIElement?) -> String {
+        guard let f = focused else { return "" }
         let role = AX.role(f).replacingOccurrences(of: "AX", with: "").lowercased()
         let label = [AX.string(f, kAXTitleAttribute), AX.string(f, kAXDescriptionAttribute)]
             .compactMap { $0 }.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""

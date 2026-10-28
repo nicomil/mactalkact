@@ -86,8 +86,10 @@ final class OnDeviceRiskClassifier {
         let prompt = Self.prompt(action)
         enum Outcome: Sendable { case answer(String), failed, late }
         // A real deadline: the answer and the clock race, and whoever comes second is ignored. A
-        // task group would wait for the model to stop even after `cancelAll()`.
-        let outcome: Outcome = await withCheckedContinuation { (done: CheckedContinuation<Outcome, Never>) in
+        // task group would wait for the model to stop even after `cancelAll()`. Cancelling the caller
+        // (a judgement in advance that gives way to a click, Story 10.3) stops the model too.
+        let working = CancellableWork()
+        let outcome: Outcome = await withTaskCancellationHandler { await withCheckedContinuation { (done: CheckedContinuation<Outcome, Never>) in
             let once = OnceFlag()
             let work = Task { @MainActor in
                 do {
@@ -98,12 +100,13 @@ final class OnDeviceRiskClassifier {
                     if once.claim() { done.resume(returning: .failed) }
                 }
             }
+            working.set(work)
             let limit = budget
             Task {
                 try? await Task.sleep(for: limit)
                 if once.claim() { work.cancel(); done.resume(returning: .late) }
             }
-        }
+        } } onCancel: { working.cancel() }
         prewarm()
         let answer: String
         switch outcome {
@@ -126,4 +129,19 @@ final class OnceFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var taken = false
     func claim() -> Bool { lock.withLock { if taken { return false }; taken = true; return true } }
+}
+
+/// The model's task of one judgement, cancelled with its caller (also when the cancel comes first).
+final class CancellableWork: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var cancelled = false
+    func set(_ t: Task<Void, Never>) {
+        let stop = lock.withLock { task = t; return cancelled }
+        if stop { t.cancel() }
+    }
+    func cancel() {
+        let t = lock.withLock { cancelled = true; return task }
+        t?.cancel()
+    }
 }

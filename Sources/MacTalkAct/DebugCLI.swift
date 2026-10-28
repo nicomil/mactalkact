@@ -1121,6 +1121,8 @@ final class FakeEngine: AgentEngine {
     private(set) var levels: [AgentLevel] = []
     private(set) var interrupts = 0
     private(set) var runs = 0
+    /// Whether the second layer could judge in advance while this engine ran (Story 10.3).
+    private(set) var anticipationSeen: [Bool] = []
 
     init(_ id: EngineID, tools: AgentTools, effectsBeforeFailure: Int = 0, fails: Bool) {
         self.id = id
@@ -1139,6 +1141,7 @@ final class FakeEngine: AgentEngine {
     func run(_ request: AgentRequest) async throws -> String {
         runs += 1
         levels.append(request.level)
+        anticipationSeen.append(tools.gate.anticipationAllowed)
         if twoCallsWhenInstant || failingActionWhenInstant || givesUpWhenInstant {
             guard request.level == .instant else {
                 return request.message.contains("<already_done>") ? "fatto rapido con il già fatto" : "fatto rapido"
@@ -1208,6 +1211,22 @@ extension DebugCLI {
                 } else { midway = false }
                 check("N=\(effects): fermata a metà senza ripetere", effects == 1 && midway && codex.runs == 0)
             }
+            agent.shutdown()
+        }
+
+        print("Giudizio anticipato lungo la catena di riserva (Storia 10.3):")
+        do {
+            let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
+            try? await agent.start()
+            let claude = FakeEngine(.claude, tools: agent.tools, fails: true)
+            let codex = FakeEngine(.codex, tools: agent.tools, fails: true)
+            let local = FakeEngine(.local, tools: agent.tools, fails: false)
+            agent.register(claude); agent.register(codex); agent.register(local)
+            agent.overrideChoice = (.claude, true)
+            let answer = try? await agent.run("prova", context: ScreenContext(), deep: false)
+            check("acceso con Claude e con Codex dopo il passaggio, spento col Motore locale e a richiesta finita",
+                  answer == "fatto da local" && claude.anticipationSeen == [true] && codex.anticipationSeen == [true]
+                  && local.anticipationSeen == [false] && !agent.tools.gate.anticipationAllowed)
             agent.shutdown()
         }
 
@@ -2495,6 +2514,8 @@ extension DebugCLI {
             /// First `read_text` of the task and whether a screenshot was asked (Story 8.3).
             var readText: Double?
             var screenshot = false
+            /// Second layer (Story 10.3): what this task added to the gate's counters.
+            var secondLayer = AccessGate.SecondLayerStats()
             var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) + router - total) <= 0.2 }
         }
         var rows: [Row] = []
@@ -2571,6 +2592,9 @@ extension DebugCLI {
                 _ = await router.decide(task.request, editable: { false }, state: state)
                 firstResponse = Date().timeIntervalSince(routerStarted)
             }
+            // The judgements in advance of the previous task land on that task, not on this one.
+            await agent.tools.gate.anticipationSettled()
+            let layerBefore = agent.tools.gate.stats
             let started = Date()
             var note = ""
             var ranAgent = true
@@ -2629,6 +2653,8 @@ extension DebugCLI {
             row.firstResponse = firstResponse
             if case .webmail = kind, ranAgent { row.webmailFirstToken = agent.lastFirstTokenAt }
             row.readText = ranAgent ? agent.tools.readTextSeconds.first : nil
+            await agent.tools.gate.anticipationSettled()
+            row.secondLayer = agent.tools.gate.stats.since(layerBefore)
             // A full screenshot (the image goes to the engine); a zoom with region is not counted.
             row.screenshot = ranAgent && agent.tools.callLog.contains { $0.hasPrefix("- screenshot") && !$0.contains("region") }
             if let fr = firstResponse {
@@ -2655,6 +2681,11 @@ extension DebugCLI {
                 let parts = BenchPhase.allCases.compactMap { p in row.phases[p].map { String(format: "%@ %.1f", p.rawValue, $0) } }
                 if !row.level.isEmpty {
                     print("      livello: \(row.level)\(row.escalation.isEmpty ? "" : " (\(row.escalation), \(String(format: "%.1f", row.escalationCost ?? 0)) s prima della scalata)")")
+                }
+                let sl = row.secondLayer
+                if !sl.costs.isEmpty || sl.anticipated + sl.anticipatedFailed > 0 {
+                    print(String(format: "      secondo strato: %d in anticipo (%d senza verdetto, %d timeout, %d fermati per un clic) · %d dalla cache anticipata · %d attese · %d giudicati al clic · %d timeout al clic · costo per azione massimo %.2f s",
+                                 sl.anticipated, sl.anticipatedFailed, sl.anticipatedTimeouts, sl.cancelled, sl.hits, sl.waited, sl.misses, sl.timeouts, sl.costs.max() ?? 0))
                 }
                 print("      fasi: \(routerTime > 0 ? String(format: "router %.1f · ", routerTime) : "")\(parts.joined(separator: " · "))\(row.sumOK ? "" : " ⚠︎ somma ≠ totale") · turni \(row.turns.map(String.init) ?? "—") · conferme \(row.confirmations) · bloccate \(row.blocked)")
             }
@@ -2713,6 +2744,17 @@ extension DebugCLI {
         }
         print("  riavvii della Sessione lunga: \(restartsText)")
         print("  falsi «fatto» (riuscito a parole, fallito alla verifica): \(ran.filter(\.falseDone).count)")
+        // NFR-16 (Story 10.3): on the positive tasks no timeout of the second layer, at most 0.3 s per action at the 90th percentile.
+        let positives = measured.filter(\.ok)
+        let layerCosts = positives.flatMap(\.secondLayer.costs)
+        let layerTimeouts = positives.map(\.secondLayer.timeouts).reduce(0, +)
+        func total(_ k: KeyPath<AccessGate.SecondLayerStats, Int>) -> Int { positives.map { $0.secondLayer[keyPath: k] }.reduce(0, +) }
+        let layerText = String(format: "%d azioni giudicate su %d compiti riusciti · %d verdetti in anticipo (%d senza verdetto, %d fermati per un clic) · %d dalla cache anticipata · %d attese · %d giudicati al clic · costo per azione mediana %.2f s, 90° %.2f s · timeout al clic %d, in anticipo %d · NFR-16 (zero timeout, 90° ≤ 0,3 s): %@",
+                               layerCosts.count, positives.count, total(\.anticipated), total(\.anticipatedFailed), total(\.cancelled), total(\.hits),
+                               total(\.waited), total(\.misses), median(layerCosts), p90(layerCosts), layerTimeouts, total(\.anticipatedTimeouts),
+                               layerCosts.isEmpty ? "non misurato" : (layerTimeouts == 0 && p90(layerCosts) <= 0.3 ? "rispettato" : "NON rispettato"))
+        print("  secondo strato: \(layerText)")
+        print("  FoundationModels nel secondo strato (tutti i compiti): \(ran.map(\.secondLayer.concurrentStarts).reduce(0, +)) giudizi partiti mentre un altro era in corso · \(ran.map(\.secondLayer.errors).reduce(0, +)) errori (rate limit, guardrail)")
         print("  somma delle fasi = totale entro 0,2 s: \(ran.allSatisfy(\.sumOK) ? "sì, su ogni compito" : "NO su \(ran.filter { !$0.sumOK }.map(\.task.id).joined(separator: ", "))")")
 
         let f = DateFormatter()
@@ -2732,6 +2774,7 @@ extension DebugCLI {
         let summary = "soglie NFR-12 riviste (mediane su \(measured.count) compiti con azioni, motore \(engine.rawValue)): " + verdicts.joined(separator: " · ")
             + "\nprima risposta visibile: \(firstResponseText)"
             + "\nriavvii della Sessione lunga: \(restartsText)"
+            + "\nsecondo strato: \(layerText)"
             + "\nfalsi «fatto»: \(ran.filter(\.falseDone).count) · prova prima del «fatto»: \(AppSettings.shared.evidenceBeforeDone ? "attiva" : "spenta")\n"
         try? summary.write(to: out.deletingPathExtension().appendingPathExtension("soglie.txt"), atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")
@@ -3026,6 +3069,291 @@ extension DebugCLI {
             let ok = await run(safari, .openApp("Note"))
             check("runLocal: senza domanda un errore passa all'Agente; altrimenti fatto", fell == .fellBack && fellBack == 1 && ok == .done && executed == 3)
         }
+
+        failures += await anticipationTest(makeGate: { makeGate($0, $1) }, judging: judging)
         return failures
+    }
+
+    /// The judgement in advance of the second layer (Story 10.3): one check per row of the story's
+    /// matrix, with a judge the test drives (verdicts released by the test, no wall-clock thresholds on
+    /// the order). No screen, no Apple model.
+    static func anticipationTest(makeGate: (String, AccessLevel.Scope) -> (AccessGate, Box<[String]>),
+                                 judging: @escaping (String) -> AccessGate.ActionFacts) async -> Int {
+        var failures = 0
+        func check(_ name: String, _ ok: Bool, _ detail: String = "") {
+            print(ok ? "  ok   \(name)" : "  FAIL \(name)\(detail.isEmpty ? "" : " — \(detail)")")
+            if !ok { failures += 1 }
+        }
+        print("Giudizio anticipato del secondo strato (Storia 10.3):")
+        /// A gate with a cloud engine at work and a judge driven by the test.
+        func makeAnticipating(_ scope: AccessLevel.Scope = .full, held: Set<String> = [], external: Set<String> = [],
+                              sources: [String: String] = [:]) -> (AccessGate, Box<[String]>, ControlledJudge) {
+            let (gate, questions) = makeGate("Safari", scope)
+            let judge = ControlledJudge(held: held, external: external, sources: sources)
+            gate.anticipationAllowed = true
+            gate.riskJudge = { await judge.judge($0) }
+            return (gate, questions, judge)
+        }
+        /// The actions of an observation, as `judging` builds the one of the click (same cache key).
+        func controls(_ labels: [String]) -> (String, (RiskAction) -> Bool) -> [RiskAction] {
+            { app, _ in labels.map { RiskAction(tool: "click", label: $0, role: "AXButton", app: app, window: "Banco", request: "") } }
+        }
+        /// Waits (at most 3 s) until `condition` holds: order, never time, is what the checks look at.
+        func until(_ condition: () -> Bool) async {
+            for _ in 0..<600 where !condition() { try? await Task.sleep(for: .milliseconds(5)) }
+        }
+        /// Lets a click started in a task reach its wait (it does not change the outcome, only the path).
+        func letRun() async { try? await Task.sleep(for: .milliseconds(50)) }
+
+        // Order of the candidates: inert roles out, nearest to the focus first, ties in reading order.
+        do {
+            let r = { (x: CGFloat, y: CGFloat) in CGRect(x: x, y: y, width: 10, height: 10) }
+            let list: [(id: Int, role: String, frame: CGRect)] = [(1, "AXButton", r(0, 0)), (2, "AXTextField", r(100, 100)),
+                                                                  (3, "AXButton", r(110, 100)), (4, "AXLink", r(90, 100)), (5, "AXRow", r(100, 110)),
+                                                                  (6, "AXCheckBox", r(500, 500))]
+            check("ordine dei candidati: dal fuoco (a pari distanza, ordine di lettura), senza ruoli inerti; senza fuoco, ordine di lettura",
+                  AgentTools.anticipationOrder(list, focus: r(100, 100)) == [3, 4, 1, 6] && AgentTools.anticipationOrder(list, focus: nil) == [1, 3, 4, 6],
+                  "\(AgentTools.anticipationOrder(list, focus: r(100, 100)))")
+        }
+        // Cache anticipata: observe with «Archivia», then a click on it: no judgement, verdict from the cache.
+        do {
+            let (gate, questions, judge) = makeAnticipating()
+            gate.anticipate(controls(["Archivia"]))
+            await gate.anticipationSettled()
+            let click = await gate.check("click", ["id": 4], origin: .model, facts: judging("Archivia"))
+            check("cache anticipata: al clic nessun giudizio, verdetto «dalla cache (anticipato)»",
+                  click == nil && judge.judged == ["Archivia"] && questions.value.isEmpty && gate.stats.anticipated == 1
+                  && gate.stats.hits == 1 && gate.stats.misses == 0 && gate.stats.costs == [0], "\(judge.judged) · \(gate.stats)")
+            gate.reset()
+            _ = await gate.check("click", ["id": 4], origin: .model, facts: judging("Archivia"))
+            check("richiesta nuova: lo stesso verdetto resta in cache ma non conta più come anticipato", gate.stats.hits == 1 && judge.judged == ["Archivia"])
+        }
+        // Giudizio in corso: the click waits for it and uses its verdict.
+        do {
+            let (gate, questions, judge) = makeAnticipating(held: ["Lento"], external: ["Lento"])
+            gate.anticipate(controls(["Lento"]))
+            await until { judge.judged == ["Lento"] }
+            let click = Task { await gate.check("click", ["id": 4], origin: .model, facts: judging("Lento")) }
+            await letRun()
+            judge.release("Lento")
+            let waited = await click.value
+            check("giudizio in corso: il clic aspetta il giudizio anticipato e usa il suo verdetto (esterno → domanda)",
+                  waited == AccessGate.denied("Lento") && questions.value.count == 1 && judge.judged == ["Lento"]
+                  && gate.stats.waited == 1 && gate.stats.timeouts == 0, "\(judge.judged) · \(gate.stats)")
+        }
+        // Giudizio in corso oltre il budget: «timeout» as today, the click goes on.
+        do {
+            let (gate, questions, judge) = makeAnticipating(held: ["Lentissimo"], external: ["Lentissimo"])
+            gate.anticipate(controls(["Lentissimo"]))
+            await until { judge.judged == ["Lentissimo"] }
+            let start = Date()
+            let late = await gate.check("click", ["id": 5], origin: .model, facts: judging("Lentissimo"))
+            let lateFor = Date().timeIntervalSince(start)
+            judge.releaseAll()
+            await gate.anticipationSettled()
+            check("giudizio in corso oltre il budget: «timeout» come oggi, il clic parte senza domanda",
+                  late == nil && questions.value.isEmpty && gate.stats.timeouts == 1 && lateFor < 2.5 && judge.judged == ["Lentissimo"],
+                  String(format: "%.2f s · %@", lateFor, "\(gate.stats)"))
+        }
+        // Giudizio in corso senza verdetto valido: with budget left the click judges again.
+        do {
+            let (gate, questions, judge) = makeAnticipating(held: ["E"], external: ["E"])
+            gate.anticipate(controls(["E"]))
+            await until { judge.judged == ["E"] }
+            let click = Task { await gate.check("click", ["id": 7], origin: .model, facts: judging("E")) }
+            await letRun()
+            judge.held = []
+            judge.release("E", source: "errore")
+            let again = await click.value
+            check("giudizio in corso finito con «errore»: col budget rimasto il clic giudica di nuovo e usa il suo verdetto",
+                  again == AccessGate.denied("E") && questions.value.count == 1 && judge.judged == ["E", "E"] && gate.stats.misses == 1,
+                  "\(judge.judged) · \(gate.stats)")
+        }
+        // Fuori dall'anticipo: at most 12 per observation, counted after the cache; the 13th is judged at the click.
+        do {
+            let (gate, _, judge) = makeAnticipating()
+            let labels = (1...15).map { "Pulsante \($0)" }
+            gate.anticipate(controls(labels))
+            await gate.anticipationSettled()
+            let anticipated = judge.judged
+            _ = await gate.check("click", ["id": 13], origin: .model, facts: judging("Pulsante 13"))
+            gate.anticipate(controls(labels))
+            await gate.anticipationSettled()
+            check("fuori dall'anticipo: 12 nell'ordine dato, il 13° al clic; all'osservazione dopo, quelli più lontani non ancora in cache",
+                  anticipated == Array(labels.prefix(12)) && judge.judged == anticipated + ["Pulsante 13", "Pulsante 14", "Pulsante 15"]
+                  && gate.stats.misses == 1, "\(judge.judged)")
+        }
+        // Nuova osservazione: the queue is cancelled, the judgement already started finishes and is cached.
+        do {
+            let (gate, _, judge) = makeAnticipating(held: ["A1", "A2", "A3"])
+            gate.anticipate(controls(["A1", "A2", "A3"]))
+            await until { judge.judged == ["A1"] }
+            gate.anticipate(controls(["N1", "N2", "A1"]))
+            judge.release("A1")
+            await gate.anticipationSettled()
+            let before = judge.judged
+            _ = await gate.check("click", ["id": 1], origin: .model, facts: judging("A1"))
+            check("nuova osservazione: coda annullata, il giudizio partito finisce ed entra in cache, poi i controlli nuovi uno alla volta",
+                  before == ["A1", "N1", "N2"] && judge.judged == before && gate.stats.anticipated == 3 && gate.stats.hits == 1, "\(judge.judged)")
+        }
+        // Fine richiesta: the queue is cancelled.
+        do {
+            let (gate, _, judge) = makeAnticipating(held: ["R1"])
+            gate.anticipate(controls(["R1", "R2", "R3"]))
+            await until { judge.judged == ["R1"] }
+            gate.reset()
+            judge.release("R1")
+            await gate.anticipationSettled()
+            check("fine richiesta: coda annullata (solo il giudizio già partito finisce)", judge.judged == ["R1"], "\(judge.judged)")
+        }
+        // Motore locale: nothing in advance; the fallback chain reaching it cancels the queue.
+        do {
+            let (gate, _, judge) = makeAnticipating(held: ["M1"])
+            gate.anticipationAllowed = false
+            var read = false
+            gate.anticipate { app, wanted in read = true; return controls(["L1"])(app, wanted) }
+            await gate.anticipationSettled()
+            gate.anticipationAllowed = true
+            gate.anticipate(controls(["M1", "M2"]))
+            await until { judge.judged == ["M1"] }
+            gate.anticipationAllowed = false
+            judge.release("M1")
+            await gate.anticipationSettled()
+            check("motore locale: nessun giudizio anticipato (i controlli non vengono nemmeno letti); arrivato a metà coda, la annulla",
+                  !read && judge.judged == ["M1"], "\(judge.judged)")
+        }
+        // The level or the setting changes during the queue: it stops.
+        do {
+            let (gate, _, judge) = makeAnticipating(held: ["Q1"])
+            gate.anticipate(controls(["Q1", "Q2"]))
+            await until { judge.judged == ["Q1"] }
+            gate.environment.level = { AccessLevel(cloudAllowed: true, scope: .confirmAll) }
+            judge.release("Q1")
+            await gate.anticipationSettled()
+            let (off, _, judgeOff) = makeAnticipating(held: ["S1"])
+            off.anticipate(controls(["S1", "S2"]))
+            await until { judgeOff.judged == ["S1"] }
+            off.environment.secondLayerOn = { false }
+            judgeOff.release("S1")
+            await off.anticipationSettled()
+            check("a metà coda «conferma ogni azione» o secondo strato spento: la coda si ferma",
+                  judge.judged == ["Q1"] && judgeOff.judged == ["S1"], "\(judge.judged) · \(judgeOff.judged)")
+        }
+        // Timeout anticipato: not cached; at the click the control is judged again.
+        do {
+            let (gate, _, judge) = makeAnticipating(sources: ["T": "timeout"])
+            gate.anticipate(controls(["T"]))
+            await gate.anticipationSettled()
+            _ = await gate.check("click", ["id": 3], origin: .model, facts: judging("T"))
+            check("timeout anticipato: niente cache, al clic si giudica di nuovo",
+                  judge.judged == ["T", "T"] && gate.stats.anticipatedFailed == 1 && gate.stats.anticipatedTimeouts == 1
+                  && gate.stats.hits == 0 && gate.stats.misses == 1, "\(judge.judged)")
+        }
+        // Verdetto esterno: at the click the question, as today.
+        do {
+            let (gate, questions, judge) = makeAnticipating(external: ["Pubblica"])
+            gate.anticipate(controls(["Pubblica"]))
+            await gate.anticipationSettled()
+            let click = await gate.check("click", ["id": 6], origin: .model, facts: judging("Pubblica"))
+            check("verdetto esterno anticipato: al clic la domanda come oggi",
+                  click == AccessGate.denied("Pubblica") && questions.value == ["Vuoi che clicchi «Pubblica», che tu non hai chiesto?"]
+                  && judge.judged == ["Pubblica"], "\(questions.value)")
+        }
+        // A click on another control while a judgement in advance runs: the click goes first, alone.
+        do {
+            let (gate, questions, judge) = makeAnticipating(held: ["Lungo"], external: ["X"])
+            gate.anticipate(controls(["Lungo", "Altro"]))
+            await until { judge.judged == ["Lungo"] }
+            let click = await gate.check("click", ["id": 9], origin: .model, facts: judging("X"))
+            judge.held = []
+            judge.releaseAll()
+            await gate.anticipationSettled()
+            let before = judge.judged
+            _ = await gate.check("click", ["id": 10], origin: .model, facts: judging("Lungo"))
+            check("clic su un altro controllo: coda e giudizio anticipato fermati, il clic ha il suo verdetto senza concorrenza; il risultato fermato non va in cache",
+                  click == AccessGate.denied("X") && questions.value.count == 1 && before == ["Lungo", "X"] && gate.stats.concurrentStarts == 0
+                  && gate.stats.cancelled == 1 && gate.stats.anticipated == 0 && judge.judged == ["Lungo", "X", "Lungo"],
+                  "\(judge.judged) · \(gate.stats)")
+        }
+        // The queue waits for a click being judged and skips its control.
+        do {
+            let (gate, _, judge) = makeAnticipating(held: ["X"])
+            let click = Task { await gate.check("click", ["id": 9], origin: .model, facts: judging("X")) }
+            await until { judge.judged == ["X"] }
+            gate.anticipate(controls(["X", "Y"]))
+            await letRun()
+            let whileClicking = judge.judged
+            judge.release("X")
+            _ = await click.value
+            await gate.anticipationSettled()
+            check("la coda aspetta il clic in giudizio e salta il suo controllo, senza concorrenza",
+                  whileClicking == ["X"] && judge.judged == ["X", "Y"] && gate.stats.concurrentStarts == 0, "\(judge.judged) · \(gate.stats)")
+        }
+        // Never with «conferma ogni azione» nor with the second layer off; a control already in the cache is skipped.
+        do {
+            let (confirmAll, _, judgeAll) = makeAnticipating(.confirmAll)
+            confirmAll.anticipate(controls(["Pubblica"]))
+            await confirmAll.anticipationSettled()
+            let (off, _, judgeOff) = makeAnticipating()
+            off.environment.secondLayerOn = { false }
+            off.anticipate(controls(["Pubblica"]))
+            await off.anticipationSettled()
+            let (gate, _, judge) = makeAnticipating()
+            _ = await gate.check("click", ["id": 6], origin: .model, facts: judging("Salva"))
+            gate.anticipate(controls(["Salva", "Apri", "Apri"]))
+            await gate.anticipationSettled()
+            check("mai con «conferma ogni azione» né col secondo strato spento; già in cache o doppio: non rigiudicato",
+                  judgeAll.judged.isEmpty && judgeOff.judged.isEmpty && judge.judged == ["Salva", "Apri"], "\(judge.judged)")
+        }
+        // The Banco's share of a task: monotonic counters, costs kept across the trimming.
+        do {
+            var s = AccessGate.SecondLayerStats()
+            for _ in 0..<9_999 { s.addCost(0.1) }
+            let before = s
+            s.misses += 1
+            s.addCost(0.5)
+            s.addCost(0.7)
+            let d = s.since(before)
+            check("Banco: la parte di un compito resta giusta anche quando i costi vengono svuotati", d.costs == [0.5, 0.7] && d.misses == 1, "\(d.costs)")
+        }
+        return failures
+    }
+}
+
+/// A judge the anticipation tests drive: labels in `held` wait until the test releases them; the
+/// others answer at once. «esterno» for `external`, with the source `sources[label]` (else a valid one).
+@MainActor
+final class ControlledJudge {
+    private(set) var judged: [String] = []
+    var held: Set<String>
+    let external: Set<String>
+    let sources: [String: String]
+    private var waiting: [(label: String, done: CheckedContinuation<RiskVerdict, Never>)] = []
+
+    init(held: Set<String>, external: Set<String>, sources: [String: String]) {
+        self.held = held
+        self.external = external
+        self.sources = sources
+    }
+
+    func judge(_ a: RiskAction) async -> RiskVerdict {
+        judged.append(a.label)
+        guard held.contains(a.label) else { return verdict(a.label) }
+        return await withCheckedContinuation { waiting.append((a.label, $0)) }
+    }
+
+    func verdict(_ label: String, source: String? = nil) -> RiskVerdict {
+        let ext = external.contains(label)
+        return RiskVerdict(external: ext, source: source ?? sources[label] ?? (ext ? "on-device: invio" : "on-device: nessun effetto fuori"), seconds: 0)
+    }
+
+    func release(_ label: String, source: String? = nil) {
+        guard let i = waiting.firstIndex(where: { $0.label == label }) else { return }
+        waiting.remove(at: i).done.resume(returning: verdict(label, source: source))
+    }
+
+    func releaseAll() {
+        for w in waiting { w.done.resume(returning: verdict(w.label)) }
+        waiting = []
     }
 }

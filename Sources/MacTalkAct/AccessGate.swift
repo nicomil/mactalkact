@@ -81,8 +81,10 @@ final class AccessGate {
     private var riskCache: [String: RiskVerdict] = [:]
 
     /// Fresh state for a new request. `keepCounters`: the same request retried on another engine
-    /// (AD-15) keeps what the first one asked.
+    /// (AD-15) keeps what the first one asked. The judgements queued in advance end with the request.
     func reset(keepCounters: Bool = false) {
+        cancelAnticipation()
+        anticipatedKeys.removeAll()
         deniedThisRequest = false
         if !keepCounters {
             lastAccessNotice = ""
@@ -147,15 +149,33 @@ final class AccessGate {
                 let verdict: RiskVerdict
                 if let cached = riskCache[action.cacheKey] {
                     verdict = cached
-                    Log.debug("Sicurezza: secondo strato · \(name) · \(cached.external ? "esterno" : "interno") · dalla cache")
+                    let early = anticipatedKeys.contains(action.cacheKey)
+                    if early { stats.hits += 1 }
+                    stats.addCost(0)
+                    Log.debug("Sicurezza: secondo strato · \(name) · \(cached.external ? "esterno" : "interno") · dalla cache\(early ? " (anticipato)" : "")")
+                } else if let inFlight = pending[action.cacheKey] {
+                    // Judged in advance and not finished yet (Story 10.3).
+                    let clock = ContinuousClock()
+                    let waitStart = clock.now
+                    let answer = await awaitPending(inFlight, for: action)
+                    let waited = Self.seconds(waitStart.duration(to: clock.now))
+                    verdict = answer.map { RiskVerdict(external: $0.external, source: $0.source, seconds: waited) }
+                        ?? RiskVerdict(external: false, source: "timeout", seconds: waited)
+                    stats.waited += 1
+                    if verdict.source == "timeout" { stats.timeouts += 1 }
+                    stats.addCost(waited)
+                    onClassified?(waited)
+                    Log.info(String(format: "Sicurezza: secondo strato · %@ «%d caratteri» · %@ · %@ · atteso il giudizio anticipato %.2f s", name,
+                                    action.label.count, verdict.external ? "esterno" : "interno", verdict.source, waited))
                 } else {
-                    verdict = await (riskJudge ?? riskClassifier.judge)(action)
                     // Greedy: the same prompt gives the same verdict, so it is kept across requests (the
-                    // dialog text is in the key). Timeouts and errors are never kept.
-                    if verdict.source.hasPrefix("on-device") {
-                        if riskCache.count > 500 { riskCache.removeAll() }
-                        riskCache[action.cacheKey] = verdict
-                    }
+                    // dialog text is in the key). Timeouts and errors are never kept (`finishJudgement`).
+                    // The click goes first: the judgements in advance stop (Story 10.3).
+                    yieldToClick()
+                    stats.misses += 1
+                    verdict = await startJudgement(action, anticipated: false).value
+                    if verdict.source == "timeout" { stats.timeouts += 1 }
+                    stats.addCost(verdict.seconds)
                     onClassified?(verdict.seconds)
                     Log.info(String(format: "Sicurezza: secondo strato · %@ «%d caratteri» · %@ · %@ · %.2f s", name, action.label.count,
                                     verdict.external ? "esterno" : "interno", verdict.source, verdict.seconds))
@@ -168,6 +188,236 @@ final class AccessGate {
             }
         }
         return nil
+    }
+
+    // MARK: Judgement in advance (Story 10.3, FR-60)
+
+    /// At most this many controls judged in advance per observation [ASSUMPTION of the story].
+    static let anticipationLimit = 12
+
+    /// A cloud engine is at work: only then the second layer judges in advance. The local engine uses
+    /// the same Apple model, so with it (or with no engine) nothing is judged ahead. Set by `AgentRunner`.
+    var anticipationAllowed = false {
+        didSet { if !anticipationAllowed { cancelAnticipation() } }
+    }
+
+    /// Whether an observation now would be judged in advance: cloud engine, second layer on, and never
+    /// with «conferma ogni azione» (the gate asks anyway). Read again before every judgement of the queue.
+    var anticipationWouldRun: Bool {
+        anticipationAllowed && environment.secondLayerOn() && (riskJudge != nil || OnDeviceRiskClassifier.isAvailable)
+            && environment.level().scope != .confirmAll
+    }
+
+    /// What the Banco reads of the second layer. Every counter only grows: the Banco takes the
+    /// difference around each task (`since`).
+    struct SecondLayerStats: Equatable {
+        /// Judgements in advance: valid verdicts, no valid verdict (of which «timeout»), and stopped
+        /// while running because a click needed the model.
+        var anticipated = 0
+        var anticipatedFailed = 0
+        var anticipatedTimeouts = 0
+        var cancelled = 0
+        /// Clicks served by a verdict taken in advance, clicks that waited for one in progress, and
+        /// clicks judged at the click (nothing in the cache nor in progress).
+        var hits = 0
+        var waited = 0
+        var misses = 0
+        /// Verdicts «timeout» at the click (waited or judged there).
+        var timeouts = 0
+        /// Concurrency of FoundationModels: judgements started while another was running, and verdicts
+        /// «errore» (rate limit, guardrails), in advance or at the click.
+        var concurrentStarts = 0
+        var errors = 0
+        /// Seconds the second layer added to each judged action (0 from the cache). At 10 000 the older
+        /// half is dropped, so a task's share stays whole; `costCount` counts them all.
+        private(set) var costs: [Double] = []
+        private var costsDropped = 0
+        var costCount: Int { costsDropped + costs.count }
+
+        mutating func addCost(_ seconds: Double) {
+            if costs.count >= 10_000 {
+                let old = costs.count / 2
+                costsDropped += old
+                costs.removeFirst(old)
+            }
+            costs.append(seconds)
+        }
+
+        /// What happened after `before` (a copy taken earlier): the Banco's share of one task.
+        func since(_ before: SecondLayerStats) -> SecondLayerStats {
+            var d = SecondLayerStats()
+            d.anticipated = anticipated - before.anticipated
+            d.anticipatedFailed = anticipatedFailed - before.anticipatedFailed
+            d.anticipatedTimeouts = anticipatedTimeouts - before.anticipatedTimeouts
+            d.cancelled = cancelled - before.cancelled
+            d.hits = hits - before.hits
+            d.waited = waited - before.waited
+            d.misses = misses - before.misses
+            d.timeouts = timeouts - before.timeouts
+            d.concurrentStarts = concurrentStarts - before.concurrentStarts
+            d.errors = errors - before.errors
+            d.costs = Array(costs.dropFirst(max(0, before.costCount - costsDropped)))
+            return d
+        }
+    }
+    private(set) var stats = SecondLayerStats()
+
+    /// The verdict of a judgement, as soon as the model gave it (before the gate stores it).
+    private final class VerdictBox { var value: RiskVerdict? }
+    /// A judgement running now, by cache key: in advance or at the click.
+    private struct Pending {
+        let id: Int
+        let task: Task<RiskVerdict, Never>
+        let started: ContinuousClock.Instant
+        let anticipated: Bool
+        let result: VerdictBox
+    }
+    private var pending: [String: Pending] = [:]
+    private var lastJudgementID = 0
+    /// The queue of the last observation: cancelling it stops what has not started yet.
+    private var anticipationTask: Task<Void, Never>?
+    /// Keys of this request whose cached verdict was taken in advance, for the log («dalla cache (anticipato)»).
+    private var anticipatedKeys: Set<String> = []
+
+    /// The budget of one verdict (0.9 s): a click waits for a judgement in progress only for what is
+    /// left of it.
+    private var judgeBudget: Double { Self.seconds(riskClassifier.budget) }
+
+    /// After an observation (or with the elements of the request): judges in background, one at a time,
+    /// the controls not yet in the cache nor being judged, in the order given (nearest to the focus
+    /// first), at most `anticipationLimit`. `candidates` gets the name of the app in front and the test
+    /// a control must pass (not in the cache, not in progress), so the caller can stop reading controls
+    /// at the limit; it is read in the background, after the observation went back to the engine.
+    /// A new observation cancels the queue of the previous one; the judgement already started
+    /// finishes and, if valid, is cached.
+    func anticipate(_ candidates: @escaping (_ app: String, _ wanted: (RiskAction) -> Bool) -> [RiskAction]) {
+        cancelAnticipation()
+        guard anticipationWouldRun else { return }
+        let app = environment.appName() ?? "questa app"
+        // One at a time: the judgement still running from the previous queue goes first.
+        let running = pending.values.filter(\.anticipated).map(\.task)
+        anticipationTask = Task { @MainActor [weak self] in
+            // Reading the controls costs a few milliseconds the engine does not wait for.
+            await Task.yield()
+            guard !Task.isCancelled, let self else { return }
+            let wanted: (RiskAction) -> Bool = { self.riskCache[$0.cacheKey] == nil && self.pending[$0.cacheKey] == nil }
+            var seen: Set<String> = []
+            let queue = candidates(app, wanted)
+                .filter { wanted($0) && seen.insert($0.cacheKey).inserted }
+                .prefix(Self.anticipationLimit)
+            guard !queue.isEmpty else { return }
+            Log.debug("Sicurezza: secondo strato · \(queue.count) controlli da giudicare in anticipo")
+            for task in running { _ = await task.value }
+            for action in queue {
+                // A click being judged goes first: the Apple model answers one prompt at a time best.
+                for p in self.pending.values where !p.anticipated { _ = await p.task.value }
+                // The level or the setting may have changed meanwhile.
+                guard !Task.isCancelled, self.anticipationWouldRun else { return }
+                if !wanted(action) { continue }
+                _ = await self.startJudgement(action, anticipated: true).value
+            }
+        }
+    }
+
+    /// Cancels the judgements in queue (new observation, end of the request, local engine).
+    func cancelAnticipation() {
+        anticipationTask?.cancel()
+        anticipationTask = nil
+    }
+
+    /// A click needs its own verdict now: the queue stops and the judgements in advance still running
+    /// are stopped and dropped (never cached), so the Apple model answers only the click. Two prompts at
+    /// once may both end in «timeout», and a timeout lets the click pass.
+    private func yieldToClick() {
+        cancelAnticipation()
+        for (key, p) in pending where p.anticipated {
+            p.task.cancel()
+            pending[key] = nil
+            stats.cancelled += 1
+        }
+    }
+
+    /// Waits until the queue and every judgement in progress are done (`--selftest`, Banco between tasks).
+    func anticipationSettled() async {
+        await anticipationTask?.value
+        for p in pending.values { _ = await p.task.value }
+    }
+
+    /// Starts one judgement and keeps it by key while it runs: a click on the same control waits for
+    /// it instead of judging again.
+    private func startJudgement(_ action: RiskAction, anticipated: Bool) -> Task<RiskVerdict, Never> {
+        let judge = riskJudge ?? riskClassifier.judge
+        if !pending.isEmpty { stats.concurrentStarts += 1 }
+        lastJudgementID += 1
+        let id = lastJudgementID
+        let box = VerdictBox()
+        let task = Task { @MainActor [weak self] in
+            let verdict = await judge(action)
+            box.value = verdict
+            self?.finishJudgement(action, verdict, id: id, anticipated: anticipated)
+            return verdict
+        }
+        pending[action.cacheKey] = Pending(id: id, task: task, started: ContinuousClock().now, anticipated: anticipated, result: box)
+        return task
+    }
+
+    /// The same rules for every verdict: only valid ones (`on-device`) enter the cache, emptied over 500.
+    /// A judgement stopped for a click is dropped.
+    private func finishJudgement(_ action: RiskAction, _ verdict: RiskVerdict, id: Int, anticipated: Bool) {
+        guard pending[action.cacheKey]?.id == id else { return }
+        pending[action.cacheKey] = nil
+        if verdict.source == "errore" { stats.errors += 1 }
+        let valid = verdict.source.hasPrefix("on-device")
+        if valid {
+            if riskCache.count > 500 { riskCache.removeAll(); anticipatedKeys.removeAll() }
+            riskCache[action.cacheKey] = verdict
+            if anticipated { anticipatedKeys.insert(action.cacheKey) }
+        }
+        guard anticipated else { return }
+        if valid { stats.anticipated += 1 } else { stats.anticipatedFailed += 1 }
+        if verdict.source == "timeout" { stats.anticipatedTimeouts += 1 }
+        Log.debug(String(format: "Sicurezza: secondo strato in anticipo · %@ «%d caratteri» · %@ · %@ · %.2f s", action.tool,
+                         action.label.count, verdict.external ? "esterno" : "interno", verdict.source, verdict.seconds))
+    }
+
+    /// At the click, a judgement of the same control is in progress: its verdict within what is left of
+    /// the budget (counted from when it started). Without a valid verdict and with time left, the click
+    /// judges again within that time; with no time left, «timeout» as today.
+    private func awaitPending(_ inFlight: Pending, for action: RiskAction) async -> RiskVerdict? {
+        let clock = ContinuousClock()
+        func left() -> Double { judgeBudget - Self.seconds(inFlight.started.duration(to: clock.now)) }
+        var answer = await Self.value(of: inFlight.task, within: left())
+        if answer == nil {
+            // It may have answered right at the deadline: its continuation runs at the next turn.
+            await Task.yield()
+            answer = inFlight.result.value
+        }
+        if let a = answer, !a.source.hasPrefix("on-device"), left() > 0 {
+            yieldToClick()
+            stats.misses += 1
+            answer = await Self.value(of: startJudgement(action, anticipated: false), within: left())
+        }
+        return answer
+    }
+
+    /// The value of `task` if it arrives within `seconds`, else nil (the task goes on by itself).
+    private static func value(of task: Task<RiskVerdict, Never>, within seconds: Double) async -> RiskVerdict? {
+        guard seconds > 0 else { return nil }
+        return await withCheckedContinuation { (done: CheckedContinuation<RiskVerdict?, Never>) in
+            let once = OnceFlag()
+            Task { @MainActor in
+                let v = await task.value
+                if once.claim() { done.resume(returning: v) }
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if once.claim() { done.resume(returning: nil) }
+            }
+        }
+    }
+
+    private static func seconds(_ d: Duration) -> Double {
+        Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
     }
 
     // MARK: Corsia locale (Story 10.2, FR-56)
