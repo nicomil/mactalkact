@@ -403,6 +403,29 @@ enum DebugCLI {
         check("etichette del consenso", AppleEventsSpike.consentLabel(noErr) == "concesso" && AppleEventsSpike.consentLabel(OSStatus(errAEEventWouldRequireUserConsent)).contains("-1744"))
         print("Livelli di accesso (Storia 9.3):")
         check("Terminal: solo clic", AccessLevel.level(bundleID: "com.apple.Terminal", name: "Terminale", list: AccessLevel.defaultList) == .clickOnly)
+        // Story 11.7: the app panel edits the same text lists.
+        do {
+            let base = "# terminali\ncom.apple.Terminal = solo clic\nTerminale = solo clic\ncom.apple.finder = normale\n"
+            let safari = AccessLevel.setting(.clickOnly, bundleID: "com.apple.Safari", name: "Safari", in: base)
+            check("pannello app: livello nuovo in fondo, il resto invariato",
+                  safari == "# terminali\ncom.apple.Terminal = solo clic\nTerminale = solo clic\ncom.apple.finder = normale\ncom.apple.Safari = solo clic"
+                    && AccessLevel.level(bundleID: "com.apple.Safari", name: "Safari", list: safari) == .clickOnly)
+            let terminal = AccessLevel.setting(.full, bundleID: "com.apple.Terminal", name: "Terminale", in: base)
+            check("pannello app: «normale» toglie le righe dell'app, per identificativo e per nome",
+                  terminal == "# terminali\ncom.apple.finder = normale" && AccessLevel.level(bundleID: "com.apple.Terminal", name: "Terminale", list: terminal) == .full)
+            check("pannello app: una riga per nome viene sostituita da quella per identificativo",
+                  AccessLevel.setting(.confirmAll, bundleID: "com.apple.Terminal", name: "Terminale", in: "Terminale = solo clic") == "com.apple.Terminal = conferma ogni azione")
+            let on = Privacy.settingReserved(true, bundleID: "com.example.Bank", name: "Banca", in: "com.apple.Passwords")
+            check("pannello app: riservata aggiunta una volta sola", on == "com.apple.Passwords\ncom.example.Bank"
+                    && Privacy.settingReserved(true, bundleID: "com.example.Bank", name: "Banca", in: on) == on)
+            check("pannello app: riservata tolta per identificativo o nome, anche in una riga con virgole",
+                  Privacy.settingReserved(false, bundleID: "com.example.Bank", name: "Banca", in: "com.apple.Passwords, Banca\ncom.example.Bank\n# nota") == "com.apple.Passwords\n# nota")
+            let apps = [InstalledApp(bundleID: "com.apple.Safari", name: "Safari", path: ""), InstalledApp(bundleID: "com.apple.Terminal", name: "Terminale", path: ""),
+                        InstalledApp(bundleID: "com.apple.Notes", name: "Note", path: "")]
+            check("pannello app: ricerca e app con un'impostazione prima",
+                  InstalledApps.filtered(apps, query: "", configured: { $0.name == "Terminale" }).map(\.name) == ["Terminale", "Safari", "Note"]
+                    && InstalledApps.filtered(apps, query: "term", configured: { _ in false }).map(\.name) == ["Terminale"])
+        }
         check("cmux: solo clic", AccessLevel.level(bundleID: "com.cmuxterm.app", name: "cmux", list: AccessLevel.defaultList) == .clickOnly)
         check("Impostazioni di Sistema: conferma ogni azione", AccessLevel.level(bundleID: "com.apple.systempreferences", name: "", list: AccessLevel.defaultList) == .confirmAll)
         check("app sconosciuta: normale", AccessLevel.level(bundleID: "com.example", name: "Esempio", list: AccessLevel.defaultList) == .full)

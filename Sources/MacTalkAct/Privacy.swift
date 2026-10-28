@@ -131,6 +131,24 @@ enum Privacy {
         return entries(list).contains { e in e == b || (!n.isEmpty && Grammar.normalize(e) == n) }
     }
 
+    /// The list of reserved apps with the app in or out (Story 11.7). Out: every entry for it, by
+    /// identifier or name, also inside a line with commas. In: its identifier on a new line, once. Pure.
+    static func settingReserved(_ on: Bool, bundleID: String, name: String, in list: String) -> String {
+        let n = Grammar.normalize(name), b = bundleID.lowercased()
+        func matches(_ e: String) -> Bool {
+            let t = e.trimmingCharacters(in: .whitespaces)
+            return !t.hasPrefix("#") && (t.lowercased() == b || (!n.isEmpty && Grammar.normalize(t) == n))
+        }
+        if on { return isReservedApp(name: name, bundleID: bundleID, list: list) ? list : (list.isEmpty || list.hasSuffix("\n") ? list : list + "\n") + bundleID }
+        return list.components(separatedBy: "\n").compactMap { line -> String? in
+            let items = line.components(separatedBy: ",")
+            let kept = items.filter { !matches($0) }
+            if kept.count == items.count { return line }
+            let joined = kept.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", ")
+            return joined.isEmpty ? nil : joined
+        }.joined(separator: "\n")
+    }
+
     /// The list entry matching the site, or nil. With the address: the host is the entry or one of
     /// its subdomains (a word without a dot matches anywhere in the host). Without the address
     /// (browsers that do not expose it): the site name in the window title.
@@ -198,6 +216,23 @@ struct AccessLevel: Equatable {
 
 extension AccessLevel.Scope {
     static let allCasesList: [AccessLevel.Scope] = [.clickOnly, .confirmAll, .full]
+}
+
+extension AccessLevel {
+    /// The list with `scope` for the app (Story 11.7, the panel in Impostazioni › Privacy): the lines of
+    /// that app (by identifier or name) go, comments and other apps stay, and a line by identifier is
+    /// added at the bottom unless the scope is «normale», which an unlisted app already has. Pure.
+    static func setting(_ scope: Scope, bundleID: String, name: String, in list: String) -> String {
+        var lines = list.components(separatedBy: "\n").filter { line in
+            let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard parts.count == 2, !parts[0].hasPrefix("#") else { return true }
+            let key = parts[0].lowercased()
+            return !(key == bundleID.lowercased() || (!name.isEmpty && key == name.lowercased()))
+        }
+        while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
+        if scope != .full { lines.append("\(bundleID) = \(scope.rawValue)") }
+        return lines.joined(separator: "\n")
+    }
 }
 
 /// macOS secure keyboard entry (a password field or an app that asks for it): no synthetic typing

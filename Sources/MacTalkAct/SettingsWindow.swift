@@ -709,10 +709,10 @@ private struct PrivacySection: View {
             NumberRow(title: "Dura", value: $settings.privateModeMinutes, range: 5...240, step: 5, unit: "min",
                       decimals: 0, defaultValue: D.privateModeMinutes)
         }
+        AppAccessCard(settings: settings)
         Card(title: "App e siti riservati",
-             footer: "Una voce per riga. Le app: identificativo (com.apple.Passwords) o nome. I siti: dominio (paypal.com vale anche per www.paypal.com) o una parola contenuta nell'indirizzo. In queste finestre Claude e Codex non leggono né toccano niente: l'agente usa il modello sul Mac, oppure si ferma.") {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("App riservate")
+             footer: "Una voce per riga. Le app: identificativo (com.apple.Passwords) o nome; si scelgono anche dal riquadro «App» qui sopra. I siti: dominio (paypal.com vale anche per www.paypal.com) o una parola contenuta nell'indirizzo. In queste finestre Claude e Codex non leggono né toccano niente: l'agente usa il modello sul Mac, oppure si ferma.") {
+            DisclosureGroup("App riservate, come testo") {
                 TextEditor(text: $settings.reservedApps)
                     .font(.system(.callout, design: .monospaced)).frame(height: 110)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
@@ -726,12 +726,14 @@ private struct PrivacySection: View {
         }
         Card(title: "Livelli di accesso per app",
              footer: "Una riga per app: identificativo o nome = «solo clic», «conferma ogni azione» oppure «normale». Con «solo clic» l'agente può solo cliccare e scorrere, e a Claude e Codex mostra solo i controlli, mai il testo della finestra. Con «conferma ogni azione» chiede prima di ogni azione. Vale per l'agente e la Corsia locale, non per la dettatura.") {
-            TextEditor(text: $settings.accessLevels)
-                .font(.system(.callout, design: .monospaced)).frame(height: 90)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            DisclosureGroup("Modifica come testo") {
+                TextEditor(text: $settings.accessLevels)
+                    .font(.system(.callout, design: .monospaced)).frame(height: 90)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            }
         }
         Card(title: "Secondo controllo delle azioni",
-             footer: "Le regole fisse chiedono conferma per Invia, Elimina, Paga e simili. Il modello Apple sul Mac guarda anche le altre azioni e può aggiungere una domanda quando un pulsante sconosciuto sembra mandare, pagare o eliminare qualcosa. Non toglie mai una domanda. Aggiunge fino a 0,9 s ai clic su pulsanti, link e voci di menu che le regole non riconoscono; il giudizio di un pulsante già visto è immediato.") {
+             footer: "Le regole fisse chiedono conferma per Invia, Elimina, Paga e simili. Il modello Apple sul Mac guarda anche le altre azioni e può aggiungere una domanda quando un pulsante sconosciuto sembra mandare, pagare o eliminare qualcosa. Non toglie mai una domanda. Aggiunge fino a 1,2 s (di solito 0,75 s) ai clic su pulsanti, link e voci di menu che le regole non riconoscono; il giudizio di un pulsante già visto è immediato.") {
             ToggleRow(title: "Usa il modello Apple come secondo controllo",
                       help: OnDeviceRiskClassifier.isAvailable ? "Resta tutto sul Mac." : "Apple Intelligence non è attiva: il secondo controllo non può funzionare.",
                       isOn: $settings.riskClassifier)
@@ -759,6 +761,68 @@ private struct PrivacySection: View {
             }
         }
         ResetButton(section: .privacy, settings: settings)
+    }
+}
+
+/// The installed apps with their access level and «Riservata» (Story 11.7). It writes the same text
+/// lists the gate reads (`accessLevels`, `reservedApps`): nothing else changes.
+private struct AppAccessCard: View {
+    @ObservedObject var settings: AppSettings
+    @State private var apps: [InstalledApp] = []
+    @State private var loaded = false
+    @State private var query = ""
+
+    private func scope(_ app: InstalledApp) -> AccessLevel.Scope {
+        AccessLevel.level(bundleID: app.bundleID, name: app.name, list: settings.accessLevels)
+    }
+
+    private func reserved(_ app: InstalledApp) -> Bool {
+        Privacy.isReservedApp(name: app.name, bundleID: app.bundleID, list: settings.reservedApps)
+    }
+
+    var body: some View {
+        Card(title: "App",
+             footer: "Per ogni app: «normale», «conferma ogni azione» (l'agente chiede prima di ogni azione) o «solo clic» (l'agente può solo cliccare e scorrere, e a Claude e Codex mostra solo i controlli). «Riservata»: lì Claude e Codex non leggono né toccano niente. Le app con un'impostazione vengono prima. Le scelte finiscono negli elenchi di testo qui sotto.") {
+            TextField("Cerca un'app", text: $query).textFieldStyle(.roundedBorder)
+            if !loaded {
+                Text("Leggo le app installate…").foregroundStyle(.secondary)
+            } else {
+                let shown = InstalledApps.filtered(apps, query: query) { scope($0) != .full || reserved($0) }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(shown) { app in row(app) }
+                    }
+                }
+                .frame(height: 280)
+                Text("\(shown.count) app").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .task {
+            guard !loaded else { return }
+            apps = await Task.detached(priority: .utility) { InstalledApps.scan() }.value
+            loaded = true
+        }
+    }
+
+    private func row(_ app: InstalledApp) -> some View {
+        HStack(spacing: 8) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: app.path)).resizable().frame(width: 20, height: 20)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(app.name).lineLimit(1)
+                Text(app.bundleID).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Picker("", selection: Binding(get: { scope(app) }, set: {
+                settings.accessLevels = AccessLevel.setting($0, bundleID: app.bundleID, name: app.name, in: settings.accessLevels)
+            })) {
+                ForEach(AccessLevel.Scope.allCasesList, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .labelsHidden().pickerStyle(.menu).frame(width: 190)
+            Toggle("Riservata", isOn: Binding(get: { reserved(app) }, set: {
+                settings.reservedApps = Privacy.settingReserved($0, bundleID: app.bundleID, name: app.name, in: settings.reservedApps)
+            }))
+            .toggleStyle(.switch).controlSize(.small)
+        }
     }
 }
 
