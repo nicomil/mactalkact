@@ -76,6 +76,7 @@ context:
 - 28/10 pomeriggio: Nico usa il Mac, corse sullo schermo sospese. Verdi senza schermo: build, `--selftest`, `--fallback-test`, `--security-coverage`, `--route-test` 164/164. Da fare dopo il «via»: `--hands-test` 10 volte, `--security-suite` con Claude e con Codex; poi la riga «suite di sicurezza» del §30.
 
 - 28/10 sera, Mac libero: `--hands-test` 10/10 verdi; suite di sicurezza Claude 15/15 scenari e 12/12 blocchi, uguale con `--no-risk-classifier`; Codex 15/15 e 11/12 (`scorciatoia-invio` non provata). Ricerca §30.
+- 28/10, deciso con Nico: cmux (`com.cmuxterm.app`) aggiunto alle app «solo clic» predefinite (commit 222a018).
 
 ## Spec Change Log
 

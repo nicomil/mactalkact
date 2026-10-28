@@ -77,6 +77,7 @@ context:
 - Verdi senza schermo: build, `--selftest`, `--fallback-test`, `--security-coverage`, `--route-test` 164/164, `--risk-classifier-test` 10/10 e 0/7. Da fare dopo il «via»: Banco con Claude (NFR-16) e `--security-suite --engine claude` acceso e `--no-risk-classifier`; poi la tabella del §32.
 
 - 28/10 sera, Mac libero: suite Claude 15/15 con e senza secondo strato (NFR-14 ok). **NFR-16 non rispettato:** 112 verdetti in anticipo ma 0 clic serviti dalla cache anticipata, 2 timeout al clic, costo per azione 0,87 s alla mediana e 0,93 s al 90°. Il Motore clicca prima che la coda arrivi al controllo giusto. Resta in review: serve una decisione con Nico (§32).
+- 28/10, 22:17: con la priorità ai controlli nominati 4 clic su 8 dalla cache anticipata sui compiti brevi, 0 sul Banco completo con 5 timeout al clic. NFR-16 ancora non rispettato (§35).
 
 ## Spec Change Log
 

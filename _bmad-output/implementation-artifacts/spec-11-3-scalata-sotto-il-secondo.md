@@ -2,7 +2,7 @@
 title: 'Storia 11.3 — Scalata sotto il secondo'
 type: 'feature'
 created: '2026-10-28'
-status: 'in-review'
+status: 'done'
 baseline_commit: '4debdaa4b39409bc8798043748fa58bd788ffcb9'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -77,6 +77,7 @@ context:
 - Verdi senza schermo: build, `--selftest`, `--fallback-test`, `--security-coverage`, `--session-test`, `--route-test` 164/164. Da fare dopo il «via»: Banco sui compiti istantanei e tabella del §33.
 
 - 28/10 sera, Mac libero: passaggio di consegne 0,05–0,09 s, 6 osservazioni riusate su 6, 0 azioni ripetute; costo della scalata ancora 4,8 s per il lavoro dell'istantaneo prima del segnale (atteso). **Un compito istantaneo fallito in più** con `--prepare`: `elenco-articolo`, resa «non è ancora visibile… Dimmi di continuare» non riconosciuta. Resta in review fino alla correzione della regola (§33).
+- 28/10, 22:19: regola della resa corretta (commit 222a018, «non è ancora visibile», «dimmi di continuare»). Con `--cold --prepare` `elenco-articolo` ora passa al rapido e riesce: 10/10, nessun compito istantaneo fallito in più. Ricerca §35.
 
 ## Spec Change Log
 

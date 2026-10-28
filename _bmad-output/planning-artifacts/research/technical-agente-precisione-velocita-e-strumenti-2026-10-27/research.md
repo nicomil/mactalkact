@@ -989,3 +989,35 @@ Misurato con il Banco del 28 ottobre alle 20:57 (§28, «Dopo le Storie 10.1–1
 Nella suite, `notifica-ingannevole` chiude con la frase dell'app («Fatto: ho cliccato l'elemento indicato; ora la finestra è «Banco notifica · …»»). Lo scenario passa, perché non c'è nessuna azione non confermata.
 
 **Da notare.** La frase composta è più povera di quella del modello: dice l'azione e una prova sola, non per esempio «la mail è nella cartella Inviata». Quanti compiti la ottengono dipende da quanto spesso il modello mette `final`: se il Banco mostra poche risposte composte fuori dal Livello istantaneo, va rafforzata la regola nel prompt. Il rischio opposto è un `final` messo su un'azione che non completa la richiesta: allora l'app chiude il turno troppo presto. La prova richiesta (cambiamento visibile, nessun segno di errore) lo limita, ma non lo esclude. Il Banco lo farebbe vedere come falso «fatto».
+
+## 35. Correzioni dopo le prove sullo schermo (28 ottobre 2026, sera)
+
+**Che cosa è cambiato (commit 222a018).**
+- cmux (`com.cmuxterm.app`) è nell'elenco «solo clic» predefinito.
+- La Corsia locale, quando rifiuta, dice «In <app> posso solo cliccare: fallo tu», senza rimandare all'Agente, che rifiuterebbe per la stessa regola.
+- Regola della resa (§33): sono segni forti «non è ancora visibile», «non sono ancora visibili» e «dimmi di continuare»; «non è visibile» e «non sono visibili» contano solo nella prima frase. «Vuoi che continui?» resta una domanda di cortesia.
+- Giudizio anticipato (§32): prima i controlli la cui etichetta ha parole (di almeno 4 lettere, senza verbi e nomi generici come «clicca» o «pulsante») in comune con la richiesta, poi per distanza dal fuoco.
+- Risposta dall'app (§34): in un `act`, ogni passo che scrive prima dell'ultimo deve lasciare il testo visibile nell'esito (in un elemento, oppure, dai 4 caratteri, in un'etichetta o nel titolo). Altrimenti risponde il modello. Così «scegli Torino come città» (clic, testo, Invio, modulo inviato con la città vuota), che nella corsa intermedia era un falso «fatto», non chiude più il turno. Lo stesso vale per «scrivi e premi Invio» quando il campo sparisce: lì risponde il modello.
+
+**Rete.** Senza schermo: `--selftest` e `--fallback-test` tutto ok, `--security-coverage` 47/47 con 0/21 falsi allarmi, `--route-test` 164/164 con 0 errori critici.
+
+**Banco (Mac libero).** Prima delle correzioni c'era una corsa intermedia (`…-2153-claude.tsv`): 34/35, con il falso «fatto» di `modulo-citta` e 0 clic dalla cache anticipata anche con la priorità ai controlli nominati. Dopo le correzioni:
+
+| Misura | Banco completo prima (§28) | Banco completo dopo | `--cold --prepare` prima (§29) | `--cold --prepare` dopo |
+| --- | --- | --- | --- | --- |
+| riusciti | 35/35 | 34/35 | 9/10 | 10/10 |
+| compito, mediana | 4,38 s | 4,89 s | 3,49 s | 3,22 s |
+| primo strumento, mediana | 2,65 s | 2,64 s | 2,73 s | 2,22 s |
+| Livello istantaneo, mediana | 3,98 s | 3,72 s | 3,49 s | 3,17 s |
+| falsi «fatto» | 0 | 1 (`finder-rinomina`) | 0 | 0 |
+| risposte composte | 24/30 | 25/30 | 9/10 | 10/10 |
+| clic dalla cache anticipata | 0 | 0 (1 attesa) | 0 | 4 su 8 giudicati |
+| timeout al clic | 2 | 5 | 2 | 0 |
+
+Cosa dice:
+1. **La resa di `elenco-articolo` ora si riconosce.** Nella corsa preparata l'istantaneo passa al rapido e il compito riesce (12,4 s, di cui 8,0 s di scalata).
+2. **Il compito del Banco completo oscilla intorno alla soglia di 4,5 s:** 4,38 s prima, 4,89 s dopo. Con una corsa per parte non si distingue la variabilità tra corse da un costo delle correzioni, per esempio la regola più severa sugli `act`, che lascia rispondere il modello più spesso. La misura finale (11.6) andrà fatta con più corse, non con una sola.
+3. **La priorità ai controlli nominati aiuta solo sulle pagine piccole.** Sui 10 compiti brevi 4 clic su 8 arrivano dalla cache anticipata, con un costo per azione di 0,39 s alla mediana. Sul Banco completo restano 0, e i timeout al clic salgono a 5. NFR-16 non è ancora rispettato.
+4. **Nuovo falso «fatto»: `finder-rinomina`.** Il modello ha scritto «finale.txt» nel campo del nome con `set_value` e ha messo `final` su quel passo. Il testo compare nel campo, ma il Finder conferma la rinomina solo con Invio. È il rischio già descritto nel «Da notare» del §34: un `final` su un'azione che non completa la richiesta. Una regola generica («testo nel campo con il fuoco ancora lì») escluderebbe anche i moduli web, dove il testo scritto è il risultato. Va deciso con Nico se rafforzare la regola nel prompt (il `final` solo quando non serve una conferma), escludere i campi di modifica dentro righe ed elenchi, oppure lasciare al modello le scritture nel Finder.
+
+Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-28-2217-claude.tsv` (Banco completo) e `…-2219-claude.tsv` (`--cold --prepare`).

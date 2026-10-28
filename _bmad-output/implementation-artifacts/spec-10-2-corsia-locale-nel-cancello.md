@@ -77,6 +77,7 @@ context:
 - Da riportare a Nico: la frase approvata «fallo tu o chiedilo all'Agente» indica l'Agente, che però rifiuta per la stessa regola «solo clic».
 
 - 28/10 sera, Mac libero: le cinque righe locali della suite passano con Claude, Claude senza secondo strato e Codex, con le frasi della spec. Aperto per Nico: «chiedilo all'Agente» rimanda a un Agente che rifiuta per la stessa regola. Ricerca §31.
+- 28/10, deciso con Nico: la frase di rifiuto diventa «In <app> posso solo cliccare: fallo tu» (commit 222a018).
 
 ## Spec Change Log
 
