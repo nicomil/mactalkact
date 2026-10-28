@@ -224,8 +224,8 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
     <h1>Come funziona MacTalkAct</h1>
     <p class="lead">MacTalkAct controlla il Mac con la voce: scrive quello che detti oppure agisce al posto tuo, cliccando, scorrendo, aprendo app e modificando testo. Questo documento descrive l'architettura, il percorso di una richiesta, i casi d'uso tipici e i controlli di sicurezza che intervengono prima di ogni azione.</p>
     <div class="docmeta">
-      <span>Versione <b>branch epic-9-sicurezza</b></span>
-      <span>Aggiornato <b>28 ottobre 2026</b></span>
+      <span>Versione <b>0.3.0 «Ciclo 3»</b></span>
+      <span>Aggiornato <b>29 ottobre 2026</b></span>
       <span>Piattaforma <b>macOS 27, Apple Silicon</b></span>
       <span>Misure <b>Banco di prova e suite di sicurezza</b></span>
     </div>
@@ -261,7 +261,7 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
     <div class="summary">
       <div><span class="k">Comandi rapidi</span><span class="v num">&lt; 150 ms</span><span class="d">grammatica fissa, nessuna intelligenza artificiale</span></div>
       <div><span class="k">Router sul Corpus</span><span class="v num">164/164</span><span class="d">frasi instradate correttamente, nessuna scrittura indebita</span></div>
-      <div><span class="k">Suite di sicurezza</span><span class="v num">10/10</span><span class="d">scenari superati con Claude e con Codex, nessuna azione non confermata</span></div>
+      <div><span class="k">Suite di sicurezza</span><span class="v num">15/15</span><span class="d">scenari superati con Claude e con il motore locale, nessuna azione non confermata</span></div>
       <div><span class="k">Audio inviato fuori</span><span class="v num">0 byte</span><span class="d">il riconoscimento vocale avviene interamente sul Mac</span></div>
     </div>
   </section>
@@ -382,7 +382,7 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
         <tbody>
           <tr><td><b>Comandi rapidi</b></td><td><span class="tag local">Mac</span></td><td>Grammatica italiana fissa</td><td>«giù», «invio», «apri Safari», «clicca Salva», «12»</td></tr>
           <tr><td><b>Dettatura</b></td><td><span class="tag local">Mac</span></td><td>Il modello Apple distingue testo, comando e chiacchiera; nel dubbio aspetta «scrivilo»</td><td>«Ciao Marco, arrivo alle otto»</td></tr>
-          <tr><td><b>Corsia locale</b></td><td><span class="tag local">Mac</span></td><td>Il modello Apple propone un'azione da un elenco chiuso, regole fisse la controllano</td><td>«riapri la scheda che ho chiuso»</td></tr>
+          <tr><td><b>Corsia locale</b></td><td><span class="tag local">Mac</span></td><td>Il modello Apple propone un'azione da un elenco chiuso; regole fisse e lo stesso cancello dell'agente la controllano</td><td>«riapri la scheda che ho chiuso»</td></tr>
           <tr><td><b>Agente</b></td><td><span class="tag cloud">Cloud</span> o <span class="tag local">Mac</span></td><td>Osserva, agisce, verifica, finché il compito è fatto</td><td>«apri la mail di Laura e segnala come letta»</td></tr>
         </tbody>
       </table>
@@ -392,7 +392,7 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
       <span class="fig-title">Tempo dalla fine della frase all'esito, per corsia</span>
       <div class="legend" aria-hidden="true"><span><i class="round" style="background:var(--series-3)"></i>sul Mac</span><span><i class="round" style="background:var(--series-1)"></i>con il cloud</span></div>
       <div class="fig-frame">
-        <svg viewBox="0 0 760 330" role="img" aria-label="Tempi per corsia su scala logaritmica: comandi rapidi sotto 0,15 secondi, dettatura 0,7, corsia locale 1,2, agente istantaneo 3,7, compito tipico dell'agente 5,5, compito su Gmail 24,7 secondi.">
+        <svg viewBox="0 0 760 330" role="img" aria-label="Tempi per corsia su scala logaritmica: comandi rapidi sotto 0,15 secondi, dettatura 0,7, corsia locale 1,2, agente istantaneo 3,6, compito tipico dell'agente 4,5, compito su Gmail 4,6 secondi.">
           <!-- griglia: x = 220 + (log10(v)+1)/2.477*500 -->
           <line x1="220" y1="20" x2="220" y2="290" class="grid"/>
           <line x1="300" y1="20" x2="300" y2="290" class="grid"/>
@@ -428,38 +428,38 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
             <text x="450" y="132" class="t-sm t-b num">1,2 s</text>
             <rect x="10" y="114" width="740" height="28" class="hit"/>
           </g>
-          <g data-tip="<b>Agente, livello istantaneo</b><br>mediana 3,7 s su 5 compiti a un passo · Claude Haiku 5.5" tabindex="0">
+          <g data-tip="<b>Agente, livello istantaneo</b><br>mediana 3,6 s su 14 compiti · Claude Haiku 5.5 · tre corse del Banco, 29/10" tabindex="0">
             <text x="200" y="177" text-anchor="end" class="t-sm">Agente istantaneo</text>
-            <line x1="220" y1="172" x2="537" y2="172" class="grid"/>
-            <circle cx="537" cy="172" r="6" class="s1"/>
-            <text x="549" y="176" class="t-sm t-b num">3,7 s</text>
+            <line x1="220" y1="172" x2="534" y2="172" class="grid"/>
+            <circle cx="534" cy="172" r="6" class="s1"/>
+            <text x="546" y="176" class="t-sm t-b num">3,6 s</text>
             <rect x="10" y="158" width="740" height="28" class="hit"/>
           </g>
-          <g data-tip="<b>Agente, compito tipico</b><br>mediana 5,5 s sul Banco (era 7,6 s prima dell'Epic 7)" tabindex="0">
+          <g data-tip="<b>Agente, compito tipico</b><br>mediana 4,5 s sul Banco (8,5 s all'inizio del ciclo 3, 7,6 s prima dell'Epic 7)" tabindex="0">
             <text x="200" y="221" text-anchor="end" class="t-sm">Agente, compito tipico</text>
-            <line x1="220" y1="216" x2="572" y2="216" class="grid"/>
-            <circle cx="572" cy="216" r="6" class="s1"/>
-            <text x="584" y="220" class="t-sm t-b num">5,5 s</text>
+            <line x1="220" y1="216" x2="554" y2="216" class="grid"/>
+            <circle cx="554" cy="216" r="6" class="s1"/>
+            <text x="566" y="220" class="t-sm t-b num">4,5 s</text>
             <rect x="10" y="202" width="740" height="28" class="hit"/>
           </g>
-          <g data-tip="<b>Agente su Gmail</b><br>24,7 s · primo token a 12,7 s, scalata dal livello istantaneo" tabindex="0">
+          <g data-tip="<b>Agente su Gmail</b><br>4,6 s · primo token a 1,8 s (era 24,7 s, con il primo token a 12,7 s)" tabindex="0">
             <text x="200" y="265" text-anchor="end" class="t-sm">Agente su Gmail</text>
-            <line x1="220" y1="260" x2="701" y2="260" class="grid"/>
-            <circle cx="701" cy="260" r="6" class="s1"/>
-            <text x="689" y="248" text-anchor="end" class="t-sm t-b num">24,7 s</text>
+            <line x1="220" y1="260" x2="556" y2="260" class="grid"/>
+            <circle cx="556" cy="260" r="6" class="s1"/>
+            <text x="568" y="264" class="t-sm t-b num">4,6 s</text>
             <rect x="10" y="246" width="740" height="28" class="hit"/>
           </g>
         </svg>
       </div>
-      <figcaption><b>Figura 2.</b> Ogni corsia in più costa circa un ordine di grandezza. Le prime tre restano sotto 1,5 s perché non escono dal Mac; il tempo dell'agente è quasi tutto ragionamento del modello. Misure del Banco di prova, 27–28 ottobre 2026.</figcaption>
+      <figcaption><b>Figura 2.</b> Ogni corsia in più costa circa un ordine di grandezza. Le prime tre restano sotto 1,5 s perché non escono dal Mac; il tempo dell'agente è quasi tutto ragionamento del modello. Misure del Banco di prova, 27–29 ottobre 2026; per l'agente, mediana di tre corse complete del 29 ottobre.</figcaption>
       <details class="data"><summary>Dati in tabella</summary>
         <div class="table-wrap"><table><thead><tr><th>Corsia</th><th>Tempo</th><th>Fonte</th></tr></thead><tbody>
           <tr><td>Comandi rapidi</td><td class="n">&lt; 0,15 s</td><td>specifica della grammatica</td></tr>
           <tr><td>Dettatura</td><td class="n">≈ 0,7 s</td><td>classificatore sul Mac</td></tr>
           <tr><td>Corsia locale</td><td class="n">≈ 1,2 s</td><td>proposta + validazione</td></tr>
-          <tr><td>Agente istantaneo</td><td class="n">3,7 s</td><td>mediana, 5 compiti, 28/10</td></tr>
-          <tr><td>Agente, compito tipico</td><td class="n">5,5 s</td><td>mediana del Banco dopo l'Epic 7</td></tr>
-          <tr><td>Agente su Gmail</td><td class="n">24,7 s</td><td>1 compito, account personale, 28/10</td></tr>
+          <tr><td>Agente istantaneo</td><td class="n">3,6 s</td><td>mediana, 14 compiti, tre corse, 29/10</td></tr>
+          <tr><td>Agente, compito tipico</td><td class="n">4,5 s</td><td>mediana del Banco, tre corse, 29/10</td></tr>
+          <tr><td>Agente su Gmail</td><td class="n">4,6 s</td><td>1 compito di osservazione, account personale, tre corse, 29/10</td></tr>
         </tbody></table></div>
       </details>
     </figure>
@@ -561,48 +561,48 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
         <span><i style="background:var(--series-4)"></i>secondo controllo sul Mac</span>
       </div>
       <div class="fig-frame">
-        <svg viewBox="0 0 760 150" role="img" aria-label="Somma delle mediane delle fasi, 4,5 secondi: lettura e collegamento 0,10 s, ragionamento del modello 2,76 s, azioni sullo schermo 0,74 s, secondo controllo 0,90 s.">
-          <!-- scala: 0..4.5 s su 20..740 → 160 px/s -->
+        <svg viewBox="0 0 760 150" role="img" aria-label="Somma delle mediane delle fasi, 4,7 secondi: lettura e collegamento 0,12 s, ragionamento del modello 2,26 s, azioni sullo schermo 1,47 s, secondo controllo 0,81 s.">
+          <!-- scala: 0..4.8 s su 20..740 → 150 px/s -->
           <line x1="20" y1="80" x2="740" y2="80" class="axis"/>
           <text x="20" y="100" class="t-xs">0 s</text>
-          <text x="180" y="100" text-anchor="middle" class="t-xs">1 s</text>
-          <text x="340" y="100" text-anchor="middle" class="t-xs">2 s</text>
-          <text x="500" y="100" text-anchor="middle" class="t-xs">3 s</text>
-          <text x="660" y="100" text-anchor="middle" class="t-xs">4 s</text>
-          <line x1="180" y1="76" x2="180" y2="84" class="axis"/><line x1="340" y1="76" x2="340" y2="84" class="axis"/><line x1="500" y1="76" x2="500" y2="84" class="axis"/><line x1="660" y1="76" x2="660" y2="84" class="axis"/>
-          <g data-tip="<b>Lettura e collegamento</b><br>0,10 s · scansione della finestra 0,03 s + server MCP 0,07 s" tabindex="0">
-            <rect x="20" y="30" width="16" height="40" rx="3" class="s1"/>
-            <rect x="20" y="30" width="16" height="40" class="hit"/>
+          <text x="170" y="100" text-anchor="middle" class="t-xs">1 s</text>
+          <text x="320" y="100" text-anchor="middle" class="t-xs">2 s</text>
+          <text x="470" y="100" text-anchor="middle" class="t-xs">3 s</text>
+          <text x="620" y="100" text-anchor="middle" class="t-xs">4 s</text>
+          <line x1="170" y1="76" x2="170" y2="84" class="axis"/><line x1="320" y1="76" x2="320" y2="84" class="axis"/><line x1="470" y1="76" x2="470" y2="84" class="axis"/><line x1="620" y1="76" x2="620" y2="84" class="axis"/>
+          <g data-tip="<b>Lettura e collegamento</b><br>0,12 s · scansione della finestra 0,04 s + server MCP 0,08 s, con la sessione pronta" tabindex="0">
+            <rect x="20" y="30" width="18" height="40" rx="3" class="s1"/>
+            <rect x="20" y="30" width="18" height="40" class="hit"/>
           </g>
-          <g data-tip="<b>Ragionamento del modello</b><br>2,76 s · primo token 0,88 + tra uno strumento e l'altro 0,91 + turno finale 0,97" tabindex="0">
-            <rect x="38" y="30" width="440" height="40" rx="3" class="s2"/>
-            <rect x="38" y="30" width="440" height="40" class="hit"/>
-            <text x="258" y="55" text-anchor="middle" class="t-sm t-b" style="fill:#ffffff">2,76 s</text>
+          <g data-tip="<b>Ragionamento del modello</b><br>2,26 s · primo token 1,13 + tra uno strumento e l'altro 1,12 + turno finale 0,01 (risposta scritta dall'app)" tabindex="0">
+            <rect x="40" y="30" width="339" height="40" rx="3" class="s2"/>
+            <rect x="40" y="30" width="339" height="40" class="hit"/>
+            <text x="209" y="55" text-anchor="middle" class="t-sm t-b" style="fill:#ffffff">2,26 s</text>
           </g>
-          <g data-tip="<b>Azioni sullo schermo</b><br>0,74 s · clic, scrittura e attesa che l'interfaccia si fermi" tabindex="0">
-            <rect x="480" y="30" width="117" height="40" rx="3" class="s3"/>
-            <rect x="480" y="30" width="117" height="40" class="hit"/>
-            <text x="538" y="55" text-anchor="middle" class="t-sm t-b" style="fill:#06281a">0,74 s</text>
+          <g data-tip="<b>Azioni sullo schermo</b><br>1,47 s · clic, scrittura e attesa che l'interfaccia si fermi" tabindex="0">
+            <rect x="381" y="30" width="221" height="40" rx="3" class="s3"/>
+            <rect x="381" y="30" width="221" height="40" class="hit"/>
+            <text x="491" y="55" text-anchor="middle" class="t-sm t-b" style="fill:#06281a">1,47 s</text>
           </g>
-          <g data-tip="<b>Secondo controllo sul Mac</b><br>0,90 s · giudizio del modello Apple sui pulsanti non riconosciuti" tabindex="0">
-            <rect x="599" y="30" width="142" height="40" rx="3" class="s4"/>
-            <rect x="599" y="30" width="142" height="40" class="hit"/>
-            <text x="670" y="55" text-anchor="middle" class="t-sm t-b" style="fill:#1a1300">0,90 s</text>
+          <g data-tip="<b>Secondo controllo sul Mac</b><br>0,81 s per pulsante giudicato · 0 s quando il verdetto è già pronto" tabindex="0">
+            <rect x="604" y="30" width="122" height="40" rx="3" class="s4"/>
+            <rect x="604" y="30" width="122" height="40" class="hit"/>
+            <text x="665" y="55" text-anchor="middle" class="t-sm t-b" style="fill:#1a1300">0,81 s</text>
           </g>
-          <text x="20" y="22" class="t-xs">0,10 s</text>
-          <text x="20" y="132" class="t-xs">Somma delle mediane delle fasi: 4,5 s. 8 compiti positivi del Banco con Claude e secondo controllo acceso, 28 ottobre 2026.</text>
+          <text x="20" y="22" class="t-xs">0,12 s</text>
+          <text x="20" y="132" class="t-xs">Somma delle mediane delle fasi: 4,7 s. Mediane di tre corse complete del Banco con Claude, 29 ottobre 2026.</text>
         </svg>
       </div>
-      <figcaption><b>Figura 4.</b> Più della metà del tempo è ragionamento del modello: le ottimizzazioni dell'app (sessione lunga, osservazione a costo fisso) hanno già portato lettura e collegamento a 0,1 s. Il secondo controllo sul Mac costa fino a 0,9 s solo sui pulsanti mai visti; dopo il primo giudizio la cache lo rende immediato.</figcaption>
+      <figcaption><b>Figura 4.</b> Il ragionamento del modello resta la parte più grande, ma il turno finale è sparito: quando l'ultima azione prova da sola il risultato, risponde l'app (da 0,97 s a 0,01 s). Con la sessione pronta all'ascolto lettura e collegamento costano 0,12 s. Il secondo controllo sul Mac costa circa 0,8 s solo sui pulsanti mai visti; quelli già giudicati, anche in anticipo, sono immediati.</figcaption>
       <details class="data"><summary>Dati in tabella</summary>
         <div class="table-wrap"><table><thead><tr><th>Fase</th><th>Mediana</th></tr></thead><tbody>
-          <tr><td>Scansione della finestra</td><td class="n">0,03 s</td></tr>
-          <tr><td>Collegamento al server MCP</td><td class="n">0,07 s</td></tr>
-          <tr><td>Primo token del modello</td><td class="n">0,88 s</td></tr>
-          <tr><td>Ragionamento tra due strumenti</td><td class="n">0,91 s</td></tr>
-          <tr><td>Turno finale</td><td class="n">0,97 s</td></tr>
-          <tr><td>Azioni sullo schermo</td><td class="n">0,74 s</td></tr>
-          <tr><td>Secondo controllo</td><td class="n">0,90 s</td></tr>
+          <tr><td>Scansione della finestra</td><td class="n">0,04 s</td></tr>
+          <tr><td>Collegamento al server MCP</td><td class="n">0,08 s</td></tr>
+          <tr><td>Primo token del modello</td><td class="n">1,13 s</td></tr>
+          <tr><td>Ragionamento tra due strumenti</td><td class="n">1,12 s</td></tr>
+          <tr><td>Turno finale</td><td class="n">0,01 s</td></tr>
+          <tr><td>Azioni sullo schermo</td><td class="n">1,47 s</td></tr>
+          <tr><td>Secondo controllo, per pulsante giudicato</td><td class="n">0,81 s</td></tr>
         </tbody></table></div>
       </details>
     </figure>
@@ -680,7 +680,7 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
             <line x1="480" y1="385" x2="586" y2="385" class="edge" marker-end="url(#c1)"/><text x="533" y="377" text-anchor="middle" class="t-xs">sì</text>
             <rect x="590" y="363" width="270" height="44" rx="8" class="box-accent"/>
             <text x="725" y="383" text-anchor="middle" class="t-sm t-b">Domanda</text>
-            <text x="725" y="399" text-anchor="middle" class="t-xs">entro 0,9 s; timeout = nessun effetto</text>
+            <text x="725" y="399" text-anchor="middle" class="t-xs">entro 1,2 s; timeout = nessun effetto</text>
           </g>
           <line x1="270" y1="414" x2="270" y2="442" class="edge" marker-end="url(#c1)"/><text x="282" y="433" class="t-xs">no</text>
           <g>
@@ -735,32 +735,32 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
     </div>
 
     <figure>
-      <span class="fig-title">Blocchi attesi messi alla prova, per motore (su 8)</span>
+      <span class="fig-title">Blocchi attesi messi alla prova, per motore (su 12)</span>
       <div class="fig-frame narrow">
-        <svg viewBox="0 0 760 170" role="img" aria-label="Blocchi messi alla prova su 8: Claude 8, Codex 8, modello locale 5. Azioni eseguite senza conferma: zero per tutti e tre.">
-          <!-- x = 160 + v/8*480 -->
+        <svg viewBox="0 0 760 170" role="img" aria-label="Blocchi messi alla prova su 12: Claude 12, Codex 11, modello locale 9. Azioni eseguite senza conferma: zero per tutti e tre.">
+          <!-- x = 160 + v/12*480 -->
           <line x1="160" y1="16" x2="160" y2="132" class="axis"/>
           <line x1="280" y1="16" x2="280" y2="132" class="grid"/><line x1="400" y1="16" x2="400" y2="132" class="grid"/><line x1="520" y1="16" x2="520" y2="132" class="grid"/><line x1="640" y1="16" x2="640" y2="132" class="grid"/>
-          <text x="160" y="150" text-anchor="middle" class="t-xs">0</text><text x="280" y="150" text-anchor="middle" class="t-xs">2</text><text x="400" y="150" text-anchor="middle" class="t-xs">4</text><text x="520" y="150" text-anchor="middle" class="t-xs">6</text><text x="640" y="150" text-anchor="middle" class="t-xs">8</text>
+          <text x="160" y="150" text-anchor="middle" class="t-xs">0</text><text x="280" y="150" text-anchor="middle" class="t-xs">3</text><text x="400" y="150" text-anchor="middle" class="t-xs">6</text><text x="520" y="150" text-anchor="middle" class="t-xs">9</text><text x="640" y="150" text-anchor="middle" class="t-xs">12</text>
           <text x="740" y="150" text-anchor="end" class="t-xs">non confermate</text>
-          <g data-tip="<b>Claude</b><br>8 blocchi su 8 messi alla prova · 10/10 scenari · 0 azioni non confermate" tabindex="0">
+          <g data-tip="<b>Claude</b><br>12 blocchi su 12 messi alla prova · 15/15 scenari · 0 azioni non confermate · uguale con il secondo controllo spento" tabindex="0">
             <text x="145" y="40" text-anchor="end" class="t-sm">Claude</text>
             <path d="M160,24 H636 a4,4 0 0 1 4,4 V48 a4,4 0 0 1 -4,4 H160 z" class="s1"/>
-            <text x="628" y="43" text-anchor="end" class="t-sm t-b" style="fill:#ffffff">8/8</text>
+            <text x="628" y="43" text-anchor="end" class="t-sm t-b" style="fill:#ffffff">12/12</text>
             <text x="740" y="43" text-anchor="end" class="t-sm t-b num">0</text>
             <rect x="10" y="20" width="740" height="36" class="hit"/>
           </g>
-          <g data-tip="<b>Codex</b><br>8 blocchi su 8 messi alla prova · 10/10 scenari · 0 azioni non confermate" tabindex="0">
+          <g data-tip="<b>Codex</b><br>11 blocchi su 12 messi alla prova (non tenta ⌘ Invio) · 15/15 scenari · 0 azioni non confermate" tabindex="0">
             <text x="145" y="78" text-anchor="end" class="t-sm">Codex</text>
-            <path d="M160,62 H636 a4,4 0 0 1 4,4 V86 a4,4 0 0 1 -4,4 H160 z" class="s1"/>
-            <text x="628" y="81" text-anchor="end" class="t-sm t-b" style="fill:#ffffff">8/8</text>
+            <path d="M160,62 H596 a4,4 0 0 1 4,4 V86 a4,4 0 0 1 -4,4 H160 z" class="s1"/>
+            <text x="588" y="81" text-anchor="end" class="t-sm t-b" style="fill:#ffffff">11/12</text>
             <text x="740" y="81" text-anchor="end" class="t-sm t-b num">0</text>
             <rect x="10" y="58" width="740" height="36" class="hit"/>
           </g>
-          <g data-tip="<b>Modello locale</b><br>5 blocchi su 8: non tenta l'invio in chat, l'eliminazione in serie e la spunta · 0 azioni non confermate" tabindex="0">
+          <g data-tip="<b>Modello locale</b><br>9 blocchi su 12: non tenta l'invio in chat, l'eliminazione in serie e la spunta · 15/15 scenari · 0 azioni non confermate" tabindex="0">
             <text x="145" y="116" text-anchor="end" class="t-sm">Modello locale</text>
-            <path d="M160,100 H456 a4,4 0 0 1 4,4 V124 a4,4 0 0 1 -4,4 H160 z" class="s1"/>
-            <text x="448" y="119" text-anchor="end" class="t-sm t-b" style="fill:#ffffff">5/8</text>
+            <path d="M160,100 H516 a4,4 0 0 1 4,4 V124 a4,4 0 0 1 -4,4 H160 z" class="s1"/>
+            <text x="508" y="119" text-anchor="end" class="t-sm t-b" style="fill:#ffffff">9/12</text>
             <text x="740" y="119" text-anchor="end" class="t-sm t-b num">0</text>
             <rect x="10" y="96" width="740" height="36" class="hit"/>
           </g>
@@ -869,11 +869,11 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
       <table>
         <thead><tr><th>Limite</th><th>Effetto</th><th>Stato</th></tr></thead>
         <tbody>
-          <tr><td>Tempo dell'agente</td><td>5–30 s per compito; sulle webmail il primo token può arrivare dopo 12 s</td><td>Soglie di velocità NFR-12 non ancora raggiunte</td></tr>
-          <tr><td>Secondo controllo sotto carico</td><td>Fino a 1,2 s sui pulsanti mai visti (di solito 0,75 s); i pulsanti già giudicati sono immediati</td><td>Accettato (SM-C7 a 1,2 s)</td></tr>
-          <tr><td>Corsia locale</td><td>Non passa ancora dai livelli di accesso e dal secondo controllo</td><td>Storia del prossimo ciclo: gate unico</td></tr>
-          <tr><td>Senza Apple Intelligence</td><td>Il Router usa regole prudenti e chiede più spesso «scrivilo»</td><td>Comportamento previsto</td></tr>
-          <tr><td>Ricerca in Mail via Apple Events</td><td>3,4 s su una casella da 45.915 messaggi</td><td>Solo spike, non è uno strumento</td></tr>
+          <tr><td>Tempo dell'agente</td><td>Compito tipico 4,5 s (era 8,5 s a inizio ciclo); primo strumento 2,3 s e livello istantaneo 3,6 s; sulle webmail il primo token arriva in 1,8 s</td><td>NFR-12: rispettate prima risposta e webmail; compito al limite di 4,5 s; primo strumento (2,0 s) e istantaneo (2,5 s) ancora sopra</td></tr>
+          <tr><td>Secondo controllo sotto carico</td><td>Circa 0,8 s sui pulsanti mai visti, al massimo 1,2 s; i pulsanti già giudicati, anche in anticipo, sono immediati. Circa un timeout per corsa del Banco</td><td>SM-C7 a 1,2 s; NFR-16 rivista non ancora rispettata (un timeout per corsa)</td></tr>
+          <tr><td>Clic sul bersaglio sbagliato</td><td>Il livello istantaneo a volte clicca l'elemento vicino a quello giusto. L'app risponde da sola solo se l'esito nomina la richiesta, altrimenti risponde il modello e corregge</td><td>Ridotto; resta il caso con parole in comune, come due mail dello stesso mittente</td></tr>
+          <tr><td>Senza Apple Intelligence</td><td>Il Router usa regole prudenti e chiede più spesso «scrivilo» (0 volte nel log d'uso del 28–29 ottobre, con Apple Intelligence attiva)</td><td>Comportamento previsto</td></tr>
+          <tr><td>Ricerca in Mail via Apple Events</td><td>0,6 s di mediana (al massimo 1,9 s) sulla posta in arrivo degli ultimi 30 giorni; 3,4 s su tutta la casella</td><td>Spike; se diventa uno strumento si decide nel prossimo ciclo (AD-20)</td></tr>
         </tbody>
       </table>
     </div>
@@ -883,7 +883,7 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
 </div>
 
 <footer>
-  <div class="page">Documento generato dal codice e dalle misure del 27–28 ottobre 2026: <code>--agent-bench</code>, <code>--security-suite</code>, <code>--security-coverage</code>, <code>--risk-classifier-test</code>, <code>--route-test</code>. Dettagli nella ricerca <code>technical-agente-precisione-velocita-e-strumenti-2026-10-27</code>, §13–§27.</div>
+  <div class="page">Documento generato dal codice e dalle misure del 27–29 ottobre 2026: <code>--agent-bench</code>, <code>--security-suite</code>, <code>--security-coverage</code>, <code>--risk-classifier-test</code>, <code>--route-test</code>. Dettagli nella ricerca <code>technical-agente-precisione-velocita-e-strumenti-2026-10-27</code>, §13–§39.</div>
 </footer>
 
 <div id="tip" hidden></div>

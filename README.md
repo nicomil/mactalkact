@@ -75,6 +75,8 @@ La guida completa è nel menu › Guida ai comandi.
 
 - Le azioni difficili da annullare (inviare, eliminare, comprare, chiudere un'app) chiedono **sempre conferma**: rispondi «sì», qualsiasi altra risposta annulla.
 - Il testo letto dallo schermo viene passato a Claude come dato e mai come istruzione, per difendersi da email o pagine che cercano di dare ordini all'agente.
+- **Livelli di accesso per app.** Ogni app può essere «normale», «conferma ogni azione» (l'agente chiede prima di ogni azione) o «solo clic» (l'agente può solo cliccare e scorrere, e a Claude e Codex mostra solo i controlli, mai il testo). I terminali (Terminal, iTerm, Warp, Ghostty, kitty, Alacritty, cmux) e i gestori di password sono «solo clic»; Impostazioni di Sistema, Script Editor e Automator chiedono ogni azione. Si sceglie in Impostazioni › Privacy › «App», un elenco delle app installate con un menu per ognuna, come nelle Impostazioni del Mac. Vale per l'agente e per la Corsia locale.
+- **Secondo controllo.** Dove le regole fisse non riconoscono il pulsante, il modello Apple sul Mac giudica se un clic manda, pubblica, paga, elimina o disiscrive, e in quel caso chiede conferma. Non toglie mai una domanda. Costa di solito 0,75 s (al massimo 1,2 s) sui pulsanti mai visti, e mentre il modello cloud ragiona l'app giudica in anticipo i pulsanti della finestra. Le cartelle di posta e i pulsanti che aprono solo una bozza non vengono giudicati.
 - La chiave API sta nel Portachiavi. La trascrizione audio non lascia il Mac.
 
 ### Privacy
@@ -91,7 +93,7 @@ Log e memoria sono leggibili solo dal tuo utente. La memoria della conversazione
 
 **Cosa va a Claude e Codex.** Solo durante un compito dell'agente: la richiesta, la descrizione della finestra in primo piano ed eventuali screenshot. Prima dell'invio, numeri di carta, IBAN, codici fiscali e codici segreti letti dallo schermo diventano `[carta]`, `[IBAN]`, `[codice fiscale]`, `[segreto]`. Email e telefoni restano, perché servono per scrivere a qualcuno. I campi password non vengono mai letti.
 
-**App e siti riservati.** Gestori di password (Password, Portachiavi, 1Password, Bitwarden, KeePassXC), banche, pagamenti e siti della pubblica amministrazione sono riservati: lì Claude e Codex non leggono e non toccano niente. L'agente lavora con il modello sul Mac oppure si ferma. Se un compito arriva su una finestra riservata a metà strada, il motore cloud viene fermato. Gli elenchi si modificano in Impostazioni › Privacy.
+**App e siti riservati.** Gestori di password (Password, Portachiavi, 1Password, Bitwarden, KeePassXC), banche, pagamenti e siti della pubblica amministrazione sono riservati: lì Claude e Codex non leggono e non toccano niente. L'agente lavora con il modello sul Mac oppure si ferma. Se un compito arriva su una finestra riservata a metà strada, il motore cloud viene fermato. Le app riservate si scelgono con l'interruttore «Riservata» nel riquadro «App» di Impostazioni › Privacy; app e siti si possono anche scrivere come testo, una voce per riga.
 
 **Modalità privata.** «Modalità privata» (o dal menu ✋) attiva per 30 minuti: niente Claude né Codex, niente testo delle frasi nel log, niente memoria (né fatti né conversazione). «Esci dalla modalità privata» la chiude prima. Mentre è attiva, l'icona nella barra dei menu diventa un lucchetto.
 

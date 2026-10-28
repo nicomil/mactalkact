@@ -7,7 +7,7 @@
 # Stati: backlog · ready-for-dev · in-progress · review · done
 
 generated: 10-26-2026 23:10
-last_updated: 10-28-2026 21:30
+last_updated: 10-29-2026 00:58
 project: mactalkact
 project_key: NOKEY
 tracking_system: file-system
@@ -102,7 +102,7 @@ development_status:
   11-3-scalata-sotto-il-secondo: review
   11-4-risposta-scritta-dall-app: review
   11-5-spike-ricerca-in-mail-sotto-il-secondo: review
-  11-6-misura-finale-del-ciclo-3: backlog
+  11-6-misura-finale-del-ciclo-3: review
   11-7-pannello-delle-app-nelle-impostazioni: review
   epic-11-retrospective: optional
 action_items: []

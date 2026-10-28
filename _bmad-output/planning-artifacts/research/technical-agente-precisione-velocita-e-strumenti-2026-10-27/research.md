@@ -1103,3 +1103,41 @@ Cosa dice:
 `webmail-inviata` ha mostrato due cose:
 - **Falso allarme del secondo strato.** Nella prima corsa il clic su «[Gmail]/Posta inviata» è stato giudicato un «invio» (per la parola «inviata»), con una domanda a cui il Banco risponde «no». Allungare l'istruzione del classificatore con le cartelle di posta lo correggeva, ma rendeva il modello più lento (da 1 a 3 timeout in tre corse con il budget di 1,2 s). Si è scelta invece la stessa via dei pulsanti che aprono una bozza: le cartelle di posta («Posta inviata», «Bozze», «Sent», «Drafts», «Spam»… come etichetta intera) non passano dal secondo strato (`AgentTools.opensMailFolder`). I pulsanti «Invia» o «Cestino» restano giudicati. `--risk-classifier-test` torna a 10/10 e 0/7 (mediana 0,73 s), e `--security-coverage` resta 47/47.
 - **Ambiguità dell'account.** Nella seconda corsa il clic passa senza domanda, ma il modello apre l'etichetta importata «[Gmail]/Posta inviata» (`#label/…`) invece della cartella di sistema (`#sent`), che il Banco si aspetta. Su questo account le due cartelle hanno lo stesso nome. Non è un errore dell'app; con una webmail di prova (non personale) il compito andrebbe rifatto.
+
+## 39. Misura finale del ciclo 3 (Storia 11.6, 29 ottobre 2026, 00:15–00:42)
+
+**Come.** Tre corse complete del Banco con Claude, tutto acceso: 38 compiti, cioè pagine, canvas, Finder, Calendario, Mail, Gmail (account personale, solo compiti di osservazione, quindi `webmail-cerca` saltato) e Frasi spurie. Poi la suite di sicurezza con Claude, Codex e il Motore locale, e un `--hands-test`. Il Mac era libero. Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-29-0022-claude.tsv`, `…-0029-…` e `…-0036-…`.
+
+**Soglie di NFR-12 rivista: riga di base (§28) e fine ciclo.**
+
+| Soglia | Riga di base (28/10, 12:40) | Corsa 1 | Corsa 2 | Corsa 3 | Mediana delle tre | Esito |
+| --- | --- | --- | --- | --- | --- | --- |
+| primo strumento ≤ 2,0 s | 3,6 s | 2,48 s | 2,28 s | 2,19 s | 2,28 s | **non rispettata** |
+| compito ≤ 4,5 s | 8,5 s | 4,52 s | 4,63 s | 4,53 s | 4,53 s | **al limite, non rispettata** |
+| Livello istantaneo ≤ 2,5 s | 6,7 s | 3,60 s | 3,56 s | 3,30 s | 3,56 s | **non rispettata** |
+| prima risposta visibile ≤ 0,5 s | 0,01 s (90° 1,6 s) | 0,01 s | 0,02 s | 0,01 s | 0,01 s | rispettata |
+| primo token sulla webmail ≤ 4 s | non misurata | 1,86 s | 1,53 s | 1,82 s | 1,82 s | rispettata |
+| NFR-16 rivista (zero timeout, 90° ≤ 1,0 s) | — | 1 timeout, 1,01 s | 1 timeout, 0,90 s | 1 timeout, 1,13 s | — | **non rispettata** |
+
+| Altre misure | Corsa 1 | Corsa 2 | Corsa 3 |
+| --- | --- | --- | --- |
+| riusciti | 34/38 | 37/38 | 34/38 |
+| risposte composte dall'app | 25/33 | 25/33 | 24/33 |
+| sessione + mcp, mediana | 0,10 s | 0,08 s | 0,07 s |
+| scalate, costo mediano | 3 · 2,98 s | 3 · 5,19 s | 2 · 5,59 s |
+| verdetti in anticipo / clic dalla cache anticipata | 131 / 4 | 159 / 4 | 128 / 3 |
+
+**Suite di sicurezza (NFR-17).** Claude: 15/15 scenari, 12/12 blocchi. Motore locale: 15/15, 9/12 blocchi (non tenta l'invio in chat, l'eliminazione in serie e la spunta). Codex: non provato, perché il limite d'uso era raggiunto fino alle 01:55; l'ultima corsa valida è delle 20:55 del 28/10 (§30), con 15/15 e 11/12. `--hands-test` è verde.
+
+**«scrivilo» senza Apple Intelligence.** Nel log d'uso disponibile (28 e 29 ottobre) il Router non ha mai chiesto «scrivilo». Su questo Mac Apple Intelligence è attiva, quindi il conteggio non dice niente sul caso senza.
+
+**I fallimenti.**
+- **Clic sul bersaglio sbagliato, chiuso dall'app.** In `sito-contatti` (corsa 1) il Livello istantaneo ha cliccato «Chi siamo» invece di «Contatti», con `final`. In `posta-apri` (corsa 3) ha cliccato un'altra mail di Marco Rossi. L'esito mostrava una pagina cambiata, quindi l'app ha risposto «Fatto» e ha chiuso il turno. Senza risposta dall'app il modello avrebbe visto l'errore. Correzione (commit 254df6a): l'app risponde da sola solo se l'esito ha almeno una parola della richiesta. Le parole fisse delle sue frasi («cliccato», «finestra»…) non contano, e le desinenze sì (`invia` e `inviata` sono la stessa parola). «Apri i contatti» → «Chi siamo» ora lascia rispondere il modello. Il caso di Marco Rossi resta scoperto, perché il nome è nella richiesta e nell'etichetta sbagliata. `--selftest`, `--fallback-test`, `--route-test` (164/164) e `--security-coverage` (47/47) sono verdi. Il Banco di verifica sullo schermo è stato interrotto dopo tre compiti (Nico al Mac) e va rifatto.
+- **`calendario-evento` (corse 1 e 3).** Il modello dice di aver creato l'evento ma il Banco non lo trova; alle 00:04 (§38) era passato. Probabilmente il controllo legge EventKit prima che il Calendario salvi. Il Banco ora rilegge fino a 4 s con `store.reset()`. Da confermare con il Banco di verifica.
+- **`modulo-citta` e `menu-accessori`.** Sono errori del modello, che però risponde in modo onesto: preme Invio e invia il modulo, oppure apre solo il menu. Il Banco li conta come falsi «fatto» perché la risposta inizia come un successo («Ho scelto Torino, ma…»).
+- **`webmail-inviata`.** È l'ambiguità dell'account vista al §38 (due cartelle «Posta inviata»).
+
+**Cosa dice.**
+1. **Il ciclo ha quasi dimezzato il tempo dell'agente:** il compito passa da 8,5 s a 4,5 s, il primo strumento da 3,6 s a 2,3 s, l'istantaneo da 6,7 s a 3,6 s, e la webmail da 12,7 s di primo token a 1,8 s. Restano sopra le soglie il primo strumento e l'istantaneo, entrambi limitati dal primo token del modello (circa 1,1 s) più la prima azione. Il compito sta sulla soglia.
+2. **La risposta scritta dall'app è la leva più grande (−1,9 s sul turno finale), ma ha un costo di precisione:** chiude il turno anche quando il modello ha sbagliato bersaglio. La correzione con le parole della richiesta riduce il rischio senza toglierlo.
+3. **Il secondo strato è stabile ma non a zero timeout:** un timeout per corsa su circa 18 giudizi. NFR-16 rivista resta aperta.
