@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco contenitore</title>
+<style>body{font:15px -apple-system;margin:24px}.btn{display:inline-block;border:1px solid #888;padding:8px 14px;cursor:pointer}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Risposta veloce</h1>
+<p><textarea aria-label="Testo">Va bene, a domani.</textarea></p>
+<!-- Un div cliccabile con un nome e un'icona dentro: cliccare l'icona preme il div. -->
+<div class="btn" tabindex="0" aria-label="Invia" onclick="inviata = true; aggiorna()"><span>➤</span></div>
+<script>
+let inviata = false;
+function aggiorna() { banco("contenitore", ["inviata=" + (inviata ? "sì" : "no")]); }
+aggiorna();
+</script>
+</body></html>

@@ -323,6 +323,7 @@ final class AgentRunner {
         defer {
             running = false
             tools.onCall = nil
+            tools.onClassified = nil
             tools.instantGuard = false
             tools.onEscalate = nil
             tools.onQuestion = nil

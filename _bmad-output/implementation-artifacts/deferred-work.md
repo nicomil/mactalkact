@@ -37,3 +37,10 @@
 - `isRiskyLabel(request)` nel filtro preliminare del Motore locale ora vale anche per «prenota», «disconnetti»: il gate resta, ma il filtro si allenta.
 - Suite con Codex da rifare dopo il limite d'uso del 28/10.
 - `--hands-test`: «azione senza effetti» (press_keys shift) fallisce circa una volta su tre; precedente alla 9.4.
+
+## Dalla review della Storia 9.5 (28/10/2026)
+
+- Decisione di Nico: SM-C7 non rispettato (circa 0,9 s per clic su pulsanti non rischiosi, un timeout su tre sotto carico). Opzioni: budget più alto, secondo strato spento per default, o accettare il costo.
+- Secondo strato e clic per coordinate: il punto può cambiare durante il giudizio; le regole fisse ricontrollano al clic.
+- FoundationModels dentro l'app (LSUIElement, in background mentre l'agente lavora): rate limit e concorrenza col Motore locale da misurare nell'app vera.
+- La Corsia locale non passa dal secondo strato (manca `ActionOrigin`).

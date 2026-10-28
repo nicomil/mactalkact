@@ -9,15 +9,19 @@ struct RiskAction: Hashable, Sendable {
     let role: String
     let app: String
     let window: String
+    /// The text of a sheet or dialog in front («Eliminare definitivamente 12 elementi?»), or "".
+    var dialog: String = ""
+    /// Kept for the log only: the verdict is about the effect of the action, not the user's intent,
+    /// so the same action gets the same verdict in every request (and the cache can last).
     let request: String
 
-    var cacheKey: String { "\(tool)|\(label)|\(role)|\(app)|\(window)" }
+    var cacheKey: String { "\(tool)|\(label)|\(role)|\(app)|\(window)|\(dialog)" }
 }
 
 /// The verdict of the second layer. `external` adds a confirmation; nothing else ever changes.
 struct RiskVerdict: Sendable, Equatable {
     let external: Bool
-    /// «on-device», «timeout», «non disponibile», «risposta non valida», «prova».
+    /// «on-device: <categoria>», «timeout», «errore», «non disponibile», «risposta non valida», «prova».
     let source: String
     let seconds: Double
 }
@@ -64,7 +68,8 @@ final class OnDeviceRiskClassifier {
     }
 
     static func prompt(_ a: RiskAction) -> String {
-        "\(a.tool) «\(a.label.prefix(80))» in \(a.app), finestra «\(a.window.prefix(80))»"
+        "\(a.tool) «\(a.label.prefix(80))»\(a.role.isEmpty ? "" : " (\(a.role))") in \(a.app), finestra «\(a.window.prefix(80))»"
+            + (a.dialog.isEmpty ? "" : ", dialogo «\(a.dialog.prefix(120))»")
     }
 
     func judge(_ action: RiskAction) async -> RiskVerdict {
@@ -78,25 +83,46 @@ final class OnDeviceRiskClassifier {
         let session = ready ?? LanguageModelSession(instructions: Self.instructions)
         ready = nil
         let prompt = Self.prompt(action)
-        let limit = budget
-        let answer: String? = await withTaskGroup(of: String?.self) { group in
-            group.addTask { @MainActor in
-                (try? await session.respond(to: prompt, generating: OnDeviceRiskJudgement.self))?.content.effetto
+        enum Outcome: Sendable { case answer(String), failed, late }
+        // A real deadline: the answer and the clock race, and whoever comes second is ignored. A
+        // task group would wait for the model to stop even after `cancelAll()`.
+        let outcome: Outcome = await withCheckedContinuation { (done: CheckedContinuation<Outcome, Never>) in
+            let once = OnceFlag()
+            let work = Task { @MainActor in
+                do {
+                    let r = try await session.respond(to: prompt, generating: OnDeviceRiskJudgement.self,
+                                                      options: GenerationOptions(samplingMode: .greedy))
+                    if once.claim() { done.resume(returning: .answer(r.content.effetto)) }
+                } catch {
+                    if once.claim() { done.resume(returning: .failed) }
+                }
             }
-            group.addTask {
+            let limit = budget
+            Task {
                 try? await Task.sleep(for: limit)
-                return nil
+                if once.claim() { work.cancel(); done.resume(returning: .late) }
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
         }
         prewarm()
-        guard let answer else { return RiskVerdict(external: false, source: "timeout", seconds: seconds()) }
+        let answer: String
+        switch outcome {
+        case .late: return RiskVerdict(external: false, source: "timeout", seconds: seconds())
+        // Guardrails, rate limit, assets: logged as such, not as a timeout. Still no question added:
+        // the fixed rules stay, and failing closed would ask before every click.
+        case .failed: return RiskVerdict(external: false, source: "errore", seconds: seconds())
+        case .answer(let a): answer = a
+        }
         let categories = ["invio", "pubblicazione", "pagamento", "eliminazione", "disiscrizione"]
         guard answer == "nessun effetto fuori" || categories.contains(answer) else {
             return RiskVerdict(external: false, source: "risposta non valida", seconds: seconds())
         }
         return RiskVerdict(external: categories.contains(answer), source: "on-device: \(answer)", seconds: seconds())
     }
+}
+
+/// True once: the first of two racing tasks wins.
+final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var taken = false
+    func claim() -> Bool { lock.withLock { if taken { return false }; taken = true; return true } }
 }

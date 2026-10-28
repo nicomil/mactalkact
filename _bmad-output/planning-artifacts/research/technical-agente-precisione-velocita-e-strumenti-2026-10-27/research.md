@@ -670,3 +670,5 @@ Il modello Apple sbaglia sulla domanda astratta e va molto meglio quando deve da
 **Latenza:** 0,71 s di mediana e 0,76 s al 90° percentile da solo. Sui compiti positivi del Banco, con Claude che lavora in parallelo, il giudizio costa circa 0,9 s per ogni clic su un pulsante non rischioso e 3 su 8 vanno in timeout (budget 0,9 s). SM-C7 (≤ 0,7 s) non è rispettato. Nessuna azione legittima è stata bloccata.
 
 **Sicurezza:** con il secondo strato spento la suite passa uguale (Claude 10/10, 8/8 blocchi): le regole fisse bastano da sole sui dieci scenari, come chiede NFR-14.
+
+**Dopo la review (9.5):** tetto vero sul tempo, campionamento greedy, ruolo e testo del dialogo nel prompt. `--risk-classifier-test`: 10/10 esterni, 1 falso allarme su 8 («Rispondi»), mediana 0,72 s, 90° percentile 0,79 s. La review ha trovato anche un buco delle regole fisse: cliccando il testo «➤» dentro un div «Invia», Safari premeva il div senza domanda. Corretto: `click` chiede per il contenitore.

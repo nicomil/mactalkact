@@ -499,8 +499,12 @@ final class PhaseTimer: @unchecked Sendable {
         lock.withLock {
             guard finished == nil, seconds > 0 else { return }
             let d = Duration.milliseconds(Int64(seconds * 1000))
-            segments.append((phase, d))
-            since = since + d
+            // Parallel tool calls: never carve more than the current phase has had.
+            let room = clock.now - since
+            let cut = min(d, room)
+            guard cut > .zero else { return }
+            segments.append((phase, cut))
+            since = since + cut
         }
     }
 

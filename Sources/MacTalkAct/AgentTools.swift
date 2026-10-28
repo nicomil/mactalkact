@@ -375,25 +375,29 @@ final class AgentTools {
         }
         // Second layer (Story 9.5, FR-55): where the fixed rules do not ask, the on-device model may
         // add a confirmation. «Conferma ogni azione» already asked for this call.
-        if level.scope != .confirmAll, AppSettings.shared.riskClassifier, let action = riskAction(name, args, app: app) {
-            let verdict: RiskVerdict
-            if let cached = riskCache[action.cacheKey] {
-                verdict = cached
-            } else {
-                verdict = await (riskJudge ?? riskClassifier.judge)(action)
-                // The verdict does not depend on the request: kept across requests, but never a timeout.
-                if verdict.source.hasPrefix("on-device") {
-                    if riskCache.count > 500 { riskCache.removeAll() }
-                    riskCache[action.cacheKey] = verdict
+        if level.scope != .confirmAll, AppSettings.shared.riskClassifier, riskJudge != nil || OnDeviceRiskClassifier.isAvailable {
+            for action in riskActions(name, args, app: app) {
+                let verdict: RiskVerdict
+                if let cached = riskCache[action.cacheKey] {
+                    verdict = cached
+                    Log.debug("Sicurezza: secondo strato · \(name) · \(cached.external ? "esterno" : "interno") · dalla cache")
+                } else {
+                    verdict = await (riskJudge ?? riskClassifier.judge)(action)
+                    // Greedy: the same prompt gives the same verdict, so it is kept across requests (the
+                    // dialog text is in the key). Timeouts and errors are never kept.
+                    if verdict.source.hasPrefix("on-device") {
+                        if riskCache.count > 500 { riskCache.removeAll() }
+                        riskCache[action.cacheKey] = verdict
+                    }
+                    onClassified?(verdict.seconds)
+                    Log.info(String(format: "Sicurezza: secondo strato · %@ «%d caratteri» · %@ · %@ · %.2f s", name, action.label.count,
+                                    verdict.external ? "esterno" : "interno", verdict.source, verdict.seconds))
                 }
-                onClassified?(verdict.seconds)
-                Log.info(String(format: "Sicurezza: secondo strato · %@ «%d caratteri» · %@ · %@ · %.2f s", name, action.label.count,
-                                verdict.external ? "esterno" : "interno", verdict.source, verdict.seconds))
-            }
-            if verdict.external,
-               !(await gate(Self.levelTarget(name, args), label: action.label, verb: Self.riskVerb[name] ?? "faccia",
-                            scenario: "secondo strato")) {
-                return Self.denied(action.label)
+                if verdict.external,
+                   !(await gate(Self.levelTarget(name, args), label: action.label, verb: Self.riskVerb[name] ?? "faccia",
+                                scenario: "secondo strato")) {
+                    return Self.denied(action.label)
+                }
             }
         }
         if Self.effectfulTools.contains(name) {
@@ -416,43 +420,102 @@ final class AgentTools {
     var onClassified: ((Double) -> Void)?
     /// One verdict per action (tool, label, role, app, window), across requests; emptied at 500.
     private var riskCache: [String: RiskVerdict] = [:]
-    private static let riskVerb = ["click": "clicchi", "perform_action": "esegua", "menu": "scelga"]
+    private static let riskVerb = ["click": "clicchi", "click_many": "clicchi", "perform_action": "esegua", "menu": "scelga"]
 
-    /// The action as the second layer sees it, or nil when it has nothing to judge: a tool without
-    /// external effects of its own, or an action the fixed rules already stop (they ask on their own).
+    /// The actions as the second layer sees them: none when there is nothing to judge (a tool
+    /// without external effects of its own, or an action the fixed rules already stop).
+    private func riskActions(_ name: String, _ a: [String: Any], app: String) -> [RiskAction] {
+        if name == "click_many" {
+            let method = (a["method"] as? String) ?? "auto"
+            return ((a["ids"] as? [Any]) ?? []).compactMap { Self.int($0) }.compactMap { riskAction("click", ["id": $0, "method": method], app: app) }
+        }
+        return riskAction(name, a, app: app).map { [$0] } ?? []
+    }
+
     private func riskAction(_ name: String, _ a: [String: Any], app: String) -> RiskAction? {
         var label = "", role = ""
         switch name {
         case "click":
+            // A right click opens a menu: it does not press.
+            if (a["method"] as? String) == "right" { return nil }
             if let id = Self.int(a["id"]) {
                 guard let item = try? resolve(id) else { return nil }
-                (label, role) = (item.label, item.role)
+                (label, role) = (item.label, AX.role(item.element))
+                // Text or an icon inside a control: the control is what gets pressed, so it is judged.
+                if ["AXStaticText", "AXImage"].contains(role), let outer = Self.pressableAncestor(item.element) {
+                    let name = Self.ownLabel(outer)
+                    if Safety.isRiskyLabel(name) { return nil } // click() asks for it
+                    (label, role) = (name.isEmpty ? label : "\(name) (\(label))", AX.role(outer))
+                }
             } else if let x = Self.double(a["x"]), let y = Self.double(a["y"]), let shot = lastShot {
                 label = AX.labelAt(shot.screenPoint(imageX: x, imageY: y)) ?? ""
-            }
-            // Modifiers or a right click do not press a button.
-            if (a["method"] as? String) == "right" { return nil }
+            } else { return nil }
             if Safety.isRiskyLabel(label) { return nil }
         case "perform_action":
-            guard let id = Self.int(a["id"]), let item = try? resolve(id) else { return nil }
-            let action = (a["action"] as? String) ?? ""
-            if Safety.isRiskyLabel(item.label) || Safety.isRiskyLabel(action) { return nil }
-            (label, role) = (item.label + (action.isEmpty ? "" : " → \(action)"), item.role)
+            // The action that will really run (as performAction resolves it), and only actions that act.
+            guard let id = Self.int(a["id"]), let item = try? resolve(id), let wanted = a["action"] as? String else { return nil }
+            let w = Grammar.normalize(wanted.hasPrefix("AX") ? String(wanted.dropFirst(2)) : wanted)
+            guard let raw = AX.actions(item.element).first(where: { Grammar.normalize(Self.actionName($0)) == w }) else { return nil }
+            let passive: Set<String> = ["AXShowMenu", "AXScrollToVisible", "AXIncrement", "AXDecrement", "AXRaise", "AXCancel", "AXShowDefaultUI", "AXShowAlternateUI"]
+            if passive.contains(raw) { return nil }
+            if Safety.isRiskyLabel(item.label) || Safety.isRiskyLabel(Self.actionName(raw)) { return nil }
+            (label, role) = ("\(item.label) → \(Self.actionName(raw))", AX.role(item.element))
         case "menu":
+            // The item the menu tool will really choose, not the words the model wrote.
             let path = (a["path"] as? String) ?? ""
-            guard !path.isEmpty, let last = path.components(separatedBy: ">").last?.trimmingCharacters(in: .whitespaces),
-                  !Safety.isRiskyLabel(last) else { return nil }
-            (label, role) = (path, "menu")
+            guard !AppMenu.split(path).isEmpty, let front = AX.frontApp(),
+                  case .item(let walked, let item) = AppMenu.resolve(path, in: front.app), item.enabled else { return nil }
+            if walked.contains(where: Safety.isRiskyLabel) || Safety.isRiskyLabel(item.title) { return nil }
+            (label, role) = ((walked.dropLast() + [item.title]).joined(separator: " > "), "menu")
         default:
             return nil
         }
-        // Fields, boxes, tabs and rows send nothing out by themselves: no verdict, no latency.
-        let inert: Set<String> = ["AXTextField", "AXTextArea", "AXCheckBox", "AXRadioButton", "AXTab", "AXStaticText", "AXRow",
-                                  "AXCell", "AXPopUpButton", "AXComboBox", "AXSlider", "AXDisclosureTriangle", "AXSearchField", "AXImage"]
+        // Fields, tabs, rows and pop-ups send nothing out by themselves: no verdict, no latency.
+        // Boxes, radio buttons and cells stay: a «Profilo pubblico» switch, an «Approva» cell.
+        let inert: Set<String> = ["AXTextField", "AXTextArea", "AXTab", "AXRow", "AXPopUpButton", "AXComboBox", "AXSlider",
+                                  "AXDisclosureTriangle", "AXSearchField", "AXScrollBar"]
         if inert.contains(role) { return nil }
-        // Nothing to name and nothing around it: the model would only guess.
-        guard !label.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-        return RiskAction(tool: name, label: label, role: role, app: app, window: Self.frontWindowTitle(), request: currentRequest)
+        // An icon without a name: the window and the dialog may still say what it does.
+        if label.trimmingCharacters(in: .whitespaces).isEmpty { label = "(senza etichetta)" }
+        return RiskAction(tool: name, label: label, role: role, app: app, window: Self.frontWindowTitle(),
+                          dialog: Self.frontDialogText(), request: currentRequest)
+    }
+
+    private static func ownLabel(_ el: AXUIElement) -> String {
+        [AX.string(el, kAXTitleAttribute), AX.string(el, kAXDescriptionAttribute)]
+            .compactMap { $0 }.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
+    }
+
+    /// The first ancestor (up to 6 levels) that can be pressed. Safari gives a press action to the
+    /// text inside a clickable div too: pressing the text presses the div.
+    static func pressableAncestor(_ el: AXUIElement) -> AXUIElement? {
+        var current = el
+        for _ in 0..<6 {
+            guard let parent = AX.element(current, kAXParentAttribute) else { return nil }
+            if AX.actions(parent).contains(kAXPressAction) { return parent }
+            current = parent
+        }
+        return nil
+    }
+
+    /// The text of a sheet or dialog in front of the window («Eliminare definitivamente 12 elementi?»):
+    /// alerts have no title and sheets carry the title of their window.
+    static func frontDialogText() -> String {
+        guard let window = AX.frontApp().flatMap({ AX.focusedWindow(in: $0.app) }) else { return "" }
+        let sub = AX.string(window, kAXSubroleAttribute) ?? ""
+        let dialog = ["AXDialog", "AXSystemDialog", "AXFloatingWindow"].contains(sub) ? window
+            : AX.children(window).first { AX.role($0) == "AXSheet" }
+        guard let dialog else { return "" }
+        var texts: [String] = []
+        func walk(_ el: AXUIElement, _ depth: Int) {
+            guard depth < 4, texts.count < 6 else { return }
+            for c in AX.children(el) {
+                if AX.role(c) == "AXStaticText", let v = AX.string(c, kAXValueAttribute), !v.isEmpty { texts.append(v) }
+                walk(c, depth + 1)
+            }
+        }
+        walk(dialog, 0)
+        return String(texts.joined(separator: " ").prefix(160))
     }
 
     /// The tools a «solo clic» app allows.
@@ -1507,6 +1570,14 @@ final class AgentTools {
             label = item.label
             if Safety.isRiskyLabel(label), !(await gate(.element(id: id, action: "click"), label: label, verb: "clicchi")) {
                 return Self.denied(label)
+            }
+            // Text or an icon inside a control: the control is what gets pressed (FR-51), «➤» inside «Invia».
+            // Also any element that cannot be pressed itself: the click goes to the container.
+            if !Safety.isRiskyLabel(label),
+               ["AXStaticText", "AXImage", "AXGroup"].contains(AX.role(item.element)) || !AX.actions(item.element).contains(kAXPressAction),
+               let outer = Self.pressableAncestor(item.element), case let name = Self.ownLabel(outer), Safety.isRiskyLabel(name),
+               !(await gate(.element(id: id, action: "click"), label: name, verb: "clicchi")) {
+                return Self.denied(name)
             }
             if !quiet { onProgress?("Clicco «\(label)»") }
             if method == "auto" {
