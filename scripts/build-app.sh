@@ -17,6 +17,7 @@ if ! .build/release/MacTalkAct --route-test > build/route-test.log 2>&1 && ! .bu
     tail -n 25 build/route-test.log; echo "Instradamento: errori critici nel Corpus"; exit 1
 fi
 .build/release/MacTalkAct --security-coverage || { echo "Copertura del riconoscimento: sotto il minimo, falsi allarmi o pulsanti non classificati"; exit 1; }
+.build/release/MacTalkAct --selftest || { echo "Selftest fallito"; exit 1; }
 if [ "${SECURITY_SUITE:-0}" = "1" ]; then
     .build/release/MacTalkAct --security-suite --engine "${SECURITY_ENGINE:-local}" || { echo "Suite di sicurezza fallita"; exit 1; }
 else

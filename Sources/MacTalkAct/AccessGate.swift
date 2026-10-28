@@ -70,6 +70,9 @@ final class AccessGate {
     private(set) var deniedConfirmations = 0
     /// Calls refused by the access level or by a password field (read by the security suite).
     var refusals = 0
+    /// Why the last call was refused, for the sentence the Corsia locale shows (Story 10.2).
+    private(set) var lastRefusal: Refusal?
+    enum Refusal: Equatable { case clickOnly(app: String, tool: String), passwordField }
     /// The target of the last question, for the tests.
     private(set) var lastTarget: ConfirmationTarget?
     /// The access level shown last in the HUD, to show a change of app once.
@@ -108,6 +111,7 @@ final class AccessGate {
     /// Actions of the user are not judged.
     func check(_ name: String, _ args: [String: Any], origin: ActionOrigin, facts: ActionFacts) async -> String? {
         guard origin == .model else { return nil }
+        lastRefusal = nil
         let effectful = AgentTools.effectfulTools.contains(name)
         // Access level of the app in front (FR-54, AD-22): the same rules for every engine.
         let level = environment.level()
@@ -119,11 +123,13 @@ final class AccessGate {
         if level.scope == .clickOnly, effectful, !Self.clickOnlyTools.contains(name) {
             Log.info("Agente: \(name) bloccato, \(app) è «solo clic»")
             refusals += 1
+            lastRefusal = .clickOnly(app: app, tool: name)
             return "In «\(app)» the agent may only click and scroll (access level set by the user). Do not type or press keys here; tell the user in one short Italian sentence."
         }
         // Never write in a password field, with any tool (FR-52).
         if Self.writingTools.contains(name), passwordTarget(name, args, facts) {
             refusals += 1
+            lastRefusal = .passwordField
             Log.info("Agente: \(name) bloccato, campo password")
             return "That is a password field: the agent never reads or types there. Tell the user to type it themselves."
         }
@@ -162,6 +168,114 @@ final class AccessGate {
             }
         }
         return nil
+    }
+
+    // MARK: Corsia locale (Story 10.2, FR-56)
+
+    /// What the Corsia locale does with a `LocalAction` the Validator approved.
+    enum LocalVerdict: Equatable {
+        case go
+        /// Refused by the access level or by a password field: the sentence for the HUD.
+        case refused(String)
+        /// The user did not say «sì» (or did not answer): nothing done, nothing passed to the Agente.
+        case cancelled
+    }
+
+    /// The tool the Agente would use for the same action: the gate judges both with the same rules.
+    static func toolCall(for action: LocalAction) -> (name: String, args: [String: Any]) {
+        switch action {
+        case .keys(let combo, _): return ("press_keys", ["keys": combo])
+        case .openApp(let name): return ("open_app", ["name": name])
+        case .openURL(let url): return ("open_url", ["url": url])
+        case .scroll(let direction): return ("scroll", ["direction": direction])
+        }
+    }
+
+    /// While the gate judges a `LocalAction`: the label its questions name (the action itself).
+    private var localQuestionLabel: String?
+
+    /// A `LocalAction` proposed by the Apple model, after the Validator: the same checks as a call of
+    /// the Agente (`check`, then the fixed rules on the keys). No element and nothing for the second
+    /// layer: `press_keys` stays with the fixed rules.
+    func checkLocal(_ action: LocalAction) async -> LocalVerdict {
+        let (name, args) = Self.toolCall(for: action)
+        let facts = ActionFacts(isSecureElement: { _ in nil }, riskActions: { _ in [] })
+        let refusalsBefore = refusals
+        let askedBefore = confirmationsAsked
+        localQuestionLabel = action.summary
+        defer { localQuestionLabel = nil }
+        if await check(name, args, origin: .model, facts: facts) != nil {
+            if let reason = lastRefusal { return .refused(Self.refusalSentence(reason)) }
+            return refusals > refusalsBefore ? .refused(Self.genericRefusalSentence) : .cancelled
+        }
+        if case .keys(let combo, _) = action {
+            if await confirmKeys(combo, origin: .model) != nil { return .cancelled }
+            // The question may last 25 s: the focus may have moved into a password field meanwhile.
+            if confirmationsAsked > askedBefore, environment.focusedFieldIsSecure() {
+                refusals += 1
+                lastRefusal = .passwordField
+                Log.info("Agente: press_keys bloccato, campo password")
+                return .refused(Self.passwordSentence)
+            }
+        }
+        return .go
+    }
+
+    /// What the Corsia locale did with an action (Story 10.2).
+    enum LocalOutcome: Equatable {
+        case done
+        case refused(String)
+        case cancelled
+        /// The action failed after a «sì»: not passed to the Agente, which would ask again.
+        case failed(String)
+        /// The action failed without any question: the Agente may still try.
+        case fellBack
+    }
+
+    /// The one decide-then-run step of the Corsia locale, for the app and the security suite: the gate,
+    /// then `execute`. A refusal or a «no» runs neither `execute` nor `fallback`.
+    func runLocal(_ action: LocalAction, execute: () async throws -> Void, fallback: (Error) async -> Void) async -> LocalOutcome {
+        let askedBefore = confirmationsAsked
+        switch await checkLocal(action) {
+        case .refused(let sentence): return .refused(sentence)
+        case .cancelled: return .cancelled
+        case .go: break
+        }
+        do {
+            try await execute()
+            return .done
+        } catch {
+            if confirmationsAsked > askedBefore { return .failed(error.localizedDescription) }
+            await fallback(error)
+            return .fellBack
+        }
+    }
+
+    static let passwordSentence = "Campo password: qui non scrivo, fallo tu"
+    static let genericRefusalSentence = "Qui non posso farlo: fallo tu o chiedilo all'Agente"
+
+    /// The HUD sentence for a refusal of the Corsia locale.
+    static func refusalSentence(_ reason: Refusal) -> String {
+        switch reason {
+        case .clickOnly(let app, let tool): return tool == "open_url" ? "In \(app) non apro indirizzi: fallo tu" : clickOnlySentence(app)
+        case .passwordField: return passwordSentence
+        }
+    }
+
+    /// The focused field is a password field, read from the focused element alone: the same answer as
+    /// `ScreenContext.capture().isSecure` without the rest of the window (title, selection, text before
+    /// the cursor), so the Corsia locale stays within its 20 ms.
+    static func focusedFieldIsSecure() -> Bool {
+        guard let front = AX.frontmostApplication() else { return false }
+        let app = AX.app(front.processIdentifier)
+        AX.prepare(app, pid: front.processIdentifier, bundleID: front.bundleIdentifier)
+        guard let focused = AX.focusedElement(in: app) else { return false }
+        return AX.isSecureField(focused)
+    }
+
+    /// The HUD sentence for a key refused by a «solo clic» app.
+    static func clickOnlySentence(_ app: String) -> String {
+        "In \(app) posso solo cliccare: fallo tu o chiedilo all'Agente"
     }
 
     /// Cloud engines in a «solo clic» app see only the controls, never text or images (FR-54).
@@ -322,7 +436,11 @@ final class AccessGate {
         guard origin == .model else { return true }
         confirmationsAsked += 1
         lastTarget = target
-        let notAsked = !Self.requestMentions(currentRequest, label)
+        // The Corsia locale does exactly what the user asked: its question names that action, never
+        // «che tu non hai chiesto» (Story 10.2).
+        let label = localQuestionLabel ?? label
+        let verb = localQuestionLabel == nil ? verb : "faccia"
+        let notAsked = localQuestionLabel == nil && !Self.requestMentions(currentRequest, label)
         let question = "Vuoi che \(verb) «\(label)»\(notAsked ? ", che tu non hai chiesto" : "")?"
         let front = environment.frontPID()
         let levelBefore = environment.level().scope.rawValue

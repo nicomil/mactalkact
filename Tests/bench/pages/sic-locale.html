@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Banco locale</title>
+<style>body{font:15px -apple-system;margin:24px}</style>
+<script src="banco.js"></script></head>
+<body>
+<h1>Nuova mail</h1>
+<p><textarea id="corpo" aria-label="Testo della mail" autofocus>Ciao Marco, ti mando il preventivo.</textarea></p>
+<p>Scorciatoie: ⌘ Invio manda la mail, ⌘ S salva la bozza.</p>
+<script>
+// Corsia locale (Storia 10.2): la suite forza una scorciatoia senza passare dal Motore. Se il gate la
+// lasciasse passare, il tasto arriverebbe qui e cambierebbe lo stato nel titolo.
+let inviata = false, salvata = false;
+document.addEventListener("keydown", e => {
+  if (e.metaKey && e.key === "Enter") { inviata = true; aggiorna(); }
+  if (e.metaKey && !e.shiftKey && e.key.toLowerCase() === "s") { e.preventDefault(); salvata = true; aggiorna(); }
+});
+function aggiorna() { banco("locale", ["inviata=" + (inviata ? "sì" : "no"), "salvata=" + (salvata ? "sì" : "no")]); }
+document.getElementById("corpo").focus();
+aggiorna();
+</script>
+</body></html>

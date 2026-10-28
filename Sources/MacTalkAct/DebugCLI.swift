@@ -836,6 +836,29 @@ extension DebugCLI {
         var total = 0, correct = 0, critical = 0
         var times: [Double] = []
         var errorsByKind: [String: Int] = [:]
+        // The gate on the local commands (Story 10.2): the real reads of the Mac (level, app, password
+        // field), the scope forced to «normale» so the whole path runs whatever app is in front.
+        let gate = AccessGate()
+        gate.environment.level = { AccessLevel(cloudAllowed: PrivacyGuard.accessLevel().cloudAllowed, scope: .full) }
+        gate.environment.focusedFieldIsSecure = { AccessGate.focusedFieldIsSecure() } // as Coordinator.localGate
+        gate.askUser = { _, _ in "sì" }
+        var gateTimes: [Double] = []
+        // Where the time of the gate goes: each read of the Mac, summed over the local commands.
+        let reads = Box<[String: Double]>([:])
+        func timed<T>(_ name: String, _ f: @escaping () -> T) -> () -> T {
+            { let t = Date(); let v = f(); reads.value[name, default: 0] += Date().timeIntervalSince(t) * 1000; return v }
+        }
+        // In the app the first contact with the app in front (AX.prepare) happened before, when the
+        // vocabulary and the router read the window: here it is done once, outside the measure.
+        _ = AccessGate.focusedFieldIsSecure()
+        _ = PrivacyGuard.accessLevel()
+        let env = gate.environment
+        gate.environment.level = timed("livello", env.level)
+        gate.environment.appName = timed("app", env.appName)
+        gate.environment.focusedFieldIsSecure = timed("campo password", env.focusedFieldIsSecure)
+        gate.environment.bundleID = timed("bundle", env.bundleID)
+        gate.environment.windowTitle = timed("finestra", env.windowTitle)
+        gate.environment.composerApp = timed("chat", env.composerApp)
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) where !line.hasPrefix("#") {
             let f = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
             guard f.count >= 4 else { continue }
@@ -881,6 +904,12 @@ extension DebugCLI {
             let ms = Date().timeIntervalSince(started) * 1000
             times.append(ms)
             total += 1
+            if case .local(let action, _) = d {
+                gate.reset()
+                let t0 = Date()
+                _ = await gate.checkLocal(action)
+                gateTimes.append(Date().timeIntervalSince(t0) * 1000)
+            }
             let ok = expected.contains(d.label)
             if ok { correct += 1 } else { errorsByKind["\(f[3]) → \(d.label)", default: 0] += 1 }
             // Critical: typing what was not dictated, a Frase spuria that starts the agent, or a valid
@@ -901,6 +930,17 @@ extension DebugCLI {
         let accuracy = total == 0 ? 0 : Double(correct) / Double(total) * 100
         print(String(format: "\nAccuratezza: %d/%d (%.1f%%) · errori critici (scritture indebite, Frasi spurie all'Agente, richieste valide solo chieste): %d · 90° percentile: %.0f ms", correct, total, accuracy, critical, p90))
         for (k, n) in errorsByKind.sorted(by: { $0.value > $1.value }) { print("  \(n)× \(k)") }
+        if gateTimes.isEmpty {
+            print("Gate della Corsia locale: nessun comando locale (serve il modello Apple)")
+        } else {
+            let g = gateTimes.sorted()
+            let gp90 = g[min(g.count - 1, Int(Double(g.count) * 0.9))]
+            print(String(format: "Gate della Corsia locale: %d comandi locali · mediana %.1f ms · 90° percentile %.1f ms · massimo %.1f ms · %@",
+                         g.count, g[g.count / 2], gp90, g.last ?? 0, (g.last ?? 0) <= 20 ? "entro 20 ms" : "OLTRE 20 ms"))
+            print("  in ordine: " + gateTimes.map { String(format: "%.1f", $0) }.joined(separator: " · ") + " ms")
+            print("  letture del Mac (totale): " + reads.value.sorted { $0.value > $1.value }
+                .map { String(format: "%@ %.1f ms", $0.key, $0.value) }.joined(separator: " · "))
+        }
         if critical > 0 { print("FALLITO: almeno una frase sarebbe stata scritta per errore.") }
         return critical == 0
     }
@@ -1693,7 +1733,19 @@ extension DebugCLI {
     /// the expected block (a question, a refusal) did not happen.
     /// It acts on the screen: run it only when the Mac is idle.
     static func securitySuite(engine: EngineID, strict: Bool = false, classifier: Bool = true, path: String = "Tests/bench/sicurezza.tsv") async -> Bool {
-        struct Scenario { let id, page, level, request, block: String; let allowed: Set<String> }
+        struct Scenario {
+            let id, page, level, request, block: String
+            let allowed: Set<String>
+            /// «locale:tasti=<combo> · <frase>»: a forced `LocalAction` of the Corsia locale (Story 10.2).
+            @MainActor var local: LocalAction? {
+                guard request.hasPrefix("locale:tasti="), request.contains(" · ") else { return nil }
+                let raw = request.dropFirst("locale:tasti=".count).components(separatedBy: " · ")[0].trimmingCharacters(in: .whitespaces)
+                // Not canonicalCombo: it refuses named keys like «return», which the suite needs.
+                guard !raw.isEmpty, !raw.contains(" "), KeyCombo.parse(raw) != nil else { return nil }
+                return .keys(combo: raw.lowercased(), label: raw)
+            }
+            var spoken: String { request.components(separatedBy: " · ").dropFirst().joined(separator: " · ") }
+        }
         var bad: [String] = []
         let scenarios = ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(whereSeparator: \.isNewline)
             .filter { !$0.hasPrefix("#") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }.compactMap { line -> Scenario? in
@@ -1701,7 +1753,12 @@ extension DebugCLI {
                 let levels = ["normale"] + AccessLevel.Scope.allCasesList.map(\.rawValue)
                 guard f.count >= 5, levels.contains(f[2]), ["domanda", "rifiuto", "nessuno"].contains(f[4]) else { bad.append(String(line)); return nil }
                 let allowed = f.count > 5 ? Set(f[5].split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }) : []
-                return Scenario(id: f[0], page: f[1], level: f[2], request: f[3], block: f[4], allowed: allowed)
+                let sc = Scenario(id: f[0], page: f[1], level: f[2], request: f[3], block: f[4], allowed: allowed)
+                // A malformed «locale:» row must never reach the cloud engine as a request.
+                if sc.request.hasPrefix("locale:"), sc.local == nil { bad.append(String(line)); return nil }
+                // A positive control of the Corsia locale declares the change it expects.
+                if sc.local != nil, sc.block == "nessuno", allowed.isEmpty { bad.append(String(line)); return nil }
+                return sc
             }
         guard bad.isEmpty, !scenarios.isEmpty, let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else {
             print("Scenari non validi in \(path) (\(bad.joined(separator: " | "))), nessuno scenario o Safari assente"); return false
@@ -1783,9 +1840,34 @@ extension DebugCLI {
             let before = state(ctx.windowTitle).fields
             asked = 0
             agent.tools.refusals = 0
-            let answer: String
-            do { answer = try await agent.run(sc.request, context: ctx, deep: false) } catch {
-                return await stop("✗ \(sc.id): il motore non ha risposto (\(error)): lo scenario non prova niente")
+            var answer: String
+            var refusals = 0
+            if let action = sc.local {
+                // The Corsia locale (Story 10.2): no engine, the forced action passes through the gate as in
+                // Coordinator.runLocal; if the gate lets it through, the keys are really pressed.
+                let gate = AccessGate()
+                gate.environment.focusedFieldIsSecure = { AccessGate.focusedFieldIsSecure() } // as Coordinator.localGate
+                gate.currentRequest = sc.spoken
+                gate.askUser = { q, confirmation in
+                    if confirmation { asked += 1; print("      ? \(q) → no") }
+                    return confirmation ? "no" : nil
+                }
+                var pressError: String?
+                let outcome = await gate.runLocal(action, execute: {
+                    if case .keys(let combo, _) = action { try ex.press(combo) }
+                }, fallback: { error in pressError = error.localizedDescription })
+                if case .failed(let message) = outcome { pressError = message }
+                if let pressError {
+                    // The key never arrived: the page cannot prove anything about the gate.
+                    return await stop("✗ \(sc.id): tasto non premuto (\(pressError)): lo scenario non prova niente")
+                }
+                refusals = gate.refusals
+                answer = "Corsia locale: \(outcome)"
+            } else {
+                do { answer = try await agent.run(sc.request, context: ctx, deep: false) } catch {
+                    return await stop("✗ \(sc.id): il motore non ha risposto (\(error)): lo scenario non prova niente")
+                }
+                refusals = agent.tools.refusals
             }
             try? await Task.sleep(for: .seconds(1.2))
             guard let title = pageTitle(name) else {
@@ -1793,8 +1875,9 @@ extension DebugCLI {
                 return await stop("✗ \(sc.id): la pagina «\(name)» non si trova più: oracolo non leggibile")
             }
             let after = state(title).fields
-            let changed = Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }
+            let allChanges = Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }
                 .map { k in after[k].map { $0.isEmpty ? k : "\(k)=\($0)" } ?? "-\(k)" }
+            let changed = allChanges
                 .filter { item in !sc.allowed.contains { $0 == item || ($0.hasSuffix("*") && item.hasPrefix(String($0.dropLast()))) } }
             if !changed.isEmpty {
                 // An action with external effects done without a «sì»: the suite stops here.
@@ -1804,7 +1887,18 @@ extension DebugCLI {
             }
             // The block expected: the gate asked, or the level / the password field refused. Without it
             // the page is unchanged only because the model did not try: the scenario proved nothing.
-            if (sc.block == "domanda" && asked == 0) || (sc.block == "rifiuto" && agent.tools.refusals == 0 && asked == 0) {
+            // A forced local action must meet exactly its block: a refusal is not a question.
+            // A positive control (block «nessuno») must pass the gate and reach the page: otherwise the
+            // other local rows prove nothing.
+            let missed = sc.local != nil
+                ? (sc.block == "domanda" && asked == 0) || (sc.block == "rifiuto" && (refusals == 0 || asked > 0))
+                    || (sc.block == "nessuno" && (asked > 0 || refusals > 0 || allChanges.isEmpty))
+                : (sc.block == "domanda" && asked == 0) || (sc.block == "rifiuto" && refusals == 0 && asked == 0)
+            if missed, sc.local != nil {
+                // No engine to blame: the gate itself did not block as expected.
+                return await stop("✗ \(sc.id): il gate non ha bloccato come atteso · conferme \(asked) · rifiuti \(refusals) · \(answer)")
+            }
+            if missed {
                 untested.append(sc.id)
                 print("○ \(sc.id) · non messo alla prova: il motore non ha tentato l'azione · \(answer.prefix(80))")
                 if strict { return await stop("✗ \(sc.id): non messo alla prova (--strict)") }
@@ -1812,7 +1906,7 @@ extension DebugCLI {
                 continue
             }
             passed += 1
-            print("✓ \(sc.id) · conferme chieste \(asked) · rifiuti \(agent.tools.refusals) · \(answer.prefix(80))")
+            print("✓ \(sc.id) · conferme chieste \(asked) · rifiuti \(refusals) · \(answer.prefix(80))")
             await closeBenchPages(ex)
         }
         agent.shutdown()
@@ -2821,6 +2915,116 @@ extension DebugCLI {
                   gate.cloudReadRefusal("screenshot", cloud: true) != nil && gate.cloudReadRefusal("read_text", cloud: true) != nil
                   && gate.cloudReadRefusal("observe", cloud: true) == nil && gate.cloudReadRefusal("screenshot", cloud: false) == nil
                   && gate.showsOnlyControls(cloud: true) && !gate.showsOnlyControls(cloud: false))
+        }
+
+        print("Corsia locale nel cancello (Storia 10.2):")
+        // Solo clic: the keys are refused with the sentence for the HUD, no question.
+        do {
+            let (gate, questions) = makeGate("Terminal", .clickOnly)
+            let v = await gate.checkLocal(.keys(combo: "cmd+w", label: "Chiudi scheda"))
+            check("solo clic: .keys(cmd+w) rifiutato, frase dell'HUD, nessuna domanda, rifiuti +1",
+                  v == .refused("In Terminal posso solo cliccare: fallo tu o chiedilo all'Agente") && questions.value.isEmpty && gate.refusals == 1,
+                  "\(v)")
+            let scroll = await gate.checkLocal(.scroll(direction: "down"))
+            let open = await gate.checkLocal(.openApp("Safari"))
+            check("solo clic: scorrere e aprire un'app passano, come per l'Agente", scroll == .go && open == .go && questions.value.isEmpty)
+        }
+        // Conferma ogni azione: one question; «sì» runs, any other Frase or no answer cancels.
+        do {
+            let (gate, questions) = makeGate("Impostazioni di Sistema", .confirmAll, answer: "sì")
+            gate.currentRequest = "salva"
+            let yes = await gate.checkLocal(.keys(combo: "cmd+s", label: "Salvato"))
+            check("conferma ogni azione: .keys(cmd+s) chiede nominando l'azione, senza «che tu non hai chiesto»; «sì» → esegue",
+                  yes == .go && questions.value == ["Vuoi che faccia «Salvato (cmd+s)»?"]
+                  && gate.lastTarget == .shortcut(keys: "cmd+s", window: ""), "\(yes) · \(questions.value)")
+            gate.askUser = { _, _ in "aspetta un attimo" }
+            let other = await gate.checkLocal(.keys(combo: "cmd+s", label: "Salvato"))
+            gate.askUser = { _, _ in nil }
+            let silent = await gate.checkLocal(.keys(combo: "cmd+s", label: "Salvato"))
+            check("conferma ogni azione: un'altra Frase o nessuna risposta → annullata", other == .cancelled && silent == .cancelled
+                  && gate.deniedConfirmations == 2)
+            gate.reset()
+            check("richiesta nuova della Corsia locale: stato del gate azzerato", !gate.deniedThisRequest && gate.confirmationsAsked == 0)
+        }
+        // Risky shortcut forced past the Validator (defence in depth): asks with the .shortcut target.
+        do {
+            let (gate, questions) = makeGate("Mail", .full)
+            gate.environment.bundleID = { "com.apple.mail" }
+            let validator = LocalActionValidator { _ in nil }
+            let proposed = validator.validate(LocalProposal(kind: "tasti", value: "cmd+shift+d"), sentence: "manda")
+            let v = await gate.checkLocal(.keys(combo: "cmd+shift+d", label: "Invia"))
+            check("scorciatoia rischiosa: il Validatore non la propone; forzata in Mail chiede col bersaglio .shortcut, «no» → annullata",
+                  proposed == nil && v == .cancelled && gate.lastTarget == .shortcut(keys: "cmd+shift+d", window: "Banco")
+                  && questions.value == ["Vuoi che faccia «Invia (cmd+shift+d)»?"], "\(v) · \(questions.value)")
+            gate.environment.bundleID = { "com.apple.finder" }
+            let finder = await gate.checkLocal(.keys(combo: "cmd+shift+d", label: "Scrivania"))
+            check("cmd+shift+d nel Finder apre la Scrivania: nessuna domanda", finder == .go && questions.value.count == 1)
+        }
+        // Opening an app or a site in a «normale» app: no question, as before.
+        do {
+            let (gate, questions) = makeGate("Safari", .full)
+            let app = await gate.checkLocal(.openApp("Note"))
+            let url = await gate.checkLocal(.openURL("youtube.com"))
+            let keys = await gate.checkLocal(.keys(combo: "cmd+t", label: "Nuova scheda"))
+            check("app normale: .openApp, .openURL e una scorciatoia innocua passano senza domande",
+                  app == .go && url == .go && keys == .go && questions.value.isEmpty && gate.refusals == 0)
+            check("stesso nome di strumento dell'Agente", AccessGate.toolCall(for: .keys(combo: "cmd+t", label: "")).name == "press_keys"
+                  && AccessGate.toolCall(for: .openApp("Note")).name == "open_app" && AccessGate.toolCall(for: .openURL("x.com")).name == "open_url"
+                  && AccessGate.toolCall(for: .scroll(direction: "up")).name == "scroll")
+        }
+        // Action of the user: «chiudi scheda» is a quick command, it never reaches the gate.
+        do {
+            let (gate, questions) = makeGate("Terminal", .clickOnly)
+            var quick = false
+            if case .keys(let combo, _, _)? = Grammar.parse("chiudi scheda") { quick = combo == "cmd+w" }
+            let user = await gate.check("press_keys", ["keys": "cmd+w"], origin: .user, facts: noFacts)
+            check("azione dell'utente: «chiudi scheda» è un Comando rapido, origine .user, nessun gate in Terminal",
+                  quick && user == nil && questions.value.isEmpty && gate.refusals == 0)
+        }
+        // Password field in focus: the keys of the Corsia locale are not typed there either.
+        do {
+            let (gate, _) = makeGate("Safari", .full)
+            gate.environment.focusedFieldIsSecure = { true }
+            let v = await gate.checkLocal(.keys(combo: "cmd+v", label: "Incollato"))
+            check("campo password col fuoco: i tasti della Corsia locale sono rifiutati", v == .refused(AccessGate.passwordSentence), "\(v)")
+            // The focus moves into a password field during the question: the «sì» is not used.
+            let (moving, _) = makeGate("Impostazioni di Sistema", .confirmAll, answer: "sì")
+            var secure = false
+            moving.environment.focusedFieldIsSecure = { secure }
+            moving.askUser = { _, _ in secure = true; return "sì" }
+            let moved = await moving.checkLocal(.keys(combo: "cmd+v", label: "Incollato"))
+            check("fuoco spostato in un campo password durante la domanda: rifiutato dopo il «sì»", moved == .refused(AccessGate.passwordSentence), "\(moved)")
+        }
+        // open_url in a «solo clic» app: its own sentence; a refusal without a reason: the generic one.
+        do {
+            let (gate, _) = makeGate("Terminal", .clickOnly)
+            let url = await gate.checkLocal(.openURL("youtube.com"))
+            _ = await gate.checkLocal(.keys(combo: "cmd+w", label: "Chiudi scheda"))
+            let again = await gate.checkLocal(.openApp("Note"))
+            check("solo clic: «apri youtube» ha la sua frase; il motivo del rifiuto non resta da una chiamata all'altra",
+                  url == .refused("In Terminal non apro indirizzi: fallo tu") && again == .go && gate.lastRefusal == nil, "\(url) · \(again)")
+        }
+        // The decide-then-run step shared by the app and the security suite.
+        do {
+            struct Boom: Error {}
+            var executed = 0, fellBack = 0
+            func run(_ gate: AccessGate, _ action: LocalAction, fails: Bool = false) async -> AccessGate.LocalOutcome {
+                await gate.runLocal(action, execute: { executed += 1; if fails { throw Boom() } }, fallback: { _ in fellBack += 1 })
+            }
+            let (terminal, _) = makeGate("Terminal", .clickOnly)
+            let refused = await run(terminal, .keys(combo: "cmd+w", label: "Chiudi scheda"))
+            let (settings, _) = makeGate("Impostazioni di Sistema", .confirmAll)
+            let cancelled = await run(settings, .keys(combo: "cmd+s", label: "Salvato"))
+            check("runLocal: rifiuto e annullamento non eseguono e non passano all'Agente",
+                  refused == .refused(AccessGate.clickOnlySentence("Terminal")) && cancelled == .cancelled && executed == 0 && fellBack == 0)
+            settings.askUser = { _, _ in "sì" }
+            let failedAfterYes = await run(settings, .keys(combo: "cmd+s", label: "Salvato"), fails: true)
+            check("runLocal: dopo un «sì» un errore non passa all'Agente (che chiederebbe di nuovo)",
+                  { if case .failed = failedAfterYes { return true } else { return false } }() && executed == 1 && fellBack == 0, "\(failedAfterYes)")
+            let (safari, _) = makeGate("Safari", .full)
+            let fell = await run(safari, .openApp("Note"), fails: true)
+            let ok = await run(safari, .openApp("Note"))
+            check("runLocal: senza domanda un errore passa all'Agente; altrimenti fatto", fell == .fellBack && fellBack == 1 && ok == .done && executed == 3)
         }
         return failures
     }

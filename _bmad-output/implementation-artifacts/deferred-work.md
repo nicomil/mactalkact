@@ -66,3 +66,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-10-1-accessgate-unico.md`
   summary: Test deterministico del ciclo di rilettura di `set_value` sui cursori web (letture AX dietro un punto d'iniezione).
   evidence: oggi solo `--hands-test` lo esercita e il guasto originale compariva circa una volta su dieci.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-10-2-corsia-locale-nel-cancello.md`
+  summary: Asserire il limite di 20 ms del gate della Corsia locale sullo stesso collegamento dell'app (fabbrica comune dell'ambiente del gate).
+  evidence: `--route-test` stampa «entro/OLTRE 20 ms» su una copia del collegamento e non fallisce; asserzioni a tempo rumorose sul build.

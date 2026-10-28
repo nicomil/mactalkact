@@ -19,6 +19,9 @@ final class Coordinator {
     let executor = Executor()
     let planner = LLMPlanner()
     lazy var agent = AgentRunner(executor: executor, settings: settings)
+    /// The gate of the Corsia locale (Story 10.2): same rules as the Agente's, its own counters, so a
+    /// local request never mixes with the state of a request of the Agente.
+    let localGate = AccessGate()
     let numbers = NumberOverlay()
     let speaker = Speaker()
     /// A question the agent asked the user, waiting for the spoken answer.
@@ -44,6 +47,8 @@ final class Coordinator {
     private var dictationIdle: Task<Void, Never>?
     private var dictationChain: Task<Void, Never>?
     private var lastRepeatable: Command?
+    /// The last repeatable action came from the Corsia locale: «ripeti» passes it through the gate again.
+    private var lastRepeatableLocal: LocalAction?
     private var busy = false
     private var cancelRequested = false
     private let escape = EscapeMonitor()
@@ -287,6 +292,28 @@ final class Coordinator {
         agent.tools.askUser = { [weak self] question, isConfirmation in
             await self?.askByVoice(question, confirmation: isConfirmation)
         }
+        // The password field from the focused element alone: the gate adds at most ~20 ms to the lane.
+        localGate.environment.focusedFieldIsSecure = { AccessGate.focusedFieldIsSecure() }
+        // The Corsia locale asks with the same spoken question (AD-24): busy is on while it waits.
+        localGate.askUser = { [weak self] question, isConfirmation in
+            await self?.askByVoice(question, confirmation: isConfirmation)
+        }
+        // The access level in force, as while the Agente works (FR-54).
+        localGate.onAccessNotice = { [weak self] text in
+            self?.hud.show(.thinking, text, detail: "⚡️ Corsia locale")
+        }
+        // Esc while the Corsia locale asks: no answer, so the action is cancelled.
+        localGate.onQuestion = { [weak self] asking in
+            guard let self else { return }
+            if asking {
+                self.escape.start { [weak self] in
+                    Log.info("Corsia locale: domanda annullata con Esc")
+                    self?.answerAgent(nil)
+                }
+            } else {
+                self.escape.stop()
+            }
+        }
     }
 
     /// Shows the agent's question and waits for the next sentence (25 s max).
@@ -473,7 +500,7 @@ final class Coordinator {
                     Log.info("Instradamento: ignora · chiacchiera durante una domanda dell'agente · \(spoken.count) caratteri")
                     return
                 }
-                Log.info("🎙 Risposta all'agente: \(Log.said(spoken))")
+                Log.info("🎙 Risposta alla domanda: \(Log.said(spoken))")
                 hud.show(.working, spoken, detail: "🤖 Ricevuto")
                 answerAgent(spoken)
             }
@@ -702,13 +729,19 @@ final class Coordinator {
         done(out, detail: "✍️ Scritto · «cancella quello che hai scritto» per toglierlo", logText: false)
     }
 
-    /// Lane 2: a validated one-step action, run without the agent (FR-11).
+    /// Lane 2: a validated one-step action, run without the agent (FR-11). Proposed by a model, so
+    /// it passes through the gate first (FR-56, Story 10.2): a refusal or a «no» never goes to the Agente.
     private func runLocal(_ action: LocalAction, text: String, app: String) async {
-        do {
+        localGate.reset()
+        localGate.currentRequest = text
+        let tool = AccessGate.toolCall(for: action).name
+        let outcome = await localGate.runLocal(action, execute: {
             switch action {
             case .keys(let combo, let label):
                 try executor.press(combo)
+                // «ripeti» runs it again through the gate: the app in front may have changed.
                 lastRepeatable = .keys(combo: combo, label: label, confirm: false)
+                lastRepeatableLocal = action
                 done(label, detail: "⚡️ \(combo)")
             case .openApp(let name):
                 let opened = try await executor.openApp(name)
@@ -719,13 +752,33 @@ final class Coordinator {
             case .scroll(let direction):
                 await executor.scroll(direction, amount: 1)
                 lastRepeatable = .scroll(direction: direction, amount: 1)
+                lastRepeatableLocal = action
                 done(direction == "up" ? "↑ Su" : "↓ Giù", detail: "⚡️")
             }
-            conversation.log.add(request: text, outcome: "fatto in locale: \(action.summary)", app: app)
-        } catch {
-            // The local proposal did not work out: the agent can still try.
-            Log.info("Corsia locale fallita (\(error.localizedDescription)): passo all'agente")
+        }, fallback: { error in
+            // The local proposal did not work out, and nobody was asked: the agent can still try.
+            Log.info("Corsia locale fallita (\(Log.isPrivate ? "errore" : error.localizedDescription)): passo all'agente")
             await runSmart(text, deep: false, context: ScreenContext.capture(includeLabels: false))
+        })
+        switch outcome {
+        case .done:
+            conversation.log.add(request: text, outcome: "fatto in locale: \(action.summary)", app: app)
+        case .fellBack:
+            break
+        case .refused(let sentence):
+            Log.info("Corsia locale: \(tool) rifiutato dal gate")
+            fail(sentence)
+            conversation.log.add(request: text, outcome: "rifiutato in locale: \(sentence)", app: app)
+            if settings.speakReplies { await speaker.say(sentence) }
+        case .cancelled:
+            Log.info("Corsia locale: \(tool) annullato")
+            Sound.cancel()
+            hud.show(.info, "Annullato", autoHide: 1.5)
+            conversation.log.add(request: text, outcome: "annullato: \(action.summary)", app: app)
+        case .failed(let message):
+            // After a «sì» the Agente would ask again: say it did not work instead.
+            fail("Non riuscito", detail: message)
+            conversation.log.add(request: text, outcome: "non riuscito in locale: \(action.summary)", app: app)
         }
     }
 
@@ -807,13 +860,18 @@ final class Coordinator {
                 }
                 try executor.press(combo)
                 lastRepeatable = cmd
+                lastRepeatableLocal = nil
                 done(label)
             case .scroll(let direction, let amount):
                 await executor.scroll(direction, amount: amount)
                 lastRepeatable = cmd
+                lastRepeatableLocal = nil
                 done(direction == "up" ? "↑ Su" : "↓ Giù")
             case .repeatLast:
-                if let last = lastRepeatable { await runFast(last, original: original) }
+                if let local = lastRepeatableLocal {
+                    // Proposed by a model: the gate judges it again, in the app in front now.
+                    await runLocal(local, text: original, app: AX.frontmostApplication()?.localizedName ?? "")
+                } else if let last = lastRepeatable { await runFast(last, original: original) }
                 else { hud.show(.info, "Niente da ripetere", autoHide: 1.5) }
             case .openApp(let name):
                 let opened = try await executor.openApp(name)
