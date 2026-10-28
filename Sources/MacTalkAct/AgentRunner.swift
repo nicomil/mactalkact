@@ -119,8 +119,19 @@ final class AgentRunner {
     private(set) var lastLevel: AgentLevel?
     private(set) var firstLevel: AgentLevel?
     private(set) var lastEscalation: String?
-    /// Seconds spent at the Instant level before the scalata (goal ≤ 1 s, FR-43).
+    /// Seconds spent at the Instant level until the signal of the scalata (FR-43).
     private(set) var lastEscalationCost: Double?
+    /// Story 11.3: seconds from the signal of the scalata to the level that takes over having the
+    /// request (its `init`, or its first token): end of the Instant turn, elements, session, MCP.
+    private(set) var lastHandoff: Double?
+    /// The handoff reused the last observation instead of scanning the window again (Story 11.3).
+    private(set) var lastObservationReused: Bool?
+    /// The session of the level that takes over was started while the Instant level worked (Story 11.3).
+    private(set) var lastTakeoverPrepared: Bool?
+    /// The level whose session was prepared (`.deep` when the fast model is off), for the log and the Bench.
+    private(set) var lastTakeoverLevel: AgentLevel?
+    /// The event of the level that took over that ended the handoff: «init» or «primo token».
+    private(set) var lastHandoffEvent: String?
     /// Called when any engine changes state; the aggregate is `availability`.
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
     /// Called when one engine changes state (menu, "Codex è tornato").
@@ -284,6 +295,32 @@ final class AgentRunner {
         return levels
     }
 
+    /// Story 11.3: while the Instant level works, the Long session of `level` gets ready in parallel, with
+    /// the checks and the switch of Story 11.2 (Claude, not private nor reserved; the Long session in use
+    /// is ClaudeEngine's check). No throttle: the CLI never starts a second process for a level, and a
+    /// session already alive is left as it is. It receives nothing before the handoff: one process acts.
+    /// Returns the level whose session started (the engine's effective level), or nil.
+    private func prepareTakeover(_ engine: AgentEngine, level: AgentLevel, chosen: EngineID, privateReason: String?,
+                                 generation: Int) -> AgentLevel? {
+        if let block = Self.prepareBlock(switchOn: settings.prepareSessionOnWake, chosen: chosen, using: engine.id,
+                                         running: false, sinceLast: .infinity, privateReason: { privateReason }) {
+            Log.debug("Agente: sessione del livello che subentra non preparata durante l'istantaneo, \(block)")
+            return nil
+        }
+        let started = engine.prepareLevel(level, generation: generation)
+        if let started { Log.info("Agente: preparo la sessione \(Self.levelName(started)) mentre lavora l'istantaneo") }
+        return started
+    }
+
+    /// «rapida», «profonda», «istantanea»: the session of a level, for the log and the Bench.
+    nonisolated static func levelName(_ level: AgentLevel) -> String {
+        switch level {
+        case .instant: return "istantanea"
+        case .fast: return "rapida"
+        case .deep: return "profonda"
+        }
+    }
+
     // MARK: Running
 
     /// Why a request stopped after the agent had already acted (AD-15).
@@ -358,6 +395,11 @@ final class AgentRunner {
         // A request refused below must not leave the previous request's phases for the Bench.
         lastEscalation = nil
         lastEscalationCost = nil
+        lastHandoff = nil
+        lastObservationReused = nil
+        lastTakeoverPrepared = nil
+        lastTakeoverLevel = nil
+        lastHandoffEvent = nil
         lastLevel = nil
         firstLevel = nil
         lastPhases = [:]
@@ -370,6 +412,7 @@ final class AgentRunner {
         running = true
         // One monotonic clock for the whole request, split into contiguous phases (FR-41, AD-18).
         let timer = PhaseTimer()
+        let handoff = HandoffClock()
         tools.onCall = { start in timer.tool(start) }
         tools.onClassified = { timer.carve(.classifier, seconds: $0) }
         if settings.riskClassifier { tools.riskClassifier.prewarm() }
@@ -388,6 +431,8 @@ final class AgentRunner {
             lastTotal = total
             lastTurns = timer.turns
             lastFirstTokenAt = timer.firstTokenAt
+            lastHandoff = handoff.seconds
+            lastHandoffEvent = handoff.endedBy
             Log.debug("Agente: fasi " + BenchPhase.allCases.compactMap { p in
                 phases[p].map { String(format: "%@ %.2fs", p.rawValue, $0) } }.joined(separator: " · "))
         }
@@ -427,6 +472,8 @@ final class AgentRunner {
         var tried: Set<EngineID> = []
         // Instant level (FR-43): Claude only, once; after a scalata the same request goes on at `.fast`.
         var instantPending = instant && !deep && settings.instantLevel
+        /// A scalata just happened: the next attempt (Claude's) ends the handoff.
+        var takeoverPending = false
 
         while true {
             // After a scalata: nothing more once the user stopped or the turn's time is over.
@@ -439,7 +486,16 @@ final class AgentRunner {
             }
             announce(choice)
             timer.mark(.session)
-            engine.onPhase = { timer.event($0) }
+            // Only Claude's attempt right after a scalata ends the handoff: not a later fallback engine.
+            let isTakeover = takeoverPending && engine.id == .claude
+            takeoverPending = false
+            engine.onPhase = { e in
+                timer.event(e)
+                // After a scalata: the level that takes over has the request (Story 11.3).
+                guard isTakeover else { return }
+                if e == .serverConnected { handoff.ready("init") }
+                if e == .firstToken { handoff.ready("primo token") }
+            }
             let attemptLevel: AgentLevel = instantPending && engine.id == .claude ? .instant : level
             var attempt = req
             attempt.level = attemptLevel
@@ -453,7 +509,18 @@ final class AgentRunner {
             lastLevel = attemptLevel
             if firstLevel == nil { firstLevel = attemptLevel }
             tools.instantGuard = attemptLevel == .instant
-            tools.onEscalate = { [weak engine] _ in engine?.interrupt() }
+            /// The elements for the level that takes over, read at the signal (Story 11.3): the Instant turn may
+            /// take up to 3 s to close after the interrupt, and `instantGuard` already blocks its calls.
+            var signalElements: (text: String, reused: Bool)?
+            func handoffElements() -> (text: String, reused: Bool) {
+                // No action with effects since the last read, same window, a few seconds old: reused.
+                if let kept = tools.currentObservation { return (kept, true) }
+                return (tools.initialObservation(), false)
+            }
+            tools.onEscalate = { [weak engine] _ in
+                engine?.interrupt()
+                signalElements = handoffElements()
+            }
             let model = engine.model(for: attemptLevel)
             let started = Date()
             // Cloud engines get the outcome of each action (AD-19); the local engine observes on its own.
@@ -465,8 +532,11 @@ final class AgentRunner {
             if engine.id.isCloud, !tried.isEmpty { tools.anticipateCurrentView() }
             /// A scalata: the same engine goes on at `.fast` with what was done and the current elements.
             func escalate(_ reason: String) {
-                let cost = Date().timeIntervalSince(started)
-                Log.info("Agente: istantaneo → \(level == .deep ? "profondo" : "rapido"), \(reason) (\(String(format: "%.1f", cost)) s)")
+                // The signal: the tools' (second call, failed action), or the end of the turn (answer, error).
+                let turnEnded = Date()
+                let signal = tools.escalatedAt ?? turnEnded
+                handoff.start(at: signal)
+                let cost = signal.timeIntervalSince(started)
                 lastEscalation = reason
                 lastEscalationCost = cost
                 instantPending = false
@@ -475,7 +545,14 @@ final class AgentRunner {
                 engine.onPhase = nil
                 let done = tools.callLog.isEmpty ? "" : "\n<already_done>\nThe app already did this for the request (do not repeat an action that worked):\n"
                     + tools.callLog.joined(separator: "\n") + "\n</already_done>"
-                let now = tools.initialObservation()
+                // Read at the signal; for an answer or an error, the signal is now (Story 11.3).
+                let elements = signalElements ?? handoffElements()
+                lastObservationReused = elements.reused
+                let now = elements.text
+                takeoverPending = true
+                Log.info("Agente: istantaneo → \(level == .deep ? "profondo" : "rapido"), \(reason) (\(String(format: "%.1f", cost)) s"
+                         + String(format: ", turno istantaneo chiuso dopo %.2f s", turnEnded.timeIntervalSince(signal))
+                         + (elements.reused ? ", osservazione riusata)" : ", nuova osservazione)"))
                 req.message = message(request, context: context, recent: recent, elements: now) + done
                 // The fast session keeps its own memory cursor: the real snapshot, no restart.
                 if let memory {
@@ -485,6 +562,11 @@ final class AgentRunner {
                 } else {
                     req.messageSince = { [unowned self] _ in self.message(request, context: context, recent: recent, elements: now) + done }
                 }
+            }
+            if attemptLevel == .instant {
+                lastTakeoverLevel = prepareTakeover(engine, level: level, chosen: chosenEngine, privateReason: privateReason,
+                                                    generation: req.memory.generation)
+                lastTakeoverPrepared = lastTakeoverLevel != nil
             }
             do {
                 let answer = try await engine.run(attempt)
@@ -602,4 +684,28 @@ final class AgentRunner {
     static func resetDate(from message: String, now: Date = Date()) -> Date? {
         LimitMessage.resetDate(from: message, now: now)
     }
+}
+
+/// Story 11.3: the handoff of a scalata, from its signal to the level that takes over having the request.
+/// Written from the engines' reading tasks, read by AgentRunner at the end of the request.
+final class HandoffClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var from: Date?
+    private var value: Double?
+    private var event: String?
+
+    func start(at signal: Date) { lock.withLock { if from == nil { from = signal } } }
+
+    /// The first event of the level that takes over (`by`: «init», «primo token»); events before the
+    /// start are not the handoff.
+    func ready(_ by: String) {
+        lock.withLock {
+            guard let from, value == nil else { return }
+            value = Date().timeIntervalSince(from)
+            event = by
+        }
+    }
+
+    var seconds: Double? { lock.withLock { value } }
+    var endedBy: String? { lock.withLock { event } }
 }

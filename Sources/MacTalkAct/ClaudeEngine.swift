@@ -181,10 +181,25 @@ final class ClaudeEngine: AgentEngine {
         watchLongSession()
         var levels = [effective(.fast)]
         if settings.instantLevel { levels.append(.instant) }
-        return levels.filter { level in
-            guard let c = config(level) else { return false }
-            return cli(level).prepareSession(c, generation: generation)
-        }
+        return levels.filter { startSession($0, generation: generation) }
+    }
+
+    /// Story 11.3: while the Instant level works, the session of the level that takes over after a
+    /// scalata starts up to the connection to the tools. It receives the request only at the handoff.
+    /// Only with the Long session in use; nothing when that session is alive, being prepared or in use.
+    /// The other checks (switch, engine, privacy) are AgentRunner's.
+    func prepareLevel(_ level: AgentLevel, generation: Int) -> AgentLevel? {
+        guard availability == .available else { return nil }
+        refreshExecutable()
+        guard usesSession else { return nil }
+        watchLongSession()
+        let real = effective(level)
+        return startSession(real, generation: generation) ? real : nil
+    }
+
+    private func startSession(_ level: AgentLevel, generation: Int) -> Bool {
+        guard let c = config(level) else { return false }
+        return cli(level).prepareSession(c, generation: generation)
     }
 
     /// Debug only: `claude` processes started by the three levels, and the reason of the last close.

@@ -253,10 +253,15 @@ protocol AgentEngine: AnyObject {
     /// Ends the turn in progress without losing the engine's state (scalata, AD-13). By default, `cancel()`.
     func interrupt()
     func shutdown()
+    /// Starts the Long session of `level` now, without sending anything, so a scalata finds it ready
+    /// (Story 11.3). Returns the level whose session started (the engine's effective level), or nil.
+    /// By default nothing: only Claude has levels.
+    func prepareLevel(_ level: AgentLevel, generation: Int) -> AgentLevel?
 }
 
 extension AgentEngine {
     func interrupt() { cancel() }
+    func prepareLevel(_ level: AgentLevel, generation: Int) -> AgentLevel? { nil }
 }
 
 // MARK: - Selection (AD-14)

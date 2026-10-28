@@ -54,6 +54,22 @@ final class AgentTools {
     var instantGuard = false
     var onEscalate: ((String) -> Void)?
     private(set) var escalation: String?
+    /// When the tools gave the signal of a scalata: the start of the handoff (Story 11.3).
+    private(set) var escalatedAt: Date?
+    /// The last full read of the window as the engine would receive it (the elements of the request, an
+    /// `observe` without `query`, the outcome scan after an action), with the actions with effects done
+    /// until then, when, and the app and window it shows (Story 11.3). Nil after a refused action that
+    /// found another app in front or no permission, and with a new task.
+    private var lastObservation: Observation?
+    private struct Observation {
+        let text: String
+        let effects: Int
+        let at: Date
+        let app: String
+        let title: String
+    }
+    /// An observation older than this is read again at the handoff of a scalata.
+    nonisolated static let observationMaxAge: TimeInterval = 4
     /// The calls of this request with the first line of their result, for the level that takes over.
     private(set) var callLog: [String] = []
     /// Text changes made during the current task, for the conversation memory (FR-8).
@@ -81,10 +97,12 @@ final class AgentTools {
             generation = 0
             lastView = nil
             lastWebArea = nil
+            lastObservation = nil
         }
         lastShot = nil
         callCount = 0
         escalation = nil
+        escalatedAt = nil
         instantGuard = false
         // The same request retried on another engine keeps what the first one asked (AD-15).
         gate.reset(keepCounters: keepElements)
@@ -341,10 +359,12 @@ final class AgentTools {
             // Without the Accessibility permission macOS drops synthetic keys and clicks
             // silently: say so instead of reporting an action that never happened.
             Log.info("Agente: azione bloccata, manca il permesso di Accessibilità")
+            lastObservation = nil
             return .error("MacTalkAct does not have the Accessibility permission, so keys and clicks are ignored by macOS. Stop and tell the user to enable MacTalkAct in System Settings › Privacy & Security › Accessibility.")
         }
         if Self.actingTools.contains(name), let problem = frontmostChanged() {
             Log.info("Agente: azione bloccata, app in primo piano cambiata")
+            lastObservation = nil
             return .error(problem)
         }
         // Access level, password fields, «conferma ogni azione» and second layer: the gate decides (AD-21).
@@ -821,22 +841,94 @@ final class AgentTools {
     }
 
     /// The Instant turn ended without doing the job: no action with effects, or an answer that says so.
-    /// Pure, tested by `--selftest`.
+    /// Story 11.3: the first sentence is judged with every sign, as before; the rest of the answer
+    /// (questions included) only with the strong ones, so «Ho cliccato Prodotti. Non trovo però la voce
+    /// Accessori.» escalates and «Ho svuotato il cestino. Non c'è più niente dentro.» stays a success.
+    /// Signs match whole words («non ce» is not «non cerca»). Pure, tested by `--selftest`.
     static func instantGaveUp(answer: String, effectfulCalls: Int) -> String? {
         if effectfulCalls == 0 { return "nessuna azione" }
-        // Only the first sentence: «Fatto. Vuoi che lo invii?» is a success.
-        let first = answer.split(whereSeparator: { ".!?\n".contains($0) }).first.map(String.init) ?? answer
-        let n = Grammar.normalize(first)
-        let signs = ["non sono riuscit", "non riesco", "non ho potuto", "non posso", "non trovo", "non ho trovato",
-                     "non ho ancora", "non e stato possibile", "non si e aperto", "non vedo", "non c e", "non ce",
-                     "impossibile", "purtroppo", "non esiste", "i couldn", "i can t", "unable"]
-        return signs.contains(where: n.contains) ? "risposta senza risultato" : nil
+        let parts = sentences(answer).map { " " + Grammar.normalize($0) + " " }
+        guard let first = parts.first else { return nil }
+        let rest = parts.dropFirst().joined(separator: "|")
+        let gaveUp = allGiveUpSigns.contains { first.contains(" \($0) ") } || strongGiveUpSigns.contains { rest.contains(" \($0) ") }
+        return gaveUp ? "risposta senza risultato" : nil
+    }
+
+    /// Signs that say the job was not done wherever they are in the answer.
+    static let strongGiveUpSigns = ["non trovo", "non ho trovato", "non sono riuscito", "non sono riuscita", "non riesco",
+                                    "non ho potuto", "non e stato possibile", "impossibile", "i couldn", "i can t", "unable",
+                                    // «il clic su Accessori non l'ho ancora fatto» (menu-accessori, ricerca §17).
+                                    "non ho ancora", "non l ho ancora"]
+    /// Signs that count only in the first sentence: later they usually describe the result
+    /// («Non c'è più niente dentro», «Non vedo altri messaggi», «Purtroppo ci ha messo un po'»).
+    static let allGiveUpSigns = strongGiveUpSigns + ["non posso", "non si e aperto", "non vedo",
+                                                     "non c e", "non ce", "purtroppo", "non esiste"]
+
+    /// The sentences of an answer: split on «.», «!» and «?» followed by a space or the end, never inside
+    /// «…» or quotes (a label such as «Serve aiuto?»), so «18.30» and «www.sito.it» stay whole. Pure.
+    static func sentences(_ answer: String) -> [String] {
+        var out: [String] = []
+        var current = ""
+        var quoted = 0
+        var straightQuote = false
+        let chars = Array(answer)
+        for (i, c) in chars.enumerated() {
+            current.append(c)
+            switch c {
+            case "«", "“": quoted += 1
+            case "»", "”": quoted = max(0, quoted - 1)
+            case "\"": straightQuote.toggle()
+            case ".", "!", "?":
+                let atEnd = i + 1 == chars.count || chars[i + 1].isWhitespace
+                if atEnd, quoted == 0, !straightQuote {
+                    let text = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if text.count > 1 { out.append(String(text.dropLast())) }
+                    current = ""
+                }
+            default: break
+            }
+        }
+        let tail = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty { out.append(tail) }
+        return out
     }
 
     private func escalate(_ reason: String) {
         guard escalation == nil else { return }
         escalation = reason
+        escalatedAt = Date()
         onEscalate?(reason)
+    }
+
+    /// The last full read of the window if it is still the screen: no action with effects after it,
+    /// younger than `observationMaxAge`, same app and window title in front. The handoff of a scalata
+    /// reuses it instead of scanning the window again (Story 11.3).
+    var currentObservation: String? {
+        guard let o = lastObservation else { return nil }
+        let front = AX.frontApp()?.1.localizedName ?? ""
+        guard Self.observationReusable(effectsThen: o.effects, effectsNow: effectfulCalls, age: Date().timeIntervalSince(o.at),
+                                       appThen: o.app, appNow: front, titleThen: o.title,
+                                       titleNow: { Self.frontWindowTitle() }) else { return nil }
+        return o.text
+    }
+
+    /// Pure, tested by `--selftest`. The title is read last and only when needed.
+    nonisolated static func observationReusable(effectsThen: Int, effectsNow: Int, age: TimeInterval, appThen: String,
+                                                appNow: String, titleThen: String, titleNow: () -> String) -> Bool {
+        effectsThen == effectsNow && age >= 0 && age < observationMaxAge && appThen == appNow && titleThen == titleNow()
+    }
+
+    /// Stores what the engine received (or would receive) of a full view of the window.
+    private func remember(_ view: View, rendered text: String) {
+        let sent = gate.showsOnlyControls(cloud: cloudEngine) ? Self.controlsOnly(text) : text
+        lastObservation = Observation(text: sent, effects: effectfulCalls, at: Date(), app: view.app, title: view.title)
+    }
+
+    /// Debug only (`--fallback-test`): an observation of the window in front, as if the engine had
+    /// received it, without a scan.
+    func debugSetObservation(_ text: String) {
+        lastObservation = Observation(text: text, effects: effectfulCalls, at: Date(),
+                                      app: AX.frontApp()?.1.localizedName ?? "", title: Self.frontWindowTitle())
     }
 
 
@@ -992,15 +1084,19 @@ final class AgentTools {
             gate.anticipate { [weak self] app, wanted in self?.anticipationCandidates(view, app: app, wanted: wanted) ?? [] }
         }
         let text = render(view, query: nil)
-        return gate.showsOnlyControls(cloud: cloudEngine) ? Self.controlsOnly(text) : text
+        remember(view, rendered: text)
+        return lastObservation?.text ?? text
     }
 
     private func observe(query: String?) -> String {
         generation += 1
         let anticipating = query == nil && gate.anticipationWouldRun
         let view = scan(query: query, anticipating: anticipating)
+        let text = render(view, query: query)
         if query == nil {
             lastView = view
+            // What the engine receives (after the «solo clic» filter of `call`): a handoff can reuse it.
+            remember(view, rendered: text)
             // A new observation: the second layer judges its controls while the engine thinks.
             if anticipating {
                 gate.anticipate { [weak self] app, wanted in self?.anticipationCandidates(view, app: app, wanted: wanted) ?? [] }
@@ -1008,7 +1104,7 @@ final class AgentTools {
                 gate.cancelAnticipation()
             }
         }
-        return render(view, query: query)
+        return text
     }
 
     private func render(_ view: View, query: String?) -> String {
@@ -1242,6 +1338,8 @@ final class AgentTools {
         let before = lastView
         let now = scan(query: nil)
         lastView = now
+        // The newest read of the screen: a handoff can reuse it (Story 11.3).
+        remember(now, rendered: render(now, query: nil))
         guard let before else {
             return "NOW: app \(now.app) · window «\(now.title)» · focus \(now.focus.isEmpty ? "none" : now.focus). Observe to see the elements."
         }

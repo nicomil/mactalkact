@@ -157,6 +157,51 @@ enum DebugCLI {
             check("nessuna azione → scalata", AgentTools.instantGaveUp(answer: "Fatto.", effectfulCalls: 0) == "nessuna azione")
             check("«non trovo» → scalata", AgentTools.instantGaveUp(answer: "Non trovo l'articolo 137.", effectfulCalls: 1) != nil)
             check("risposta riuscita → resta", AgentTools.instantGaveUp(answer: "Ho spuntato Bruno alle 18:30.", effectfulCalls: 1) == nil)
+            // Story 11.3: the whole answer, except the courtesy questions.
+            check("resa nella seconda frase → scalata", AgentTools.instantGaveUp(answer: "Ho cliccato Prodotti. Non trovo però la voce Accessori.", effectfulCalls: 1) == "risposta senza risultato")
+            check("domande di cortesia → resta", AgentTools.instantGaveUp(answer: "Fatto. Non c'è altro? Vuoi che lo apra?", effectfulCalls: 1) == nil)
+            check("«Fatto. Vuoi che lo invii?» → resta", AgentTools.instantGaveUp(answer: "Fatto. Vuoi che lo invii?", effectfulCalls: 1) == nil)
+            check("resa prima della domanda nella stessa frase → scalata", AgentTools.instantGaveUp(answer: "Non trovo Accessori, vuoi che cerchi altrove?", effectfulCalls: 1) != nil)
+            check("resa forte dopo un punto esclamativo → scalata", AgentTools.instantGaveUp(answer: "Ho aperto il menu! Non sono riuscito a trovare la voce.", effectfulCalls: 1) != nil)
+            check("resa nella prima frase su più righe → scalata", AgentTools.instantGaveUp(answer: "Ho cliccato Salva\nNon vedo la conferma", effectfulCalls: 1) != nil)
+            // Successes whose later sentences describe the result with a weak sign: they stay.
+            for ok in ["Ho svuotato il cestino. Non c'è più niente dentro.", "Ho chiuso l'avviso. Non vedo altri messaggi.",
+                       "Fatto. Purtroppo ci ha messo un po'."] {
+                check("successo che resta: «\(ok)»", AgentTools.instantGaveUp(answer: ok, effectfulCalls: 1) == nil)
+            }
+            check("menu-accessori (§17): «non l'ho ancora fatto» nella seconda frase → scalata", AgentTools.instantGaveUp(answer: "Ho aperto il menu Prodotti. Il clic su Accessori non l'ho ancora fatto.", effectfulCalls: 1) != nil)
+            check("resa dopo la virgola in una domanda → scalata", AgentTools.instantGaveUp(answer: "Vuoi che riprovi, visto che non trovo il pulsante?", effectfulCalls: 1) != nil)
+            check("«non ce» non è «non cerca»", AgentTools.instantGaveUp(answer: "Non cerca più nulla: ho chiuso la ricerca.", effectfulCalls: 1) == nil)
+            check("«18.30» non divide la frase: segno debole nella prima → scalata", AgentTools.instantGaveUp(answer: "Alle 18.30 non c'è nessun treno.", effectfulCalls: 1) != nil)
+            check("«www.sito.it» non divide la frase: segno debole nella prima → scalata", AgentTools.instantGaveUp(answer: "Su www.sito.it non vedo il modulo.", effectfulCalls: 1) != nil)
+            check("«?» dentro «…» non divide la frase", AgentTools.sentences("Ho cliccato «Serve aiuto? Scrivici» nel menu. Vuoi altro?")
+                  == ["Ho cliccato «Serve aiuto? Scrivici» nel menu", "Vuoi altro"])
+            check("orari e indirizzi restano interi", AgentTools.sentences("Alle 18.30 su www.sito.it. Fatto!") == ["Alle 18.30 su www.sito.it", "Fatto"])
+            check("etichetta con «?» e resa dopo → scalata", AgentTools.instantGaveUp(answer: "Ho aperto «Hai trovato?». Non trovo però il modulo.", effectfulCalls: 1) != nil)
+            check("riepilogo della scalata: costo = istantaneo + passaggio, senza le righe non misurate",
+                  Self.escalationSummary([(2.0, 0.3), (3.0, 0.5), (0.1, nil)]).contains("costo mediana 2.90 s")
+                  && Self.escalationSummary([(2.0, 0.3), (3.0, 0.5), (0.1, nil)]).contains("1 senza passaggio misurato")
+                  && Self.escalationSummary([(0.2, nil)]).contains("non misurato") && !Self.escalationSummary([(0.2, nil)]).contains("rispettato")
+                  && Self.escalationSummary([(0.2, 0.3)]).contains("obiettivo ≤ 1 s: rispettato")
+                  && Self.escalationSummary([]) == "nessuna")
+            check("riepilogo della scalata: la parte che lo tiene sopra si conta compito per compito",
+                  Self.escalationSummary([(2.0, 0.3), (0.4, 1.5), (0.5, 2.0)]).contains("lo tiene sopra il passaggio di consegne in 2 su 3, il lavoro dell'istantaneo in 1"))
+            check("osservazione riusabile: stesse azioni, giovane, stessa app e finestra",
+                  AgentTools.observationReusable(effectsThen: 1, effectsNow: 1, age: 1, appThen: "Safari", appNow: "Safari", titleThen: "A", titleNow: { "A" })
+                  && !AgentTools.observationReusable(effectsThen: 1, effectsNow: 1, age: 4.5, appThen: "Safari", appNow: "Safari", titleThen: "A", titleNow: { "A" })
+                  && !AgentTools.observationReusable(effectsThen: 1, effectsNow: 1, age: 1, appThen: "Safari", appNow: "Mail", titleThen: "A", titleNow: { "A" })
+                  && !AgentTools.observationReusable(effectsThen: 1, effectsNow: 1, age: 1, appThen: "Safari", appNow: "Safari", titleThen: "A", titleNow: { "B" })
+                  && !AgentTools.observationReusable(effectsThen: 0, effectsNow: 1, age: 1, appThen: "Safari", appNow: "Safari", titleThen: "A", titleNow: { "A" }))
+            // Story 11.3: the last observation is reused only without actions with effects after it.
+            let tools = AgentTools(executor: Executor())
+            check("nessuna osservazione: niente da riusare", tools.currentObservation == nil)
+            tools.debugSetObservation("[1] button «Salva»")
+            check("osservazione ancora valida", tools.currentObservation == "[1] button «Salva»")
+            tools.simulateEffect()
+            check("dopo un'azione con effetti: osservazione scaduta", tools.currentObservation == nil)
+            tools.debugSetObservation("[1] button «Salva»")
+            tools.reset()
+            check("nuovo compito: osservazione scaduta", tools.currentObservation == nil)
         }
         print("Eventi dei Motori per le fasi:")
         do {
@@ -1132,6 +1177,24 @@ final class FakeEngine: AgentEngine {
     var failingActionWhenInstant = false
     /// At the Instant level: no tool call and «Non trovo Salva.».
     var givesUpWhenInstant = false
+    /// At the Instant level: one action with effects, then this answer (Story 11.3, the rule of the giving up).
+    var instantAnswer: String?
+    /// At the Instant level, with `twoCallsWhenInstant`: an action with effects between the two calls.
+    var effectBeforeSecondCall = false
+    /// Levels whose session was prepared through `prepareLevel` (Story 11.3).
+    private(set) var prepared: [AgentLevel] = []
+    /// `interrupt()` calls that arrived while a request was running: the turn was stopped at the signal.
+    private(set) var interruptsWhileRunning = 0
+    private var runningNow = false
+    /// At the Instant level, with `twoCallsWhenInstant`: the first call is `wait` (outcome scan, no
+    /// effects) after marking the observation of before, then the second call (Story 11.3).
+    var waitFirstWhenInstant = false
+    /// At the Instant level: the turn stays open this long after the second call, like a CLI slow to stop.
+    var lingerAfterSecondCall: Duration = .zero
+    /// The message of the last request received.
+    private(set) var lastMessage = ""
+    /// Marks the observation that `waitFirstWhenInstant` must replace.
+    nonisolated static let preWaitMarker = "OSSERVAZIONE-PRIMA-DEL-WAIT"
     /// `interrupt()` makes the running request throw, like the real CLI after a control_request.
     var throwsOnInterrupt = false
     private var interruptedRun = false
@@ -1152,24 +1215,42 @@ final class FakeEngine: AgentEngine {
     func refreshAvailability() {}
     func prewarm() {}
     func cancel() {}
-    func interrupt() { interrupts += 1; if throwsOnInterrupt { interruptedRun = true } }
+    func interrupt() {
+        interrupts += 1
+        if runningNow { interruptsWhileRunning += 1 }
+        if throwsOnInterrupt { interruptedRun = true }
+    }
     func shutdown() {}
+    func prepareLevel(_ level: AgentLevel, generation: Int) -> AgentLevel? { prepared.append(level); return level }
 
     func run(_ request: AgentRequest) async throws -> String {
         runs += 1
         levels.append(request.level)
+        lastMessage = request.message
         anticipationSeen.append(tools.gate.anticipationAllowed)
-        if twoCallsWhenInstant || failingActionWhenInstant || givesUpWhenInstant {
+        runningNow = true
+        defer { runningNow = false }
+        if twoCallsWhenInstant || failingActionWhenInstant || givesUpWhenInstant || instantAnswer != nil {
             guard request.level == .instant else {
+                // The level that takes over has the request: the end of the handoff (Story 11.3).
+                onPhase?(.serverConnected)
                 return request.message.contains("<already_done>") ? "fatto rapido con il già fatto" : "fatto rapido"
             }
             interruptedRun = false
             if givesUpWhenInstant { return "Non trovo Salva." }
+            if let instantAnswer { tools.simulateEffect(); return instantAnswer }
             if failingActionWhenInstant {
                 _ = await tools.call("click", ["id": 99_999])
             } else {
+                if waitFirstWhenInstant {
+                    tools.debugSetObservation(Self.preWaitMarker)
+                    _ = await tools.call("wait", ["seconds": 0.1])
+                } else {
+                    _ = await tools.call("observe", [:])
+                }
+                if effectBeforeSecondCall { tools.simulateEffect() }
                 _ = await tools.call("observe", [:])
-                _ = await tools.call("observe", [:])
+                if lingerAfterSecondCall > .zero { try? await Task.sleep(for: lingerAfterSecondCall) }
             }
             if interruptedRun { throw AgentEngineError.failed("error_during_execution") }
             return "ok"
@@ -1337,9 +1418,10 @@ extension DebugCLI {
         let instantWas = AppSettings.shared.instantLevel
         AppSettings.shared.instantLevel = true
         defer { AppSettings.shared.instantLevel = instantWas }
-        func instantRun(_ setup: (FakeEngine) -> Void) async -> (AgentRunner, FakeEngine, String?) {
+        func instantRun(agentSetup: (AgentRunner) -> Void = { _ in }, _ setup: (FakeEngine) -> Void) async -> (AgentRunner, FakeEngine, String?) {
             let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
             try? await agent.start()
+            agentSetup(agent)
             let claude = FakeEngine(.claude, tools: agent.tools, fails: false)
             setup(claude)
             agent.register(claude)
@@ -1355,6 +1437,10 @@ extension DebugCLI {
             let (a2, c2, ans2) = await instantRun { $0.failingActionWhenInstant = true }
             check("azione fallita → scalata con il già fatto", c2.levels == [.instant, .fast] && ans2 == "fatto rapido con il già fatto"
                   && a2.lastEscalation?.hasPrefix("errore") == true)
+            // Story 11.3: a click that ran (effects 1) is followed by the outcome scan, the newest read: reused.
+            // Refused for the missing Accessibility permission: the observation is dropped and read again.
+            check("azione fallita: osservazione dall'esito se l'azione è partita, nuova se rifiutata per il permesso",
+                  a2.tools.effectfulCalls == 1 ? a2.lastObservationReused == true : (AXIsProcessTrusted() || a2.lastObservationReused == false))
             let (a3, c3, ans3) = await instantRun { $0.givesUpWhenInstant = true }
             check("turno senza azioni che si arrende → scalata", c3.levels == [.instant, .fast] && ans3 == "fatto rapido"
                   && a3.lastEscalation == "nessuna azione" && a3.firstLevel == .instant && (a3.lastEscalationCost ?? 99) < 1)
@@ -1388,6 +1474,78 @@ extension DebugCLI {
             _ = try? await agent2.run("clicca Salva", context: ScreenContext(), deep: false, instant: true)
             check("Codex: niente istantaneo, livello rapido", codex.levels == [.fast] && agent2.lastEscalation == nil)
             agent2.shutdown()
+        }
+
+        print("Scalata sotto il secondo (Storia 11.3):")
+        do {
+            let settings = AppSettings.shared
+            let prepareWas = settings.prepareSessionOnWake
+            settings.prepareSessionOnWake = true
+            defer { settings.prepareSessionOnWake = prepareWas }
+            let (a1, c1, ans1) = await instantRun { $0.twoCallsWhenInstant = true; $0.throwsOnInterrupt = true }
+            check("seconda chiamata: turno istantaneo interrotto al segnale, rapido preparato mentre lavorava l'istantaneo",
+                  c1.interruptsWhileRunning == 1 && c1.prepared == [.fast] && a1.lastTakeoverPrepared == true
+                  && c1.levels == [.instant, .fast] && ans1 == "fatto rapido con il già fatto")
+            check(String(format: "passaggio di consegne misurato (%.3f s)", a1.lastHandoff ?? -1),
+                  (a1.lastHandoff ?? -1) >= 0 && (a1.lastHandoff ?? 9) < 1)
+            check("scalata dopo observe senza azioni con effetti: osservazione riusata", a1.lastObservationReused == true)
+            check("nessuna azione ripetuta: una sola chiamata eseguita", a1.tools.callCount == 1 && a1.tools.effectfulCalls == 0)
+            let (a2, c2, _) = await instantRun { $0.twoCallsWhenInstant = true; $0.effectBeforeSecondCall = true }
+            check("scalata dopo un'azione con effetti: nuova osservazione, azioni con effetti invariate",
+                  a2.lastObservationReused == false && a2.tools.effectfulCalls == 1 && c2.levels == [.instant, .fast])
+            let (a3, c3, _) = await instantRun { $0.instantAnswer = "Ho cliccato Prodotti. Non trovo però la voce Accessori." }
+            check("resa a metà risposta → scalata «risposta senza risultato»",
+                  a3.lastEscalation == "risposta senza risultato" && c3.levels == [.instant, .fast])
+            let courtesy = "Fatto. Non c'è altro? Vuoi che lo apra?"
+            let (a4, c4, ans4) = await instantRun { $0.instantAnswer = courtesy }
+            check("domanda di cortesia: nessuna scalata", a4.lastEscalation == nil && c4.levels == [.instant] && ans4 == courtesy
+                  && a4.lastHandoff == nil)
+            settings.prepareSessionOnWake = false
+            let (a5, c5, ans5) = await instantRun { $0.twoCallsWhenInstant = true }
+            settings.prepareSessionOnWake = true
+            check("interruttore della 11.2 spento: nessuna preparazione, scalata come oggi",
+                  c5.prepared.isEmpty && a5.lastTakeoverPrepared == false && c5.levels == [.instant, .fast]
+                  && ans5 == "fatto rapido con il già fatto")
+            let agent = AgentRunner(executor: Executor(), settings: settings)
+            try? await agent.start()
+            let claude = FakeEngine(.claude, tools: agent.tools, fails: false)
+            agent.register(claude)
+            agent.overrideChoice = (.claude, false)
+            _ = try? await agent.run("clicca Salva", context: ScreenContext(), deep: false, instant: false)
+            check("richiesta non istantanea: nessuna preparazione", claude.prepared.isEmpty && agent.lastTakeoverPrepared == nil
+                  && claude.levels == [.fast])
+            agent.shutdown()
+            let (a7, c7, _) = await instantRun { $0.twoCallsWhenInstant = true; $0.waitFirstWhenInstant = true }
+            check("unica chiamata `wait`, poi scalata: elementi dall'esito o nuovi, mai quelli di prima del wait",
+                  c7.levels == [.instant, .fast] && a7.lastObservationReused != nil && !c7.lastMessage.contains(FakeEngine.preWaitMarker)
+                  && c7.lastMessage.contains("<elements>"))
+            let (a8, c8, _) = await instantRun(agentSetup: { $0.tools.gate.environment = DebugCLI.fakeGateEnvironment("Banco", .clickOnly) }) {
+                $0.twoCallsWhenInstant = true
+            }
+            check("«solo clic»: il rapido riceve gli elementi riusati nella forma dei soli controlli",
+                  a8.lastObservationReused == true && c8.lastMessage.contains("(Access level «solo clic»: only the controls are shown"))
+            let (a9, c9, _) = await instantRun { $0.twoCallsWhenInstant = true; $0.lingerAfterSecondCall = .milliseconds(300) }
+            check(String(format: "turno istantaneo che resta aperto 0,3 s: costo fino al segnale %.2f s, passaggio %.2f s",
+                         a9.lastEscalationCost ?? -1, a9.lastHandoff ?? -1),
+                  (a9.lastEscalationCost ?? 9) < 0.25 && (a9.lastHandoff ?? 0) >= 0.3 && c9.levels == [.instant, .fast]
+                  && a9.lastHandoffEvent == "init")
+            // Codex chosen: no Instant level, nothing prepared; Codex chosen but Claude used by the fallback
+            // chain: the Instant level runs, but the preparation of Story 11.2's rules is refused.
+            for (fallback, name) in [(false, "Codex scelto"), (true, "Codex scelto, Claude dalla catena di riserva")] {
+                let agent = AgentRunner(executor: Executor(), settings: settings)
+                try? await agent.start()
+                let claude = FakeEngine(.claude, tools: agent.tools, fails: false)
+                claude.twoCallsWhenInstant = true
+                let codex = FakeEngine(.codex, tools: agent.tools, fails: false)
+                codex.twoCallsWhenInstant = true
+                if fallback { codex.availability = .unavailable("prova") }
+                agent.register(claude); agent.register(codex)
+                agent.overrideChoice = (.codex, fallback)
+                _ = try? await agent.run("clicca Salva", context: ScreenContext(), deep: false, instant: true)
+                check("\(name): nessuna preparazione", claude.prepared.isEmpty && codex.prepared.isEmpty
+                      && agent.lastTakeoverPrepared != true && (fallback ? claude.levels.first == .instant : codex.levels == [.fast]))
+                agent.shutdown()
+            }
         }
 
         print("Server degli strumenti chiuso (Storia 9.1):")
@@ -1831,6 +1989,61 @@ extension DebugCLI {
             }
         }
 
+        print("Scalata con ClaudeEngine e il claude finto (Storia 11.3):")
+        do {
+            let fake = FileManager.default.currentDirectoryPath + "/Tests/fixtures/claude/finto-claude"
+            let settings = AppSettings.shared
+            let (longWas, prepareWas, instantWas) = (settings.longSession, settings.prepareSessionOnWake, settings.instantLevel)
+            settings.longSession = true
+            settings.prepareSessionOnWake = true
+            settings.instantLevel = true
+            defer { settings.longSession = longWas; settings.prepareSessionOnWake = prepareWas; settings.instantLevel = instantWas }
+            let agent = AgentRunner(executor: Executor(), settings: settings)
+            try? await agent.start()
+            if let claude = agent.engines[.claude] as? ClaudeEngine {
+                claude.debugExecutable = fake
+                claude.refreshStatus(force: true)
+                _ = await eventually(2) { claude.cliStatus.isVerified }
+                agent.overrideChoice = (.claude, false)
+                // The fake echoes the whole message (the elements of the window in front): not in the output.
+                let detailWas = Log.forceDetail
+                Log.forceDetail = false
+                // The fake answers without tools: the Instant level escalates for «nessuna azione».
+                let answer = (try? await agent.run("prova", context: ScreenContext(), deep: false, instant: true)) ?? ""
+                let spawns = claude.debugSpawns
+                check(String(format: "il rapido parte sulla sessione preparata durante l'istantaneo: 2 processi, passaggio %.3f s", agent.lastHandoff ?? -1),
+                      answer.hasPrefix("ricevuto:") && agent.firstLevel == .instant && agent.lastLevel == .fast
+                      && agent.lastEscalation == "nessuna azione" && agent.lastTakeoverPrepared == true && spawns == 2
+                      && (agent.lastHandoff ?? 9) < 1 && agent.lastObservationReused == true)
+                let again = (try? await agent.run("prova", context: ScreenContext(), deep: false, instant: true)) ?? ""
+                check("sessione rapida già viva: nessuna preparazione, nessun processo nuovo",
+                      again.hasPrefix("ricevuto:") && agent.lastTakeoverPrepared == false && claude.debugSpawns == spawns)
+                Log.forceDetail = detailWas
+            } else {
+                check("AgentRunner con Claude", false)
+            }
+            agent.shutdown()
+            // Long session off: a process per request, as today; nothing prepared, no session left alive.
+            settings.longSession = false
+            let off = AgentRunner(executor: Executor(), settings: settings)
+            try? await off.start()
+            if let claude = off.engines[.claude] as? ClaudeEngine {
+                claude.debugExecutable = fake
+                claude.refreshStatus(force: true)
+                _ = await eventually(2) { claude.cliStatus.isVerified }
+                off.overrideChoice = (.claude, false)
+                let detailWas = Log.forceDetail
+                Log.forceDetail = false
+                let answer = (try? await off.run("prova", context: ScreenContext(), deep: false, instant: true)) ?? ""
+                Log.forceDetail = detailWas
+                check("Sessione lunga spenta: nessuna preparazione, nessuna sessione viva",
+                      answer.hasPrefix("ricevuto:") && off.lastTakeoverPrepared == false && claude.debugLiveSessions == 0)
+            } else {
+                check("AgentRunner con Claude, Sessione lunga spenta", false)
+            }
+            off.shutdown()
+        }
+
         print("«Vuoi che faccia qualcosa?» nel Coordinator (FR-48, Storia 11.2):")
         do {
             let ask = Coordinator.handling(of: .askIntent("il treno arriva alle nove", reason: "prova"), mode: .session)
@@ -2256,6 +2469,40 @@ extension DebugCLI {
         let n = " " + core.replacingOccurrences(of: "non e piu ", with: "").replacingOccurrences(of: "non piu ", with: "") + " "
         return !["non", "nessun", "nessuna", "niente", "nulla", "impossibile", "purtroppo", "fallito", "nemmeno", "neanche"]
             .contains { n.contains(" \($0) ") }
+    }
+
+    /// Story 11.3: the scalate of a Bench run, as medians. The cost is the Instant level until the signal
+    /// plus the handoff (end of the Instant turn, elements, session and MCP of the fast level); the verdict
+    /// against ≤ 1 s names the part that keeps it above. Pure, tested by `--selftest`.
+    /// Rows without a measured handoff stay out of the cost and the verdict, and are counted.
+    static func escalationSummary(_ rows: [(cost: Double?, handoff: Double?)]) -> String {
+        guard !rows.isEmpty else { return "nessuna" }
+        let measured = rows.compactMap { r -> (instant: Double, handoff: Double)? in
+            guard let c = r.cost, let h = r.handoff else { return nil }
+            return (c, h)
+        }
+        let unmeasured = rows.count - measured.count
+        let missing = unmeasured > 0 ? " · \(unmeasured) senza passaggio misurato" : ""
+        guard let total = median(measured.map { $0.instant + $0.handoff }) else {
+            return "\(rows.count) scalate · costo non misurato\(missing)"
+        }
+        var text = String(format: "%d scalate · costo mediana %.2f s su %d (istantaneo fino al segnale %.2f s + passaggio di consegne %.2f s)",
+                          rows.count, total, measured.count, median(measured.map(\.instant)) ?? 0, median(measured.map(\.handoff)) ?? 0)
+        text += missing
+        if total <= 1 {
+            text += " · obiettivo ≤ 1 s: rispettato"
+        } else {
+            // Task by task: over 1 s, which part is the larger share of that scalata.
+            let over = measured.filter { $0.instant + $0.handoff > 1 }
+            let byHandoff = over.filter { $0.handoff > $0.instant }.count
+            let byInstant = over.count - byHandoff
+            let parts = [(byHandoff, "il passaggio di consegne"), (byInstant, "il lavoro dell'istantaneo")]
+                .filter { $0.0 > 0 }.sorted { $0.0 > $1.0 }
+                .map { "\($0.1) in \($0.0)" }
+            text += " · obiettivo ≤ 1 s: NON rispettato, lo tiene sopra " + parts.enumerated()
+                .map { $0.offset == 0 ? "\($0.element) su \(over.count)" : $0.element }.joined(separator: ", ")
+        }
+        return text
     }
 
     /// The median; the mean of the two middle values for an even count; nil when empty.
@@ -2814,7 +3061,21 @@ extension DebugCLI {
             /// Level of the first attempt and the reason of a scalata (Story 7.3).
             var level = ""
             var escalation = ""
+            /// Seconds at the Instant level until the signal of the scalata.
             var escalationCost: Double?
+            /// Story 11.3: from the signal to the fast level having the request, and whether it reused the
+            /// last observation and found its session prepared during the Instant turn.
+            var handoff: Double?
+            var observationReused: Bool?
+            var takeoverPrepared: Bool?
+            var takeoverLevel: AgentLevel?
+            /// The event of the fast level that ended the handoff («init», «primo token»).
+            var handoffEvent: String?
+            /// What the scalata cost in all: the Instant level until the signal plus the handoff.
+            var escalationTotal: Double? {
+                guard let escalationCost, let handoff else { return nil }
+                return escalationCost + handoff
+            }
             /// The answer claims success but the check fails (Story 8.2, FR-46).
             var falseDone = false
             /// First `read_text` of the task and whether a screenshot was asked (Story 8.3).
@@ -2991,6 +3252,11 @@ extension DebugCLI {
                 row.level = first == last ? first : "\(first)→\(last)"
                 row.escalation = agent.lastEscalation ?? ""
                 row.escalationCost = agent.lastEscalationCost
+                row.handoff = agent.lastHandoff
+                row.observationReused = agent.lastObservationReused
+                row.takeoverPrepared = agent.lastTakeoverPrepared
+                row.takeoverLevel = agent.lastTakeoverLevel
+                row.handoffEvent = agent.lastHandoffEvent
             }
             rows.append(row)
             print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, row.steps,
@@ -2999,6 +3265,14 @@ extension DebugCLI {
                 let parts = BenchPhase.allCases.compactMap { p in row.phases[p].map { String(format: "%@ %.1f", p.rawValue, $0) } }
                 if !row.level.isEmpty {
                     print("      livello: \(row.level)\(row.escalation.isEmpty ? "" : " (\(row.escalation), \(String(format: "%.1f", row.escalationCost ?? 0)) s prima della scalata)")")
+                }
+                if !row.escalation.isEmpty {
+                    print(String(format: "      passaggio di consegne: %@ · osservazione %@ · %@ · costo della scalata %@",
+                                 row.handoff.map { String(format: "%.2f s (fino a %@)", $0, row.handoffEvent ?? "?") } ?? "non misurato",
+                                 row.observationReused == true ? "riusata" : "rifatta",
+                                 row.takeoverLevel.map { "sessione \(AgentRunner.levelName($0)) preparata durante l'istantaneo" }
+                                    ?? "sessione del livello che subentra non preparata (già viva, interruttore spento o Sessione lunga non in uso)",
+                                 row.escalationTotal.map { String(format: "%.1f s", $0) } ?? "non misurato"))
                 }
                 let sl = row.secondLayer
                 if !sl.costs.isEmpty || sl.anticipated + sl.anticipatedFailed > 0 {
@@ -3036,12 +3310,16 @@ extension DebugCLI {
         let instantRows = ran.filter { $0.level.hasPrefix("istantaneo") }
         if !instantRows.isEmpty {
             let clean = instantRows.filter { $0.escalation.isEmpty }
-            let costs = instantRows.compactMap(\.escalationCost)
-            print(String(format: "  livello istantaneo: %d compiti, %d senza scalata (%.0f%%), riusciti %d · tempo mediana %.1f s · costo della scalata mediana %@ (obiettivo ≤ 1 s)",
+            print(String(format: "  livello istantaneo: %d compiti, %d senza scalata (%.0f%%), riusciti %d · tempo mediana %.1f s",
                          instantRows.count, clean.count, Double(clean.count) / Double(instantRows.count) * 100,
-                         instantRows.filter(\.ok).count, median(instantRows.map(\.total)),
-                         costs.isEmpty ? "—" : String(format: "%.1f s", median(costs))))
+                         instantRows.filter(\.ok).count, median(instantRows.map(\.total))))
         }
+        let escalationText = Self.escalationSummary(instantRows.filter { !$0.escalation.isEmpty }.map { ($0.escalationCost, $0.handoff) })
+        if !instantRows.isEmpty { print("  scalata: \(escalationText)") }
+        // Story 11.3: what preparing costs when the Instant level succeeds: a process started and not used by a scalata.
+        let unusedPreparations = instantRows.filter { $0.takeoverPrepared == true && $0.escalation.isEmpty }.count
+        let preparationsText = "\(unusedPreparations) richieste istantanee su \(instantRows.count) senza scalata con la sessione del livello che subentra preparata e non usata (resta per la prossima richiesta o si chiude dopo 10 minuti)"
+        if !instantRows.isEmpty { print("  preparazioni non usate: \(preparationsText)") }
         // NFR-12 (Story 7.5): the outcome is stated, met or not. Rows that never ran stay out.
         let measured = ran.filter { !$0.task.kind.isPhrase && $0.note != "pagina non aperta" }
         // The first visible response counts on every task that ran, Frasi spurie included (Story 11.1).
@@ -3080,12 +3358,12 @@ extension DebugCLI {
         let out = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
         let phaseHeader = BenchPhase.allCases.map { "\($0.rawValue)_s" }.joined(separator: "\t")
-        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tprima_risposta_s\tprimo_token_webmail_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tfalso_fatto\tread_text_s\tscreenshot\tturni\tconferme\tbloccate\tmodello\trisposta\n"
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tprima_risposta_s\tprimo_token_webmail_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tpassaggio_s\tpassaggio_fino_a\tosservazione_riusata\trapido_preparato\tfalso_fatto\tread_text_s\tscreenshot\tturni\tconferme\tbloccate\tmodello\trisposta\n"
         for r in rows {
             let esito = r.skipped != nil ? "saltato" : (r.ok ? "ok" : "no")
             let phases = BenchPhase.allCases.map { p in r.phases[p].map { String(format: "%.2f", $0) } ?? "" }.joined(separator: "\t")
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.firstResponse.map { String(format: "%.2f", $0) } ?? "")\t\(r.webmailFirstToken.map { String(format: "%.2f", $0) } ?? "")\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.falseDone ? "sì" : "")\t\(r.readText.map { String(format: "%.2f", $0) } ?? "")\t\(r.screenshot ? "sì" : "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.firstResponse.map { String(format: "%.2f", $0) } ?? "")\t\(r.webmailFirstToken.map { String(format: "%.2f", $0) } ?? "")\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.handoff.map { String(format: "%.2f", $0) } ?? "")\t\(r.handoffEvent ?? "")\t\(r.escalation.isEmpty ? "" : (r.observationReused == true ? "sì" : "no"))\t\(r.escalation.isEmpty ? "" : (r.takeoverLevel.map(AgentRunner.levelName) ?? "no"))\t\(r.falseDone ? "sì" : "")\t\(r.readText.map { String(format: "%.2f", $0) } ?? "")\t\(r.screenshot ? "sì" : "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         // The verdict in a file of its own, next to the table: the TSV stays a plain table.
@@ -3102,6 +3380,8 @@ extension DebugCLI {
         let summary = "soglie NFR-12 riviste (mediane su \(measured.count) compiti con azioni, motore \(engine.rawValue)\(cold ? ", a freddo" : "")\(prepare ? ", sessione pronta" : "")): " + verdicts.joined(separator: " · ")
             + String(format: "\nsessione + mcp: mediana %.2f s su %d compiti, obiettivo < 0,2 s con la sessione pronta: %@", sessionAndMCP, sessionRows.count, sessionVerdict)
             + "\nprima risposta visibile: \(firstResponseText)"
+            + "\nscalata: \(escalationText)"
+            + (instantRows.isEmpty ? "" : "\npreparazioni non usate: \(preparationsText)")
             + "\nriavvii della Sessione lunga: \(restartsText)"
             + "\nsecondo strato: \(layerText)"
             + "\nfalsi «fatto»: \(ran.filter(\.falseDone).count) · prova prima del «fatto»: \(AppSettings.shared.evidenceBeforeDone ? "attiva" : "spenta")\n"
