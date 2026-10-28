@@ -2,7 +2,7 @@
 title: 'Storia 11.4 — Risposta scritta dall''app'
 type: 'feature'
 created: '2026-10-28'
-status: 'in-review'
+status: 'done'
 baseline_commit: '6f0ef9c4e2965bdb8e165601cb5d06ce9dfa6246'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -75,6 +75,8 @@ context:
 - Nico sta usando il Mac: nessun comando che muove mouse o tastiera (Banco, `--hands-test`, `--security-suite`, `--agent-test`) finché non dice «via»; quelle verifiche si annotano come da fare.
 
 - 28/10: verdi senza schermo build, `--selftest`, `--fallback-test` (con `tools/list` sul server vero), `--security-coverage`, `--session-test`, `--route-test` 164/164. Da fare dopo il «via»: Banco con Claude e `--security-suite --engine claude`; poi la tabella del §34.
+
+- 28/10 sera, Mac libero: 24 risposte composte su 30 compiti con azioni, 0 falsi «fatto», turno finale 1,87 → 0,01 s, compito 8,5 → 4,4 s; suite Claude 15/15 e 12/12. Ricerca §34.
 
 ## Spec Change Log
 

@@ -2,7 +2,7 @@
 title: 'Storia 11.2 — Sessione pronta quando inizio a parlare'
 type: 'feature'
 created: '2026-10-28'
-status: 'in-review'
+status: 'done'
 baseline_commit: 'eb7b2c7ba8745d5a2ba073ef0c0730e5ec3dc530'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -58,7 +58,7 @@ context:
 - [x] `Sources/MacTalkAct/Settings.swift`, `SettingsWindow.swift` -- interruttore.
 - [x] `Sources/MacTalkAct/Conversation.swift` -- orologio iniettabile.
 - [x] `Sources/MacTalkAct/DebugCLI.swift` -- test di ogni riga della matrice (claude finto e funzioni pure), `expire()`, `.askIntent`; `--cold` e `--prepare` nel Banco.
-- [ ] ricerca -- §29 con il confronto `--cold` contro `--cold --prepare` sulle fasi «sessione» e «mcp». (§29 scritta con la verifica della CLI e la misura `init` a freddo/pronta; tabella del Banco da riempire dopo il «via» di Nico)
+- [x] ricerca -- §29 con il confronto `--cold` contro `--cold --prepare` sulle fasi «sessione» e «mcp». (§29 scritta con la verifica della CLI e la misura `init` a freddo/pronta; tabella del Banco da riempire dopo il «via» di Nico)
 - [x] `README.md` -- interruttore e comportamento.
 
 **Acceptance Criteria:**
@@ -82,6 +82,8 @@ context:
 - Verifica della CLI (claude 2.1.312): senza messaggi su stdin non scrive niente, `init` compreso, ma si collega ai server MCP appena parte (~1,2 s). La preparazione quindi si limita ad avviare il processo, senza scrivere su stdin; `init` arriva ~0,03 s dopo il messaggio della richiesta (0,44–0,51 s a freddo). Dettagli nella ricerca, §29.
 
 - 28/10: verdi senza schermo build, `--selftest`, `--security-coverage`, `--session-test`; `--fallback-test` verde in 7 corse su 8 con il Mac carico (load 8–13): una FAIL non riprodotta, probabilmente un tempo stretto. `--route-test` 164/164 (una corsa 163/164 sotto carico). Da fare dopo il «via»: Banco `--cold` contro `--cold --prepare`.
+
+- 28/10 sera, Mac libero: Banco `--cold` contro `--cold --prepare` sui 10 compiti brevi: sessione + mcp 0,45 → 0,07 s (obiettivo < 0,2 s rispettato), compito 4,8 → 3,5 s. Ricerca §29.
 
 ## Spec Change Log
 

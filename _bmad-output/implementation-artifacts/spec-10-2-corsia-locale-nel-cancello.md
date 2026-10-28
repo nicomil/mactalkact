@@ -2,7 +2,7 @@
 title: 'Storia 10.2 — La Corsia locale passa dal cancello'
 type: 'feature'
 created: '2026-10-28'
-status: 'in-review'
+status: 'done'
 baseline_commit: 'cd7b80e66c6f01715958931cf0c2eac3bfd5e162'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -75,6 +75,8 @@ context:
 
 - 28/10: verdi senza schermo build, `--selftest`, `--fallback-test`, `--security-coverage`, `--route-test` 164/164. Da fare dopo il «via»: `--security-suite --engine claude` (righe locali, controllo positivo, campo password).
 - Da riportare a Nico: la frase approvata «fallo tu o chiedilo all'Agente» indica l'Agente, che però rifiuta per la stessa regola «solo clic».
+
+- 28/10 sera, Mac libero: le cinque righe locali della suite passano con Claude, Claude senza secondo strato e Codex, con le frasi della spec. Aperto per Nico: «chiedilo all'Agente» rimanda a un Agente che rifiuta per la stessa regola. Ricerca §31.
 
 ## Spec Change Log
 

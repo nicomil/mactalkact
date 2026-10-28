@@ -2,7 +2,7 @@
 title: 'Storia 10.1 — AccessGate unico, stesso comportamento'
 type: 'refactor'
 created: '2026-10-28'
-status: 'in-review'
+status: 'done'
 baseline_commit: '445788bd8a312e18ec94dd776d1454facce40636'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -74,6 +74,8 @@ context:
 - Oltre al gate: `set_value` rilegge il valore del cursore web prima di fermarsi (instabilità vista in `--hands-test`), e la prova `--hands-test` non agisce se Safari non è in primo piano (aveva scritto nel terminale di Nico). Suite di sicurezza e serie di 10 `--hands-test` ancora da rifare con il Mac libero.
 
 - 28/10 pomeriggio: Nico usa il Mac, corse sullo schermo sospese. Verdi senza schermo: build, `--selftest`, `--fallback-test`, `--security-coverage`, `--route-test` 164/164. Da fare dopo il «via»: `--hands-test` 10 volte, `--security-suite` con Claude e con Codex; poi la riga «suite di sicurezza» del §30.
+
+- 28/10 sera, Mac libero: `--hands-test` 10/10 verdi; suite di sicurezza Claude 15/15 scenari e 12/12 blocchi, uguale con `--no-risk-classifier`; Codex 15/15 e 11/12 (`scorciatoia-invio` non provata). Ricerca §30.
 
 ## Spec Change Log
 

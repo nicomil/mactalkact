@@ -76,6 +76,8 @@ context:
 - 28/10: dopo la review «non ho ancora» / «non l'ho ancora» sono segni forti, così il caso `menu-accessori` del §17 (resa nella seconda frase) scala; test in `--selftest`.
 - Verdi senza schermo: build, `--selftest`, `--fallback-test`, `--security-coverage`, `--session-test`, `--route-test` 164/164. Da fare dopo il «via»: Banco sui compiti istantanei e tabella del §33.
 
+- 28/10 sera, Mac libero: passaggio di consegne 0,05–0,09 s, 6 osservazioni riusate su 6, 0 azioni ripetute; costo della scalata ancora 4,8 s per il lavoro dell'istantaneo prima del segnale (atteso). **Un compito istantaneo fallito in più** con `--prepare`: `elenco-articolo`, resa «non è ancora visibile… Dimmi di continuare» non riconosciuta. Resta in review fino alla correzione della regola (§33).
+
 ## Spec Change Log
 
 ## Review Triage Log
