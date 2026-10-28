@@ -271,6 +271,16 @@ enum DebugCLI {
             check("in pausa il tempo non scende", abs(before - during) < 0.05)
             check("dopo la pausa riprende", clock.remaining < during && clock.remaining > during - 0.3)
         }
+        print("Stop dei test con Esc:")
+        do {
+            let me = Int64(getpid())
+            check("Esc dalla tastiera: ferma", TestKillSwitch.isUserEscape(keyCode: 53, marker: 0, sourcePID: 0, ownPID: me))
+            check("Esc inviato dai test (marcatore): non ferma", !TestKillSwitch.isUserEscape(keyCode: 53, marker: Executor.eventMarker, sourcePID: 0, ownPID: me))
+            check("Esc di questo processo: non ferma", !TestKillSwitch.isUserEscape(keyCode: 53, marker: 0, sourcePID: me, ownPID: me))
+            check("altro tasto: non ferma", !TestKillSwitch.isUserEscape(keyCode: 36, marker: 0, sourcePID: 0, ownPID: me))
+            check("comandi che usano mouse e tastiera", TestKillSwitch.needed(for: ["x", "--agent-bench"]) && TestKillSwitch.needed(for: ["x", "--hands-test"])
+                  && !TestKillSwitch.needed(for: ["x", "--selftest"]) && !TestKillSwitch.needed(for: ["x", "--route-test"]))
+        }
         print("Soglie NFR-12 riviste (Storia 11.1):")
         do {
             check("mediana pari = media dei due centrali", median([1, 2, 3, 4]) == 2.5 && median([3, 1, 2]) == 2 && median([]) == nil)

@@ -313,6 +313,8 @@ Se il server è spento l'app usa il modello Apple e lo dice. Un indirizzo fuori 
 
 ## Strumenti di test
 
+I comandi che usano davvero mouse e tastiera (`--agent-bench`, `--hands-test`, `--security-suite`, `--tools-test`, `--agent-test` e simili) si fermano subito con **Esc** premuto sulla tastiera: il processo esce, rilascia il tasto del mouse e i modificatori, e ricorda di lanciare `--bench-cleanup`. Gli Esc inviati dai test stessi non contano.
+
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build
 .build/debug/MacTalkAct --selftest                 # test della grammatica e degli helper
