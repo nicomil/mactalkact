@@ -119,6 +119,8 @@ final class CodexEngine: AgentEngine {
     }
 
     func cancel() { cli.cancelCurrent() }
+    // `interrupt()` is `cancel()` (AgentEngine's default): one `codex exec` per request, so closing its process
+    // after a final action verified by the app (Story 11.4) loses no session.
 
     func shutdown() {
         pause.cancel()

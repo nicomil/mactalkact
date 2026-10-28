@@ -278,7 +278,7 @@ final class ClaudeEngine: AgentEngine {
                             Log.info("Motore Claude: avvio senza il login dell'abbonamento, \(cliStatus)")
                         }
                         let tools = toolAccess()?.tools
-                        if inSession, (tools?.effectfulCalls ?? 1) == 0, tools?.escalation == nil {
+                        if inSession, (tools?.effectfulCalls ?? 1) == 0, tools?.escalation == nil, tools?.closing == nil {
                             // Without a verified login: the same request with one process, as before (FR-45).
                             inSession = false
                             continue
@@ -315,7 +315,8 @@ final class ClaudeEngine: AgentEngine {
             return try await attempt()
         } catch ClaudeCLIError.sessionDied(let m)
                     where Self.retriesDeadSession(reused: cli.lastAttemptReused, effectfulCalls: tools?.effectfulCalls ?? 1,
-                                                  cancelled: tools?.cancelled ?? true) && tools?.escalation == nil {
+                                                  cancelled: tools?.cancelled ?? true) && tools?.escalation == nil
+                    && tools?.closing == nil {
             Log.info("Agente (claude/\(model)): sessione chiusa a metà senza azioni \(m), ripeto la richiesta")
             onNotice?("Ripeto la richiesta")
             return try await attempt()
@@ -334,7 +335,8 @@ final class ClaudeEngine: AgentEngine {
             || l.contains("econnrefused") || l.contains("timed out") || l.contains("offline")
     }
 
-    /// Ends the turn but keeps the Long session (scalata from the Instant level).
+    /// Ends the turn but keeps the Long session: scalata from the Instant level, or a final action verified
+    /// by the app (Story 11.4). Without a Long session the request's process is closed: nothing is lost.
     func interrupt() {
         cliInstant.interruptCurrent()
         cliFast.interruptCurrent()

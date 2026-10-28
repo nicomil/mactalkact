@@ -128,7 +128,9 @@ enum DebugCLI {
             check("«non» dentro le virgolette: dichiara riuscito", claimsSuccess("Ho scritto «non disturbare» nel campo Stato."))
             check("«non è più spuntata»: dichiara riuscito", claimsSuccess("Ho tolto la spunta: la casella Newsletter non è più spuntata."))
             let evidenceWas = AppSettings.shared.evidenceBeforeDone
-            defer { AppSettings.shared.evidenceBeforeDone = evidenceWas }
+            let quickWas = AppSettings.shared.quickReplies
+            defer { AppSettings.shared.evidenceBeforeDone = evidenceWas; AppSettings.shared.quickReplies = quickWas }
+            AppSettings.shared.quickReplies = false // its own rule is checked with Story 11.4
             AppSettings.shared.evidenceBeforeDone = true
             let on = AgentRunner.systemPrompt
             AppSettings.shared.evidenceBeforeDone = false
@@ -202,6 +204,113 @@ enum DebugCLI {
             tools.debugSetObservation("[1] button «Salva»")
             tools.reset()
             check("nuovo compito: osservazione scaduta", tools.currentObservation == nil)
+        }
+        print("Risposte rapide (Storia 11.4):")
+        do {
+            let labels: [Int: String] = [4: "Invia", 7: "Nome", 9: "Newsletter", 12: "Volume", 40: "Promemoria"]
+            func reply(_ tool: String, _ args: [String: Any], _ result: String, error: Bool = false, dialog: Bool = false) -> String? {
+                AgentTools.quickReply(tool: tool, args: args, resultText: result, isError: error, windowIsDialog: dialog, label: { labels[$0] })
+            }
+            let sent = "Clicked «Invia».\nRESULT: window «Posta inviata» (was «Nuovo messaggio») · elements +3 −5 ~0\n+ [20] statictext «Messaggio inviato»"
+            check("clic con finestra cambiata → «Fatto: ho cliccato «Invia»; ora la finestra è «Posta inviata».»",
+                  reply("click", ["id": 4], sent) == "Fatto: ho cliccato «Invia»; ora la finestra è «Posta inviata».")
+            check("esito nullo → risponde il modello",
+                  reply("click", ["id": 4], "Clicked.\nRESULT: nothing changed on screen (same window, focus and elements). If you expected a change, the action did not work: try another way.") == nil)
+            check("errore → risponde il modello", reply("click", ["id": 4], sent, error: true) == nil)
+            check("senza RESULT (nessuna vista prima) → risponde il modello",
+                  reply("click", ["id": 4], "Clicked.\nNOW: app Safari · window «Banco» · focus none. Observe to see the elements.") == nil)
+            check("strumento di sola lettura → mai composta", reply("read_text", [:], sent) == nil && reply("get_text", [:], sent) == nil
+                  && reply("observe", [:], sent) == nil)
+            check("casella spuntata", reply("click", ["id": 9], "Clicked.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [9]* checkbox «Newsletter» (checked) (page) @10,20 14x14")
+                  == "Fatto: ho cliccato «Newsletter»; la casella «Newsletter» ora è spuntata.")
+            let typedName = "Typed 13 characters.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [7] textfield «Nome» value=«Mario Bianchi» (focused) @1,2 3x4"
+            check("testo comparso nel campo, mai citato", reply("type_text", ["id": 7, "text": "Mario Bianchi"], typedName)
+                  == "Fatto: ho scritto il testo in «Nome»; il testo ora compare in «Nome».")
+            check("testo scritto che non compare → risponde il modello", reply("type_text", ["id": 7, "text": "Mario Bianchi"],
+                  "Typed 13 characters.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [3] button «Salva» (page)") == nil)
+            check("testo di 2 caratteri in un campo non bersaglio → risponde il modello", reply("type_text", ["text": "ok"],
+                  "Typed 2 characters.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [8] textfield «Note» value=«ok, a domani» @1,2 3x4") == nil)
+            check("campo password: mai citato, risponde il modello", reply("type_text", ["id": 7, "text": "segreta123"],
+                  "Typed 10 characters.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [7] textfield «Password» (password field: content never read) @1,2 3x4") == nil)
+            check("cursore: valore nuovo", reply("set_value", ["id": 12, "value": "40"],
+                  "Set to 40.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [12] slider «Volume» value=40 settable @0,0 1x1")
+                  == "Fatto: ho impostato «Volume» a 40; «Volume» ora vale 40.")
+            check("cursore con un numero JSON: il numero nella frase", reply("set_value", ["id": 12, "value": 40],
+                  "Set to 40.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [12] slider «Volume» value=40 settable @0,0 1x1")
+                  == "Fatto: ho impostato «Volume» a 40; «Volume» ora vale 40.")
+            check("app in primo piano cambiata con open_app", reply("open_app", ["name": "Mail"], "Mail is now frontmost.\nRESULT: app is now Mail · window «In arrivo» (was «Banco») · elements +4 −3 ~0")
+                  == "Fatto: ho aperto «Mail»; ora è in primo piano «Mail».")
+            check("un'altra app in primo piano dopo un clic → risponde il modello",
+                  reply("click", ["id": 4], "Clicked.\nRESULT: app is now Finder · window «Download» (was «Banco») · elements +4 −3 ~0") == nil)
+            check("finestra nuova che è un dialogo o un foglio → risponde il modello", reply("click", ["id": 4], sent, dialog: true) == nil)
+            let password = reply("act", ["steps": [["tool": "type_text", "id": 7, "text": "segreta123"], ["tool": "press_keys", "keys": "return"]]],
+                                 "1. type_text: ok — Typed 10 characters.\n2. press_keys: ok — Pressed return.\nRESULT: window «Grazie» (was «Modulo») · elements +2 −9 ~0")
+            check("act: testo mai citato, tasti detti a voce, prova dall'ultimo passo",
+                  password == "Fatto: ho scritto il testo in «Nome» e premuto «Invio»; ora la finestra è «Grazie»." && password?.contains("segreta") == false)
+            check("tasti detti a voce", AgentTools.spokenKeys("cmd+shift+n") == "comando maiuscole N" && AgentTools.spokenKeys("return") == "Invio"
+                  && AgentTools.spokenKeys("cmd+a delete") == "comando A, Cancella")
+            check("act che finisce con wait: si giudica la scrittura prima del wait", reply("act", ["steps": [["tool": "type_text", "id": 7, "text": "Mario Bianchi"], ["tool": "wait", "seconds": 1]]],
+                  "1. type_text: ok — Typed 13 characters.\n2. wait: ok — Waited 1 s.\nRESULT: window «Altro» (was «Banco») · elements +0 −0 ~0") == nil)
+            check("cambiamento lontano dal bersaglio (un orologio) → risponde il modello",
+                  reply("click", ["id": 4], "Clicked.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [77] statictext «12:01»") == nil)
+            check("comparsa di elementi senza bersaglio cambiato → risponde il modello",
+                  reply("click", ["id": 4], "Clicked.\nRESULT: window «Banco» · elements +1 −0 ~0\n+ [78] statictext «Nuovo»") == nil)
+            check("menu e tasti: solo una finestra o un'app nuova provano",
+                  reply("press_keys", ["keys": "cmd+b"], "Pressed cmd+b.\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [9]* checkbox «Grassetto» (checked)") == nil)
+            check("errore comparso dopo il clic → risponde il modello",
+                  reply("click", ["id": 4], "Clicked.\nRESULT: window «Posta» (was «Nuovo messaggio») · elements +1 −0 ~0\n+ [30] statictext «Impossibile inviare il messaggio»") == nil)
+            check("campo obbligatorio o non trovato → risponde il modello",
+                  reply("click", ["id": 4], "Clicked.\nRESULT: window «Modulo» (was «Banco») · elements +1 −0 ~0\n+ [31] statictext «Il campo Email è obbligatorio»") == nil
+                  && reply("click", ["id": 4], "Clicked.\nRESULT: window «Pagina non trovata» (was «Banco») · elements +1 −0 ~0") == nil)
+            check("foglio o avviso comparso → risponde il modello",
+                  reply("click", ["id": 4], "Clicked.\nRESULT: window «Modulo» (was «Banco») · elements +1 −0 ~0\n+ [32] sheet «Salva con nome»") == nil)
+            check("segno di errore nel testo dello strumento, prima di RESULT → risponde il modello",
+                  reply("click", ["id": 4], "Clicked «Invia». Errore di rete.\nRESULT: window «Posta inviata» (was «Nuovo messaggio») · elements +0 −1 ~0") == nil)
+            check("«Pressed the container of» → risponde il modello",
+                  reply("click", ["id": 4], "Pressed the container of [4] «Invia».\nRESULT: window «Posta inviata» (was «Nuovo messaggio») · elements +0 −1 ~0") == nil)
+            check("esito troncato → risponde il modello",
+                  reply("click", ["id": 4], "Clicked.\nRESULT: window «Posta» (was «Banco») · elements +30 −0 ~0\n+ [50] row «A»\n(… 5 more: observe for the full list)") == nil
+                  && reply("click", ["id": 4], "Clicked.\nRESULT: window «Posta» (was «Banco») · elements +60 −50 ~0\nThe screen changed a lot. First elements now:\n[1] row «A»\n(… observe for the rest)") == nil)
+            check("click_many con un errore → risponde il modello",
+                  reply("click_many", ["ids": [9, 10]], "[9] «Newsletter» ok, now checked\n[10] ERROR: Element 10 not found\nRESULT: window «Banco» · elements +0 −0 ~1\n~ [9]* checkbox «Newsletter» (checked)") == nil)
+            check("bersaglio sparito, senza negazioni", reply("click", ["id": 40], "Clicked.\nRESULT: window «Posta» · elements +0 −1 ~0\n- [40] row «Promemoria»")
+                  == "Fatto: ho cliccato «Promemoria»; è sparito «Promemoria».")
+            check("replace_text verificato dallo strumento, senza citare il testo",
+                  reply("replace_text", ["find": "ciao", "replace": "salve"], "Replaced and verified (AX value).")
+                  == "Fatto: ho sostituito il testo; l'app ha riletto il campo con il testo nuovo.")
+            let composed = reply("click", ["id": 4], sent) ?? ""
+            check("la frase composta conta come «fatto» per il Banco", Self.claimsSuccess(composed)
+                  && Self.claimsSuccess(reply("click", ["id": 40], "Clicked.\nRESULT: window «Posta» · elements +0 −1 ~0\n- [40] row «Promemoria»") ?? ""))
+            for q in ["cosa dice questa mail?", "Cosa dice questa mail", "quanto costa il volo", "leggimi l'ultimo messaggio",
+                      "dimmi chi ha scritto", "spiegami questo errore", "riassumi la pagina", "c'è posta nuova", "apri la mail di Laura e leggila",
+                      "quale scheda è aperta", "mi dici l'ora", "controlla la posta", "cerca voli per Roma", "trova il file del preventivo",
+                      "mostrami le foto di ieri", "fammi vedere il calendario", "guarda se è arrivata la mail", "apri Mail e vedi se c'è posta",
+                      "how much is it", "is the mail sent", "show me the inbox", "check my mail", "summarize this page", "find the invoice"] {
+                check("informativa: «\(q)»", AgentTools.asksForInformation(q))
+            }
+            for a in ["clicca Invia", "apri la mail di Laura", "spunta la newsletter", "scrivi Mario nel campo nome", "chiudi la finestra",
+                      "metti il volume a 40", "archivia questa mail", "invia la mail"] {
+                check("azione: «\(a)»", !AgentTools.asksForInformation(a))
+            }
+            let mcp = Dictionary(uniqueKeysWithValues: AgentTools.mcpDefinitions.compactMap { d -> (String, [String: Any])? in
+                guard let n = d["name"] as? String, let p = (d["inputSchema"] as? [String: Any])?["properties"] as? [String: Any] else { return nil }
+                return (n, p)
+            })
+            check("`final` su ogni mano dei Motori cloud", AgentTools.finalTools.allSatisfy { mcp[$0]?["final"] != nil })
+            check("`final` mai sugli strumenti di lettura", ["observe", "screenshot", "read_text", "get_text", "ask_user", "wait"].allSatisfy { mcp[$0]?["final"] == nil })
+            check("`final` mai nelle definizioni del Motore locale", AgentTools.definitions.allSatisfy {
+                ((($0["inputSchema"] as? [String: Any])?["properties"] as? [String: Any])?["final"]) == nil })
+            check("flag `final`: booleano, stringa o numero", AgentTools.isFinalFlag(true) && AgentTools.isFinalFlag("true") && AgentTools.isFinalFlag(1)
+                  && !AgentTools.isFinalFlag(false) && !AgentTools.isFinalFlag(nil) && !AgentTools.isFinalFlag("no"))
+            check("«Risposte rapide» accese per impostazione predefinita", AppSettings.Defaults.quickReplies)
+            let settings = AppSettings.shared
+            let was = settings.quickReplies
+            settings.quickReplies = true
+            let on = AgentRunner.systemPrompt
+            settings.quickReplies = false
+            let off = AgentRunner.systemPrompt
+            settings.quickReplies = was
+            check("regola di `final` nel prompt solo con l'interruttore acceso", on.contains("final: true") && !off.contains("final: true"))
         }
         print("Eventi dei Motori per le fasi:")
         do {
@@ -1197,6 +1306,17 @@ final class FakeEngine: AgentEngine {
     nonisolated static let preWaitMarker = "OSSERVAZIONE-PRIMA-DEL-WAIT"
     /// `interrupt()` makes the running request throw, like the real CLI after a control_request.
     var throwsOnInterrupt = false
+    /// Story 11.4: the request's one tool call, answered with this result without touching the screen.
+    var finalCall: (name: String, args: [String: Any], result: AgentTools.Result)?
+    /// Story 11.4: a «no» of the user to a risky shortcut before the final call.
+    var denyFirst = false
+    /// Story 11.4: what a call got back after the app closed the turn.
+    private(set) var afterClose: AgentTools.Result?
+    /// Story 11.4: after a scalata, the level that takes over makes this final call.
+    var takeoverFinal: AgentTools.Result?
+    /// Story 11.4: the user says «stop» right after the app closed the turn.
+    var cancelAfterClose = false
+    nonisolated static let modelAnswer = "risposta del modello"
     private var interruptedRun = false
     private(set) var levels: [AgentLevel] = []
     private(set) var interrupts = 0
@@ -1230,6 +1350,23 @@ final class FakeEngine: AgentEngine {
         anticipationSeen.append(tools.gate.anticipationAllowed)
         runningNow = true
         defer { runningNow = false }
+        if let f = finalCall {
+            // After a scalata the fast level does not repeat what was done: it answers.
+            if request.message.contains("<already_done>") {
+                guard let t = takeoverFinal else { return "fatto rapido con il già fatto" }
+                interruptedRun = false
+                _ = tools.debugCall("click", ["id": 4, "final": true], result: t)
+                if interruptedRun { throw AgentEngineError.failed("error_during_execution") }
+                return Self.modelAnswer
+            }
+            interruptedRun = false
+            if denyFirst { _ = await tools.gate.confirmKeys("cmd+q", origin: .model) }
+            _ = tools.debugCall(f.name, f.args, result: f.result)
+            if tools.closing != nil { afterClose = tools.debugCall("observe", [:], result: .text("[1] button «Salva»")) }
+            if cancelAfterClose { tools.cancelled = true }
+            if interruptedRun { throw AgentEngineError.failed("error_during_execution") }
+            return Self.modelAnswer
+        }
         if twoCallsWhenInstant || failingActionWhenInstant || givesUpWhenInstant || instantAnswer != nil {
             guard request.level == .instant else {
                 // The level that takes over has the request: the end of the handoff (Story 11.3).
@@ -1548,6 +1685,97 @@ extension DebugCLI {
             }
         }
 
+        print("Risposte rapide (Storia 11.4):")
+        do {
+            let settings = AppSettings.shared
+            let quickWas = settings.quickReplies
+            settings.quickReplies = true
+            defer { settings.quickReplies = quickWas }
+            let verified = AgentTools.Result.text("Clicked «Invia».\nRESULT: window «Posta inviata» (was «Nuovo messaggio») · elements +3 −5 ~0")
+            let nothing = AgentTools.Result.text("Clicked.\nRESULT: nothing changed on screen (same window, focus and elements). If you expected a change, the action did not work: try another way.")
+            // The label of id 4 depends on the window in front (the elements of the request are real): only the shape.
+            func isComposed(_ a: String?) -> Bool {
+                a?.hasPrefix("Fatto: ho cliccato ") == true && a?.hasSuffix("; ora la finestra è «Posta inviata».") == true
+            }
+            func quickRun(_ request: String = "clicca Invia", engine id: EngineID = .claude, instant: Bool = false,
+                          agentSetup: (AgentRunner) -> Void = { _ in }, _ setup: (FakeEngine) -> Void) async -> (AgentRunner, FakeEngine, String?) {
+                let agent = AgentRunner(executor: Executor(), settings: settings)
+                try? await agent.start()
+                agent.tools.frontWindowIsDialog = { false } // the window in front of the test does not count
+                agentSetup(agent)
+                let engine = FakeEngine(id, tools: agent.tools, fails: false)
+                engine.throwsOnInterrupt = true
+                setup(engine)
+                agent.register(engine)
+                agent.overrideChoice = (id, false)
+                let answer = try? await agent.run(request, context: ScreenContext(), deep: false, instant: instant)
+                agent.shutdown()
+                return (agent, engine, answer)
+            }
+            let (a1, e1, ans1) = await quickRun { $0.finalCall = ("click", ["id": 4, "final": true], verified) }
+            check("azione finale verificata: turno interrotto, risposta composta dall'esito",
+                  isComposed(ans1) && e1.interrupts == 1 && a1.lastQuickReply && e1.levels == [.fast])
+            check("dopo la chiusura nessun'altra chiamata: niente scalata, nessuna azione ripetuta",
+                  e1.afterClose?.isError == true && a1.tools.callCount == 1 && a1.tools.escalation == nil)
+            let (a2, e2, ans2) = await quickRun { $0.finalCall = ("click", ["id": 4, "final": true], nothing) }
+            check("esito nullo: risponde il modello", ans2 == FakeEngine.modelAnswer && e2.interrupts == 0 && !a2.lastQuickReply)
+            let (a3, e3, ans3) = await quickRun { $0.finalCall = ("click", ["id": 4, "final": true], .error("Element 4 not found")) }
+            check("errore: risponde il modello", ans3 == FakeEngine.modelAnswer && e3.interrupts == 0 && !a3.lastQuickReply)
+            let (a4, e4, ans4) = await quickRun(agentSetup: {
+                $0.tools.gate.environment = DebugCLI.fakeGateEnvironment("Banco", .full)
+                $0.tools.askUser = { _, _ in "no" }
+            }) { $0.denyFirst = true; $0.finalCall = ("click", ["id": 4, "final": true], verified) }
+            check("«no» dell'utente prima: risponde il modello anche con un esito verificato",
+                  ans4 == FakeEngine.modelAnswer && e4.interrupts == 0 && a4.tools.deniedThisRequest && !a4.lastQuickReply)
+            let (a5, e5, ans5) = await quickRun(instant: true) { $0.finalCall = ("click", ["id": 4], verified) }
+            check("istantaneo: l'unica chiamata vale come finale, risposta composta senza scalata",
+                  isComposed(ans5) && e5.levels == [.instant] && a5.lastEscalation == nil && a5.lastQuickReply && e5.interrupts == 1)
+            let (a6, e6, ans6) = await quickRun(instant: true) { $0.finalCall = ("click", ["id": 4], nothing) }
+            check("istantaneo con esito nullo: scalata come oggi", e6.levels == [.instant, .fast] && a6.lastEscalation == "nessun effetto"
+                  && ans6 == "fatto rapido con il già fatto" && !a6.lastQuickReply)
+            let (a7, e7, ans7) = await quickRun("cosa dice questa mail?") { $0.finalCall = ("click", ["id": 4, "final": true], verified) }
+            check("richiesta informativa: risponde il modello", ans7 == FakeEngine.modelAnswer && e7.interrupts == 0 && !a7.lastQuickReply)
+            let (a8, _, ans8) = await quickRun("leggimi l'ultimo messaggio") {
+                $0.finalCall = ("get_text", ["final": true], .text("SELECTED_TEXT: <<<>>>\nRESULT: window «X» (was «Y») · elements +1 −0 ~0"))
+            }
+            check("`final` su uno strumento di lettura: risponde il modello", ans8 == FakeEngine.modelAnswer && !a8.lastQuickReply)
+            settings.quickReplies = false
+            let (a9, e9, ans9) = await quickRun { $0.finalCall = ("click", ["id": 4, "final": true], verified) }
+            settings.quickReplies = true
+            check("interruttore spento: `final` ignorato, turno finale di oggi", ans9 == FakeEngine.modelAnswer && e9.interrupts == 0 && !a9.lastQuickReply)
+            let (a10, e10, ans10) = await quickRun(engine: .codex) { $0.finalCall = ("click", ["id": 4, "final": true], verified) }
+            check("Codex: processo della richiesta chiuso, risposta composta", isComposed(ans10) && e10.interrupts == 1 && a10.lastQuickReply)
+            let (a11, e11, ans11) = await quickRun(engine: .local) { $0.finalCall = ("click", ["id": 4, "final": true], verified) }
+            check("Motore locale: risponde lui, come oggi", ans11 == FakeEngine.modelAnswer && e11.interrupts == 0 && !a11.lastQuickReply)
+            let (a12, _, ans12) = await quickRun(agentSetup: { $0.tools.gate.environment = DebugCLI.fakeGateEnvironment("Banco", .clickOnly) }) {
+                $0.finalCall = ("click", ["id": 4, "final": true], verified)
+            }
+            check("«solo clic»: risponde il modello (la frase porterebbe testo della finestra nella memoria)",
+                  ans12 == FakeEngine.modelAnswer && !a12.lastQuickReply)
+            // The engine finishes before the interruption lands: one answer, the app's.
+            let (a13, _, ans13) = await quickRun { $0.throwsOnInterrupt = false; $0.finalCall = ("click", ["id": 4, "final": true], verified) }
+            check("il modello finisce prima dell'interruzione: vale la risposta dell'app", isComposed(ans13) && a13.lastQuickReply)
+            let (a14, e14, ans14) = await quickRun(instant: true) { $0.finalCall = ("click", ["id": 4], nothing); $0.takeoverFinal = verified }
+            check("dopo una scalata il rapido può chiudere: azione finale verificata, risposta composta",
+                  e14.levels == [.instant, .fast] && a14.lastEscalation == "nessun effetto" && isComposed(ans14) && a14.lastQuickReply)
+            let (a15, _, ans15) = await quickRun { $0.cancelAfterClose = true; $0.finalCall = ("click", ["id": 4, "final": true], verified) }
+            check("«stop» dopo la chiusura: nessun «Fatto»", ans15 == nil && !a15.lastQuickReply)
+            let (a16, _, ans16) = await quickRun(agentSetup: { $0.tools.frontWindowIsDialog = { true } }) {
+                $0.finalCall = ("click", ["id": 4, "final": true], verified)
+            }
+            check("finestra in primo piano che è un dialogo: risponde il modello", ans16 == FakeEngine.modelAnswer && !a16.lastQuickReply)
+            let maskWas = settings.hideSensitiveFromCloud
+            settings.hideSensitiveFromCloud = true
+            let iban = "IT60X0542811101000000123456"
+            let (a17, _, ans17) = await quickRun {
+                $0.finalCall = ("click", ["id": 4, "final": true],
+                                .text("Clicked.\nRESULT: window «Bonifico a \(iban)» (was «Nuovo bonifico») · elements +0 −1 ~0"))
+            }
+            settings.hideSensitiveFromCloud = maskWas
+            check("dati sensibili mascherati nella risposta composta, che va nella memoria del cloud",
+                  a17.lastQuickReply && ans17?.contains("[IBAN]") == true && ans17?.contains(iban) == false)
+        }
+
         print("Server degli strumenti chiuso (Storia 9.1):")
         do {
             let agent = AgentRunner(executor: Executor(), settings: AppSettings.shared)
@@ -1587,6 +1815,53 @@ extension DebugCLI {
                 check("Host localhost: risponde", await post(origin: nil, host: "localhost:\(port)") == 200)
                 check("pagina web con Origin estraneo: 403", await post(origin: "http://evil.example", host: nil) == 403)
                 check("Host di un altro dominio (DNS rebinding): 403", await post(origin: nil, host: "evil.example:80") == 403)
+                // Story 11.4: `tools/list` follows «Risposte rapide» at every request.
+                func listTools() async -> [String: [String: Any]] {
+                    guard let port = URL(string: access.mcpURL)?.port else { return [:] }
+                    let body = #"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#
+                    let head = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nAuthorization: Bearer \(access.mcpToken)\r\n"
+                        + "Content-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
+                    let raw: Data = await withCheckedContinuation { cont in
+                        let c = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: UInt16(port))!, using: .tcp)
+                        let done = Box(false)
+                        let buffer = Box(Data())
+                        func finish() { if !done.value { done.value = true; c.cancel(); cont.resume(returning: buffer.value) } }
+                        func complete() -> Bool {
+                            guard let sep = buffer.value.range(of: Data("\r\n\r\n".utf8)),
+                                  let header = String(data: buffer.value[..<sep.lowerBound], encoding: .utf8),
+                                  let m = header.firstMatch(of: #/Content-Length: (\d+)/#), let length = Int(m.1) else { return false }
+                            return buffer.value.count - sep.upperBound >= length
+                        }
+                        func read() {
+                            c.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, error in
+                                if let data { buffer.value.append(data) }
+                                if complete() || isComplete || error != nil { finish() } else { read() }
+                            }
+                        }
+                        c.stateUpdateHandler = { state in
+                            if case .ready = state { c.send(content: Data(head.utf8), completion: .contentProcessed { _ in read() }) }
+                            else if case .failed = state { finish() }
+                        }
+                        c.start(queue: .global())
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 3) { finish() }
+                    }
+                    guard let sep = raw.range(of: Data("\r\n\r\n".utf8)),
+                          let json = try? JSONSerialization.jsonObject(with: raw[sep.upperBound...]) as? [String: Any],
+                          let tools = (json["result"] as? [String: Any])?["tools"] as? [[String: Any]] else { return [:] }
+                    return Dictionary(uniqueKeysWithValues: tools.compactMap { t -> (String, [String: Any])? in
+                        guard let n = t["name"] as? String else { return nil }
+                        return (n, ((t["inputSchema"] as? [String: Any])?["properties"] as? [String: Any]) ?? [:])
+                    })
+                }
+                let quickWas = AppSettings.shared.quickReplies
+                AppSettings.shared.quickReplies = true
+                let listedOn = await listTools()
+                AppSettings.shared.quickReplies = false
+                let listedOff = await listTools()
+                AppSettings.shared.quickReplies = quickWas
+                check("tools/list: `final` su click con «Risposte rapide» accese, assente con l'interruttore spento, mai su observe",
+                      listedOn["click"]?["final"] != nil && listedOn["observe"] != nil && listedOn["observe"]?["final"] == nil
+                      && listedOff["click"] != nil && listedOff["click"]?["final"] == nil && listedOff["observe"]?["final"] == nil)
                 // The real Claude configuration, as ClaudeEngine builds it, on the fake claude.
                 let fake = FileManager.default.currentDirectoryPath + "/Tests/fixtures/claude/finto-claude"
                 let cli = ClaudeCLI()
@@ -2044,6 +2319,66 @@ extension DebugCLI {
             off.shutdown()
         }
 
+        print("Risposte rapide con ClaudeEngine e il claude finto (Storia 11.4):")
+        do {
+            let fake = FileManager.default.currentDirectoryPath + "/Tests/fixtures/claude/finto-claude"
+            let settings = AppSettings.shared
+            let (longWas, quickWas, instantWas) = (settings.longSession, settings.quickReplies, settings.instantLevel)
+            settings.longSession = true
+            settings.quickReplies = true
+            settings.instantLevel = false
+            defer { settings.longSession = longWas; settings.quickReplies = quickWas; settings.instantLevel = instantWas }
+            let agent = AgentRunner(executor: Executor(), settings: settings)
+            try? await agent.start()
+            if let claude = agent.engines[.claude] as? ClaudeEngine {
+                claude.debugExecutable = fake
+                claude.refreshStatus(force: true)
+                _ = await eventually(2) { claude.cliStatus.isVerified }
+                agent.overrideChoice = (.claude, false)
+                let detailWas = Log.forceDetail
+                Log.forceDetail = false
+                agent.tools.frontWindowIsDialog = { false }
+                let log = ConversationLog()
+                // Two entries before the request: the session sees them in its first, full message.
+                let privateMode = AppSettings.shared.privateModeActive
+                log.add(request: "richiesta vecchia uno", outcome: "esito vecchio uno", app: "Banco")
+                log.add(request: "richiesta vecchia due", outcome: "esito vecchio due", app: "Banco")
+                // «ASPETTA»: the fake keeps the turn open until an interrupt, like a model about to write «fatto».
+                // Meanwhile a final action with a verified outcome: the app closes the turn.
+                let verified = AgentTools.Result.text("Clicked «Invia».\nRESULT: window «Posta inviata» (was «Nuovo messaggio») · elements +3 −5 ~0")
+                let closer = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    _ = agent.tools.debugCall("click", ["id": 4, "final": true], result: verified)
+                }
+                let first = (try? await agent.run("ASPETTA clicca Invia", context: ScreenContext(), recent: log.promptBlock, deep: false,
+                                                  memory: log)) ?? ""
+                await closer.value
+                let finalTurn = agent.lastPhases[.finalTurn] ?? -1
+                check(String(format: "turno chiuso dall'app: risposta composta, Sessione lunga viva, chiusura %.2f s", finalTurn),
+                      first.hasPrefix("Fatto: ho cliccato") && agent.lastQuickReply && claude.debugLiveSessions == 1
+                      && finalTurn >= 0 && finalTurn < 1)
+                if privateMode {
+                    print("  —    richiesta successiva con la memoria: saltata, modalità privata attiva")
+                } else {
+                    // The Coordinator records the request with the app's answer. (Here without «ASPETTA», which
+                    // the fake would read in <recent>.)
+                    log.add(request: "clicca Invia", outcome: first, app: "Banco")
+                    let spawns = claude.debugSpawns
+                    let second = (try? await agent.run("seconda richiesta", context: ScreenContext(), deep: false, memory: log)) ?? ""
+                    check("richiesta successiva nella stessa sessione: la sua risposta, con l'esito del turno chiuso in <recent>",
+                          second.hasPrefix("ricevuto:") && second.contains("REQUEST: seconda richiesta") && second.contains(first)
+                          && claude.debugSpawns == spawns && !agent.lastQuickReply)
+                    // The cursor stopped at the last entry the session had seen: the old entries are not sent again.
+                    check("cursore dopo l'interruzione: le voci già viste non tornano, solo quella del turno chiuso",
+                          !second.contains("esito vecchio") && second.contains("clicca Invia"))
+                }
+                Log.forceDetail = detailWas
+            } else {
+                check("AgentRunner con Claude", false)
+            }
+            agent.shutdown()
+        }
+
         print("«Vuoi che faccia qualcosa?» nel Coordinator (FR-48, Storia 11.2):")
         do {
             let ask = Coordinator.handling(of: .askIntent("il treno arriva alle nove", reason: "prova"), mode: .session)
@@ -2124,6 +2459,40 @@ extension DebugCLI {
         try? await Task.sleep(for: .milliseconds(100))
         check("sessione pronta: la seconda richiesta riusa la sessione preparata", d != nil && phases.value.contains(.sessionReused)
               && cli.spawns == spawnsBefore + 1 && cli.lastAttemptReused)
+        // Story 11.4: a request closed by the app (its turn interrupted while the model writes), then the next
+        // one on the same session with the app's answer in <recent>.
+        memory = MemorySnapshot(generation: 2, lastSeq: 5)
+        let closeAtToken: PhaseSink = { p in if p == .firstToken { cli.interruptCurrent() } }
+        var closed = false
+        let closeStarted = Date()
+        do {
+            _ = try await cli.runInSession(config, memory: memory, maxRequests: 8, timeout: 60,
+                                           message: { _ in "Scrivi i numeri da 1 a 300, uno per riga, senza altro testo." },
+                                           onPhase: closeAtToken, onRestart: { restarts.append($0) })
+            print("  il turno è finito prima dell'interruzione")
+        } catch ClaudeCLIError.failed {
+            closed = true
+        } catch {
+            print("  errore: \(error.localizedDescription)")
+        }
+        let closeSeconds = Date().timeIntervalSince(closeStarted)
+        check(String(format: "richiesta chiusa dall'app: turno interrotto in %.1f s, sessione viva, cursore prima della sua voce", closeSeconds),
+              closed && cli.hasLiveSession && cli.liveCursor(memory: memory) == 5)
+        memory = MemorySnapshot(generation: 2, lastSeq: 6)
+        phases.value = []
+        let spawnsBeforeNext = cli.spawns
+        var next: String?
+        do {
+            let data = try await cli.runInSession(config, memory: memory, maxRequests: 8, timeout: 60, message: { seq in
+                (seq == 5 ? "<recent>\n- 12:00 in Mail: «scrivi i numeri» → Fatto: ho scritto i numeri; nel campo ora c'è «1 2 3».\n</recent>\n" : "")
+                    + "Nuova richiesta: di che colore è l'erba? Una parola."
+            }, onPhase: sink, onRestart: { restarts.append($0) })
+            next = String(data: data, encoding: .utf8)
+        } catch { print("  errore: \(error.localizedDescription)") }
+        try? await Task.sleep(for: .milliseconds(100))
+        check("richiesta successiva nella stessa sessione: risposta corretta, nessun residuo del turno chiuso",
+              next?.lowercased().contains("verde") == true && next?.rangeOfCharacter(from: .decimalDigits) == nil
+              && phases.value.contains(.sessionReused) && cli.spawns == spawnsBeforeNext, next ?? "")
         cli.shutdown()
         return failures == 0
     }
@@ -3085,6 +3454,8 @@ extension DebugCLI {
             var secondLayer = AccessGate.SecondLayerStats()
             /// `--prepare` (Story 11.2): the levels prepared before the request (empty: none started).
             var prepared: [AgentLevel]?
+            /// Story 11.4: the app wrote the answer from the outcome of the final action.
+            var quickReply = false
             var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) + router - total) <= 0.2 }
         }
         var rows: [Row] = []
@@ -3257,12 +3628,16 @@ extension DebugCLI {
                 row.takeoverPrepared = agent.lastTakeoverPrepared
                 row.takeoverLevel = agent.lastTakeoverLevel
                 row.handoffEvent = agent.lastHandoffEvent
+                row.quickReply = agent.lastQuickReply
             }
             rows.append(row)
             print(String(format: "%@ %-18@ %2d passi · primo %@ · %5.1f s · %@", ok ? "✓" : "✗", task.id as NSString, row.steps,
                          first.map { String(format: "%4.1f s", $0) } ?? "  — ", total, String(note.prefix(70))))
             if !row.phases.isEmpty {
                 let parts = BenchPhase.allCases.compactMap { p in row.phases[p].map { String(format: "%@ %.1f", p.rawValue, $0) } }
+                if row.quickReply {
+                    print(String(format: "      risposta composta dall'app · turno finale %.2f s", row.phases[.finalTurn] ?? 0))
+                }
                 if !row.level.isEmpty {
                     print("      livello: \(row.level)\(row.escalation.isEmpty ? "" : " (\(row.escalation), \(String(format: "%.1f", row.escalationCost ?? 0)) s prima della scalata)")")
                 }
@@ -3340,6 +3715,17 @@ extension DebugCLI {
         }
         print("  riavvii della Sessione lunga: \(restartsText)")
         print("  falsi «fatto» (riuscito a parole, fallito alla verifica): \(ran.filter(\.falseDone).count)")
+        // Story 11.4: how many answers the app wrote, and the final turn with and without them. Rows without a
+        // final turn stay out of its medians; an empty set prints «—».
+        let quickRows = measured.filter(\.quickReply)
+        let modelRows = measured.filter { !$0.quickReply && !$0.phases.isEmpty }
+        func seconds(_ v: [Double], _ format: String = "%.2f s") -> String { Self.median(v).map { String(format: format, $0) } ?? "—" }
+        let quickText = "\(quickRows.count) su \(measured.count) compiti con azioni (\(quickRows.filter(\.falseDone).count) falsi «fatto» tra queste)"
+            + " · turno finale mediana \(seconds(quickRows.compactMap { $0.phases[.finalTurn] })) con la risposta dell'app,"
+            + " \(seconds(modelRows.compactMap { $0.phases[.finalTurn] })) con quella del modello"
+            + " · compito mediana \(seconds(quickRows.map(\.total), "%.1f s")) / \(seconds(modelRows.map(\.total), "%.1f s"))"
+            + " · «Risposte rapide» \(AppSettings.shared.quickReplies ? "accese" : "spente")"
+        print("  risposte composte dall'app: \(quickText)")
         // NFR-16 (Story 10.3): on the positive tasks no timeout of the second layer, at most 0.3 s per action at the 90th percentile.
         let positives = measured.filter(\.ok)
         let layerCosts = positives.flatMap(\.secondLayer.costs)
@@ -3358,12 +3744,12 @@ extension DebugCLI {
         let out = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
         let phaseHeader = BenchPhase.allCases.map { "\($0.rawValue)_s" }.joined(separator: "\t")
-        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tprima_risposta_s\tprimo_token_webmail_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tpassaggio_s\tpassaggio_fino_a\tosservazione_riusata\trapido_preparato\tfalso_fatto\tread_text_s\tscreenshot\tturni\tconferme\tbloccate\tmodello\trisposta\n"
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tprima_risposta_s\tprimo_token_webmail_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tpassaggio_s\tpassaggio_fino_a\tosservazione_riusata\trapido_preparato\tfalso_fatto\trisposta_composta\tread_text_s\tscreenshot\tturni\tconferme\tbloccate\tmodello\trisposta\n"
         for r in rows {
             let esito = r.skipped != nil ? "saltato" : (r.ok ? "ok" : "no")
             let phases = BenchPhase.allCases.map { p in r.phases[p].map { String(format: "%.2f", $0) } ?? "" }.joined(separator: "\t")
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.firstResponse.map { String(format: "%.2f", $0) } ?? "")\t\(r.webmailFirstToken.map { String(format: "%.2f", $0) } ?? "")\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.handoff.map { String(format: "%.2f", $0) } ?? "")\t\(r.handoffEvent ?? "")\t\(r.escalation.isEmpty ? "" : (r.observationReused == true ? "sì" : "no"))\t\(r.escalation.isEmpty ? "" : (r.takeoverLevel.map(AgentRunner.levelName) ?? "no"))\t\(r.falseDone ? "sì" : "")\t\(r.readText.map { String(format: "%.2f", $0) } ?? "")\t\(r.screenshot ? "sì" : "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.firstResponse.map { String(format: "%.2f", $0) } ?? "")\t\(r.webmailFirstToken.map { String(format: "%.2f", $0) } ?? "")\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.handoff.map { String(format: "%.2f", $0) } ?? "")\t\(r.handoffEvent ?? "")\t\(r.escalation.isEmpty ? "" : (r.observationReused == true ? "sì" : "no"))\t\(r.escalation.isEmpty ? "" : (r.takeoverLevel.map(AgentRunner.levelName) ?? "no"))\t\(r.falseDone ? "sì" : "")\t\(r.quickReply ? "sì" : "")\t\(r.readText.map { String(format: "%.2f", $0) } ?? "")\t\(r.screenshot ? "sì" : "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         // The verdict in a file of its own, next to the table: the TSV stays a plain table.
@@ -3384,6 +3770,7 @@ extension DebugCLI {
             + (instantRows.isEmpty ? "" : "\npreparazioni non usate: \(preparationsText)")
             + "\nriavvii della Sessione lunga: \(restartsText)"
             + "\nsecondo strato: \(layerText)"
+            + "\nrisposte composte dall'app: \(quickText)"
             + "\nfalsi «fatto»: \(ran.filter(\.falseDone).count) · prova prima del «fatto»: \(AppSettings.shared.evidenceBeforeDone ? "attiva" : "spenta")\n"
         try? summary.write(to: out.deletingPathExtension().appendingPathExtension("soglie.txt"), atomically: true, encoding: .utf8)
         print("Tabella: \(out.path)")

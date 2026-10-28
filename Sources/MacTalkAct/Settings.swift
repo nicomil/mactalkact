@@ -142,6 +142,8 @@ final class AppSettings: ObservableObject {
         static let riskClassifier = true
         /// The agent names the evidence before saying «fatto» (FR-46).
         static let evidenceBeforeDone = true
+        /// Story 11.4 (NFR-15): a verified last action ends the turn, the app writes the answer.
+        static let quickReplies = true
         static let cleanDictation = false
         // Engines (Epic 4-5)
         static let agentEngine = EngineID.claude
@@ -241,6 +243,8 @@ final class AppSettings: ObservableObject {
     /// The on-device model as a second safety layer (Story 9.5): it may only add confirmations.
     @Published var riskClassifier: Bool { didSet { defaults.set(riskClassifier, forKey: "riskClassifier") } }
     @Published var evidenceBeforeDone: Bool { didSet { defaults.set(evidenceBeforeDone, forKey: "evidenceBeforeDone") } }
+    /// «Risposte rapide» (Story 11.4): the app writes the answer from a verified outcome of the last action.
+    @Published var quickReplies: Bool { didSet { defaults.set(quickReplies, forKey: "quickReplies") } }
     @Published var cleanDictation: Bool { didSet { defaults.set(cleanDictation, forKey: "cleanDictation") } }
 
     // MARK: Engines
@@ -379,6 +383,7 @@ final class AppSettings: ObservableObject {
         fixedCostObservation = bool("fixedCostObservation", Defaults.fixedCostObservation)
         riskClassifier = bool("riskClassifier", Defaults.riskClassifier)
         evidenceBeforeDone = bool("evidenceBeforeDone", Defaults.evidenceBeforeDone)
+        quickReplies = bool("quickReplies", Defaults.quickReplies)
         d.removeObject(forKey: "confirmValiditySeconds") // removed with Story 9.2: no time window any more
         cleanDictation = bool("cleanDictation", Defaults.cleanDictation)
 
@@ -452,6 +457,7 @@ final class AppSettings: ObservableObject {
             prepareSessionOnWake = Defaults.prepareSessionOnWake
             instantLevel = Defaults.instantLevel; instantModel = Defaults.instantModel; instantEffort = Defaults.instantEffort
             fixedCostObservation = Defaults.fixedCostObservation; riskClassifier = Defaults.riskClassifier; evidenceBeforeDone = Defaults.evidenceBeforeDone
+            quickReplies = Defaults.quickReplies
             cleanDictation = Defaults.cleanDictation
             agentEngine = Defaults.agentEngine; engineFallback = Defaults.engineFallback
             codexPath = Defaults.codexPath; codexModel = Defaults.codexModel; codexFastModel = Defaults.codexFastModel

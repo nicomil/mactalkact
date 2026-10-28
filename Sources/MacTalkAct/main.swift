@@ -331,7 +331,7 @@ if arguments.contains("--mcp-serve") {
         let tools = AgentTools(executor: Executor())
         tools.onProgress = { print("  · \($0)") }
         tools.askUser = { q, _ in print("  ? \(q) → (test: nessuna risposta)"); return nil }
-        let server = MCPServer(tools: AgentTools.definitions) { name, args in
+        let server = MCPServer(toolList: { await AgentTools.servedDefinitions() }) { name, args in
             await tools.call(name, args)
         }
         do {

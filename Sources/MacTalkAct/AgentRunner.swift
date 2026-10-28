@@ -93,9 +93,18 @@ final class AgentRunner {
     could not verify: never claim success without evidence.
     """
 
+    /// Story 11.4 (FR-57): `final` on the action that completes the request. Off: the prompt of before.
+    static let finalRule = """
+
+    - Put `final: true` on the action that completes the request (the last one). If its RESULT proves the \
+    change, the app tells the user and ends your turn; otherwise go on and answer as usual. Never use it when \
+    the user asks you to read, explain or tell them something.
+    """
+
     /// The prompt of the cloud engines; part of the Long session's configuration (changing it restarts it).
     static var systemPrompt: String {
-        AppSettings.shared.evidenceBeforeDone ? basePrompt + evidenceRule : basePrompt
+        let s = AppSettings.shared
+        return basePrompt + (s.evidenceBeforeDone ? evidenceRule : "") + (s.quickReplies ? finalRule : "")
     }
 
     /// A change of engine to show once in the HUD (FR-27).
@@ -132,6 +141,8 @@ final class AgentRunner {
     private(set) var lastTakeoverLevel: AgentLevel?
     /// The event of the level that took over that ended the handoff: «init» or «primo token».
     private(set) var lastHandoffEvent: String?
+    /// Story 11.4: the app wrote the answer of the last request from the outcome of its final action.
+    private(set) var lastQuickReply = false
     /// Called when any engine changes state; the aggregate is `availability`.
     var onAvailabilityChange: ((AgentAvailability) -> Void)?
     /// Called when one engine changes state (menu, "Codex è tornato").
@@ -232,7 +243,7 @@ final class AgentRunner {
     func start() async throws {
         guard server == nil else { return }
         let tools = self.tools
-        let s = MCPServer(tools: AgentTools.definitions) { name, args in
+        let s = MCPServer(toolList: { await AgentTools.servedDefinitions() }) { name, args in
             await tools.call(name, args)
         }
         try await s.start()
@@ -400,6 +411,7 @@ final class AgentRunner {
         lastTakeoverPrepared = nil
         lastTakeoverLevel = nil
         lastHandoffEvent = nil
+        lastQuickReply = false
         lastLevel = nil
         firstLevel = nil
         lastPhases = [:]
@@ -422,6 +434,8 @@ final class AgentRunner {
             tools.onClassified = nil
             tools.instantGuard = false
             tools.onEscalate = nil
+            tools.onClose = nil
+            tools.quickReplies = false
             tools.onQuestion = nil
             // End of the request: the judgements in advance still in queue are cancelled (Story 10.3).
             tools.gate.anticipationAllowed = false
@@ -469,6 +483,9 @@ final class AgentRunner {
         } else {
             req.messageSince = { [unowned self] _ in self.message(request, context: context, recent: recent, elements: elements) }
         }
+        // «Risposte rapide» (Story 11.4): never for a question or a request for information, whose answer is
+        // what the model reads.
+        let quickOn = settings.quickReplies && !AgentTools.asksForInformation(request)
         var tried: Set<EngineID> = []
         // Instant level (FR-43): Claude only, once; after a scalata the same request goes on at `.fast`.
         var instantPending = instant && !deep && settings.instantLevel
@@ -521,8 +538,24 @@ final class AgentRunner {
                 engine?.interrupt()
                 signalElements = handoffElements()
             }
+            // A final action with a verified outcome closes the turn (Story 11.4). Claude keeps its Long session
+            // (`interrupt`); Codex runs one process per request, closed like at a scalata, so nothing is lost; the
+            // local engine gets no outcome of its actions and works on the Mac, so it keeps answering itself.
+            tools.quickReplies = quickOn && engine.id != .local
+            tools.onClose = { [weak engine] _ in engine?.interrupt() }
             let model = engine.model(for: attemptLevel)
             let started = Date()
+            /// The turn was closed by the app: the composed answer, whatever the engine returned or threw.
+            func quickAnswer(_ reply: String, modelSaid: String) -> String {
+                engine.onPhase = nil
+                lastEngine = engine.id
+                lastModel = model
+                lastQuickReply = true
+                Log.info(String(format: "Agente (%@/%@): %d passi in %.1fs → risposta dell'app dall'esito%@", engine.id.rawValue, model,
+                                tools.callCount, Date().timeIntervalSince(started),
+                                Log.isDetailed ? ": \(reply) (modello: \(modelSaid.isEmpty ? "turno chiuso" : modelSaid))" : ""))
+                return reply
+            }
             // Cloud engines get the outcome of each action (AD-19); the local engine observes on its own.
             tools.reportOutcome = engine.id != .local
             tools.cloudEngine = engine.id.isCloud
@@ -570,6 +603,9 @@ final class AgentRunner {
             }
             do {
                 let answer = try await engine.run(attempt)
+                // The model may finish before the interruption lands: the app's answer still wins (one answer).
+                // After «stop» the request is not «fatto»: the Coordinator says it was interrupted.
+                if let reply = tools.closing, !tools.cancelled { return quickAnswer(reply, modelSaid: answer) }
                 if attemptLevel == .instant, tools.escalation == nil, !tools.cancelled, !tools.deniedThisRequest,
                    let reason = AgentTools.instantGaveUp(answer: answer, effectfulCalls: tools.effectfulCalls) {
                     // Haiku gave up inside its one call: the fast level tries, with what was done (FR-43).
@@ -588,6 +624,9 @@ final class AgentRunner {
                                 tools.callCount, Date().timeIntervalSince(started),
                                 Log.isDetailed ? answer : "risposta di \(answer.count) caratteri"))
                 return answer
+            } catch where tools.closing != nil && !tools.cancelled {
+                // The interrupted turn ends with an error (or the process closed): the request is done.
+                return quickAnswer(tools.closing ?? "", modelSaid: "")
             } catch let error as AgentEngineError {
                 engine.onPhase = nil // a late event of this engine must not move the next attempt's phases
                 if attemptLevel == .instant, !tools.cancelled, !tools.deniedThisRequest {

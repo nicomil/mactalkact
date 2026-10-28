@@ -84,3 +84,10 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-11-2-sessione-pronta-all-ascolto.md`
   summary: Trovare la verifica di `--fallback-test` che è fallita una volta su otto con il Mac carico e renderla indipendente dai tempi.
   evidence: 28/10 pomeriggio, load average 8–13; il controllo non è stato catturato e non si è ripetuto in 7 corse.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-4-risposta-scritta-dall-app.md`
+  summary: Verificare con la CLI vera che l'interruzione arrivata mentre una chiamata MCP è in attesa chiuda il turno e lasci viva la Sessione lunga.
+  evidence: `--session-test` interrompe al primo token senza strumenti; il Banco del ciclo 3 lo mostrerà (riavvii della sessione).
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-4-risposta-scritta-dall-app.md`
+  summary: Rendere indipendenti dallo schermo le righe di `--fallback-test` della Storia 11.4 (registro delle etichette finto).
+  evidence: oggi l'etichetta dell'id 4 dipende dalla finestra davanti; il test controlla solo la forma della frase.

@@ -70,6 +70,13 @@ final class AgentTools {
     }
     /// An observation older than this is read again at the handoff of a scalata.
     nonisolated static let observationMaxAge: TimeInterval = 4
+    /// «Risposte rapide» (Story 11.4): a final action with a verified outcome closes the turn and the app
+    /// answers. Set by AgentRunner for every attempt (switch on, cloud engine, not a request for information).
+    var quickReplies = false
+    /// Called once when a final action is verified: AgentRunner interrupts the engine's turn.
+    var onClose: ((String) -> Void)?
+    /// The answer composed by the app from the outcome of the final action: the turn is closing.
+    private(set) var closing: String?
     /// The calls of this request with the first line of their result, for the level that takes over.
     private(set) var callLog: [String] = []
     /// Text changes made during the current task, for the conversation memory (FR-8).
@@ -103,6 +110,7 @@ final class AgentTools {
         callCount = 0
         escalation = nil
         escalatedAt = nil
+        closing = nil
         instantGuard = false
         // The same request retried on another engine keeps what the first one asked (AD-15).
         gate.reset(keepCounters: keepElements)
@@ -250,6 +258,34 @@ final class AgentTools {
              ["action": ["type": "string", "description": "Short Italian description, e.g. «Invio la mail a Marco?»"]], required: ["action"]),
     ]
 
+    /// The hands that accept `final` (Story 11.4, FR-57): the action that completes the request.
+    static let finalTools: Set<String> = [
+        "act", "click", "click_many", "type_text", "press_keys", "menu", "perform_action", "set_value", "drag",
+        "open_app", "open_url", "replace_text", "edit_text",
+    ]
+    static let finalProperty: [String: Any] = [
+        "type": "boolean",
+        "description": "true on the action that completes the request (the last one). If its RESULT proves the change, the app tells the user and your turn ends; otherwise you go on as usual.",
+    ]
+
+    /// The tools of the cloud engines over MCP: `definitions` with `final` on the hands (Story 11.4).
+    /// The local engine keeps `definitions`: its small context gets no parameter it never uses.
+    static let mcpDefinitions: [[String: Any]] = definitions.map { def in
+        guard let name = def["name"] as? String, finalTools.contains(name),
+              var schema = def["inputSchema"] as? [String: Any],
+              var properties = schema["properties"] as? [String: Any] else { return def }
+        properties["final"] = finalProperty
+        schema["properties"] = properties
+        var copy = def
+        copy["inputSchema"] = schema
+        return copy
+    }
+
+    /// What the MCP server lists at `tools/list`: `final` only with «Risposte rapide» on (Story 11.4).
+    static func servedDefinitions() -> [[String: Any]] {
+        AppSettings.shared.quickReplies ? mcpDefinitions : definitions
+    }
+
     private static func tool(_ name: String, _ description: String, _ properties: [String: Any],
                              required: [String] = []) -> [String: Any] {
         var schema: [String: Any] = ["type": "object", "properties": properties]
@@ -277,12 +313,39 @@ final class AgentTools {
         var errorDescription: String? { message }
     }
 
-    func call(_ name: String, _ args: [String: Any]) async -> Result {
+    /// Why a call must not run now: the task was cancelled, the app already answered (Story 11.4), or the
+    /// Instant level used its one call (FR-43). Nil to go on.
+    private func stopBeforeCall(_ name: String) -> Result? {
         if cancelled { return .error("The user cancelled the task. Stop now.") }
+        if closing != nil {
+            return .error("Stop now: the request is done and the app already answered the user. Do not call tools; reply with one word.")
+        }
         if instantGuard, escalation != nil || callCount >= 1 {
             escalate(escalation ?? "seconda chiamata (\(name))")
             return .error("Stop now: another assistant continues this task. Do not call tools; reply with one word.")
         }
+        return nil
+    }
+
+    /// `final: true` (a boolean, or a model writing it as a string or a number). Pure.
+    static func isFinalFlag(_ v: Any?) -> Bool {
+        if let b = v as? Bool { return b }
+        if let s = v as? String { return ["true", "1", "yes", "si", "sì"].contains(s.lowercased()) }
+        if let n = v as? NSNumber { return n.intValue == 1 }
+        return false
+    }
+
+    /// The arguments without `final`, and whether the call is final: `final: true`, or the one call of the
+    /// Instant level, which is always the final one (Story 11.4, FR-57).
+    private func takeFinal(_ rawArgs: [String: Any]) -> (args: [String: Any], isFinal: Bool) {
+        var args = rawArgs
+        let flag = Self.isFinalFlag(args.removeValue(forKey: "final"))
+        return (args, flag || instantGuard)
+    }
+
+    func call(_ name: String, _ rawArgs: [String: Any]) async -> Result {
+        if let stop = stopBeforeCall(name) { return stop }
+        let (args, isFinal) = takeFinal(rawArgs)
         onCall?(true)
         defer { onCall?(false) }
         callCount += 1
@@ -305,6 +368,13 @@ final class AgentTools {
             }
             result.content.append(["type": "text", "text": outcome()])
         }
+        return finishCall(name, args, result, isFinal: isFinal)
+    }
+
+    /// The tail of every call after the tool ran (shared with `debugCall`): «solo clic» filter, call log,
+    /// Instant judgement, masking for the cloud, final action, log.
+    private func finishCall(_ name: String, _ args: [String: Any], _ result: Result, isFinal: Bool) -> Result {
+        var result = result
         // «Solo clic» app, cloud engine: only the controls, never text of the window (FR-54). Before the
         // call log, so the level that takes over after a scalata does not receive it either.
         if gate.showsOnlyControls(cloud: cloudEngine) {
@@ -338,6 +408,8 @@ final class AgentTools {
                 return copy
             }
         }
+        // After the masking: the answer goes into the memory the next request sends to the cloud (Story 11.4).
+        if isFinal { considerClosing(name, args, result) }
         if Log.isDetailed {
             let summary = (result.content.first?["text"] as? String).map { String($0.prefix(160)) } ?? "(immagine)"
             Log.debug("Agente ← \(name)\(result.isError ? " ERRORE" : ""): \(summary.replacingOccurrences(of: "\n", with: " ⏎ "))")
@@ -891,6 +963,341 @@ final class AgentTools {
         let tail = current.trimmingCharacters(in: .whitespacesAndNewlines)
         if !tail.isEmpty { out.append(tail) }
         return out
+    }
+
+    // MARK: Quick replies (Story 11.4, FR-57)
+
+    /// After a final action: when its outcome proves the result, the answer is composed here and the
+    /// engine's turn is closed (`onClose`). Never after an error, a «no» of the user, a scalata still in
+    /// progress at the Instant level, with the switch off or the local engine (no outcome reported), nor in a
+    /// «solo clic» app (the answer would carry text of the window into the conversation memory sent to the
+    /// cloud). `result` is what the engine receives, already masked for the cloud; the answer is masked too,
+    /// because it goes into the memory that the next request sends to the cloud.
+    private func considerClosing(_ name: String, _ args: [String: Any], _ result: Result) {
+        guard quickReplies, reportOutcome, closing == nil, !(instantGuard && escalation != nil), !cancelled,
+              !deniedThisRequest, Self.finalTools.contains(name), !gate.showsOnlyControls(cloud: cloudEngine) else { return }
+        let registry = self.registry
+        guard let reply = Self.quickReply(tool: name, args: args, resultText: result.text, isError: result.isError,
+                                          windowIsDialog: frontWindowIsDialog(),
+                                          // No label for an element registered under its role, nor for a password field.
+                                          label: { id in registry[id].flatMap { item in
+                                              item.label == item.role || Self.isSecure(item.element) ? nil : item.label } }) else {
+            Log.debug("Agente: azione finale (\(name)) senza esito che la provi, risponde il modello")
+            return
+        }
+        closing = cloudEngine && AppSettings.shared.hideSensitiveFromCloud ? Privacy.redact(reply, forCloud: true) : reply
+        Log.info("Agente: azione finale verificata (\(name)), rispondo io e chiudo il turno")
+        onClose?(closing ?? reply)
+    }
+
+    private static func isSecure(_ el: AXUIElement) -> Bool {
+        AX.string(el, kAXSubroleAttribute) == "AXSecureTextField" || AX.isSecureField(el)
+    }
+
+    /// The window in front is a dialog, a sheet or an alert (a save panel, a question, an error): the model
+    /// reads it and answers. Replaceable by the tests.
+    var frontWindowIsDialog: () -> Bool = {
+        guard let (app, _) = AX.frontApp(), let window = AX.focusedWindow(in: app) else { return false }
+        let role = AX.role(window)
+        let subrole = AX.string(window, kAXSubroleAttribute) ?? ""
+        return ["AXSheet", "AXDialog"].contains(role) || ["AXDialog", "AXSystemDialog", "AXFloatingWindow"].contains(subrole)
+            || AX.children(window).contains { AX.role($0) == "AXSheet" }
+    }
+
+    /// Debug only (`--fallback-test`): a call that returns `result` without touching the screen, through the
+    /// same guards, counters and tail as `call` (Instant level, final action, masking, closing).
+    func debugCall(_ name: String, _ rawArgs: [String: Any], result: Result) -> Result {
+        if let stop = stopBeforeCall(name) { return stop }
+        let (args, isFinal) = takeFinal(rawArgs)
+        onCall?(true)
+        defer { onCall?(false) }
+        callCount += 1
+        if firstCallAt == nil { firstCallAt = Date() }
+        if Self.effectfulTools.contains(name) || name == "act", !result.isError { effectfulCalls += 1 }
+        return finishCall(name, args, result, isFinal: isFinal)
+    }
+
+    /// The request asks for information, to look or search for something, or is a question: the answer is
+    /// what the model reads or thinks, never composed by the app (Story 11.4). When in doubt the model
+    /// answers. Pure, tested by `--selftest`.
+    static func asksForInformation(_ request: String) -> Bool {
+        let trimmed = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasSuffix("?") { return true }
+        let words = Grammar.normalize(trimmed).split(separator: " ")
+        let n = " " + words.joined(separator: " ") + " "
+        if questionStarts.contains(where: { n.hasPrefix(" \($0) ") }) { return true }
+        // «leggi», «leggila», «rileggimi»: every form of reading.
+        if words.contains(where: { $0.hasPrefix("legg") || $0.hasPrefix("rilegg") }) { return true }
+        return informationWords.contains { n.contains(" \($0) ") }
+    }
+
+    /// A request that starts with these words is a question (the others are in `informationWords`).
+    static let questionStarts = ["che", "chi", "come", "dove", "quando", "perche", "ci sono", "e vero", "sai", "hai visto",
+                                 "esiste", "posso", "is", "are", "does", "do", "how", "where", "when", "who", "why"]
+    /// Anywhere in the request: it asks to read, tell, explain, count, look or search.
+    static let informationWords = ["dimmi", "dirmi", "dici", "che dice", "cosa", "c e", "quanto", "quanta", "quanti", "quante",
+                                   "quale", "quali", "spiega", "spiegami", "spiegare", "riassumi", "riassumimi", "riassunto",
+                                   "descrivi", "descrivimi", "traduci", "traducimi", "controlla", "verifica", "guarda",
+                                   "cerca", "cercami", "trova", "trovami", "mostra", "mostrami", "fammi vedere", "elenca",
+                                   "elencami", "significa", "vuol dire", "what", "read", "tell", "show", "check", "summarize",
+                                   "summarise", "find", "search", "explain", "list"]
+
+    /// The answer composed from a final action and its outcome: «Fatto: ho cliccato «Invia»; ora la
+    /// finestra è «Posta inviata».» Nil when the outcome does not prove the result (FR-46: never «fatto»
+    /// without evidence). `label` gives the label of an element id (nil for password fields).
+    /// Pure, tested by `--selftest`.
+    static func quickReply(tool: String, args: [String: Any], resultText: String, isError: Bool,
+                           windowIsDialog: Bool = false, label: (Int) -> String?) -> String? {
+        guard !isError, finalTools.contains(tool),
+              let evidence = verifiedEvidence(tool: tool, args: args, resultText: resultText, windowIsDialog: windowIsDialog)
+        else { return nil }
+        return "Fatto: ho \(actionPhrase(tool: tool, args: args, label: label)); \(evidence)."
+    }
+
+    /// Words of a failure in the tool's text or in what appeared or changed («Impossibile inviare», «Campo
+    /// obbligatorio»): the outcome does not prove the result, the model reads it. Whole words, normalized.
+    static let failureSigns = ["errore", "errori", "error", "impossibile", "non riuscito", "non riuscita", "non e riuscito",
+                               "non e riuscita", "fallito", "fallita", "failed", "non valido", "non valida", "invalid",
+                               "obbligatorio", "obbligatoria", "required", "riprova", "try again", "attenzione", "warning",
+                               "negato", "negata", "denied", "non e stato", "non e stata", "non e possibile", "non puoi",
+                               "rifiutato", "rifiutata", "non trovato", "non trovata", "not found", "errata", "errato",
+                               "sbagliata", "sbagliato", "scaduto", "scaduta", "expired", "unable", "cannot", "non disponibile",
+                               "incorrect"]
+    /// Roles that appear with a question or a problem: the model reads them.
+    static let alertRoles: Set<String> = ["sheet", "dialog", "alert", "systemdialog"]
+    /// Hands whose result is only a new window or app: element changes elsewhere prove nothing.
+    static let untargetedTools: Set<String> = ["open_app", "open_url", "menu", "press_keys"]
+
+    /// One element line of observe or of an outcome: «[12]* checkbox «Newsletter» (checked) @…».
+    struct ElementLine: Equatable {
+        var id: Int
+        var role: String
+        var label: String
+        var value: String?
+        /// nil: not a checkbox, radio button or switch.
+        var checked: Bool?
+        /// A password field: its label and content are never quoted.
+        var secure = false
+
+        init?(_ line: String) {
+            guard let m = line.firstMatch(of: #/^\[(\d+)\]\*? ([a-z]+)(?: «(.*?)»)?/#) else { return nil }
+            id = Int(m.1) ?? 0
+            role = String(m.2)
+            label = m.3.map(String.init) ?? ""
+            if let v = line.firstMatch(of: #/value=«(.*?)»/#) { value = String(v.1) }
+            else if let v = line.firstMatch(of: #/value=(-?[0-9.]+)/#) { value = String(v.1) }
+            if line.contains(" (checked)") { checked = true } else if line.contains(" (unchecked)") { checked = false }
+            secure = line.contains("(password field")
+        }
+    }
+
+    /// Text inputs: their value is the text in them.
+    static let textInputLineRoles: Set<String> = ["textfield", "textarea", "searchfield", "combobox"]
+
+    /// The evidence of the result in the outcome of `tool`, as the end of an Italian sentence, or nil.
+    /// Pure, tested by `--selftest`.
+    /// - Nil on any failure sign in the tool's text or in what appeared or changed, on a click that pressed
+    ///   a container, on a `click_many` with an error, on a truncated outcome, with a dialog in front.
+    /// - Another app in front proves only `open_app` and `open_url`; a new window proves any hand.
+    /// - `open_app`, `open_url`, `menu` and `press_keys` need a new window or app; the other hands need a
+    ///   change of the element they aimed at (a clock or a badge changing elsewhere proves nothing).
+    /// - Writing needs the text on screen: in the target field, or (at least 4 characters) in a text field,
+    ///   an element that appeared or the title. The evidence never repeats the text.
+    static func verifiedEvidence(tool: String, args: [String: Any], resultText: String, windowIsDialog: Bool = false) -> String? {
+        let lines = resultText.components(separatedBy: "\n")
+        let at = lines.firstIndex(where: { $0.hasPrefix("RESULT: ") })
+        func failing(_ s: String) -> Bool {
+            let n = " " + Grammar.normalize(s).split(separator: " ").joined(separator: " ") + " "
+            return failureSigns.contains { n.contains(" \($0) ") }
+        }
+        let toolText = Array(lines[..<(at ?? lines.count)])
+        if toolText.contains(where: { $0.contains("Pressed the container of") || failing($0) }) { return nil }
+        if tool == "click_many" || tool == "act", toolText.contains(where: { $0.contains("] ERROR:") }) { return nil }
+        if windowIsDialog { return nil }
+        let last = lastStep(tool: tool, args: args)
+        guard let at else { return textVerifiedByTool(tool: last.tool, args: last.args, resultText: resultText) }
+        let head = String(lines[at].dropFirst("RESULT: ".count))
+        if head.hasPrefix("nothing changed") { return nil }
+        if resultText.contains("more: observe for the full list") || resultText.contains("(… observe for the rest)") { return nil }
+        var changedRaw: [String] = [], addedRaw: [String] = [], removed: [ElementLine] = []
+        var bigChange = false
+        for line in lines[(at + 1)...] {
+            if line.hasPrefix("~ ") { changedRaw.append(String(line.dropFirst(2))) }
+            else if line.hasPrefix("+ ") { addedRaw.append(String(line.dropFirst(2))) }
+            else if line.hasPrefix("- ") { if let e = ElementLine(String(line.dropFirst(2))) { removed.append(e) } }
+            else if line.hasPrefix("The screen changed a lot") { bigChange = true }
+            else if bigChange, line.hasPrefix("[") { addedRaw.append(line) }
+        }
+        let changed = changedRaw.compactMap(ElementLine.init)
+        let added = addedRaw.compactMap(ElementLine.init)
+        let app = head.firstMatch(of: #/^app is now (.+?)(?: · |$)/#).map { String($0.1) }
+        let window = head.firstMatch(of: #/window «(.*?)» \(was «/#).map { String($0.1) }
+        let selection = head.firstMatch(of: #/selected «(.*?)»(?: · |$)/#).map { String($0.1) }
+        // A failure that appeared or changed: the model reads it and answers.
+        if ([window ?? "", selection ?? ""] + changedRaw + addedRaw).contains(where: failing) { return nil }
+        if added.contains(where: { alertRoles.contains($0.role) }) { return nil }
+        if let app {
+            return ["open_app", "open_url"].contains(last.tool) ? "ora è in primo piano «\(short(app, max: 40))»" : nil
+        }
+        let targets = targetIDs(tool: last.tool, args: last.args)
+
+        if let typed = typedText(tool: last.tool, args: last.args) {
+            let want = String(Grammar.normalize(typed).split(separator: " ").joined(separator: " ").prefix(24))
+            guard !want.isEmpty else { return nil }
+            let long = want.count >= 4
+            func has(_ s: String?) -> Bool { s.map { Grammar.normalize($0).split(separator: " ").joined(separator: " ").contains(want) } ?? false }
+            let visible = (changed + added).filter { !$0.secure }
+            if let e = visible.first(where: { has($0.value) && (targets.contains($0.id) || long && textInputLineRoles.contains($0.role)) }) {
+                return e.label.isEmpty || e.label == e.value ? "il testo ora compare nel campo" : "il testo ora compare in «\(short(e.label, max: 40))»"
+            }
+            if long, added.contains(where: { !$0.secure && has($0.label) }) { return "il testo è comparso sullo schermo" }
+            if long, has(window) { return "il testo compare nel titolo della finestra" }
+            return textVerifiedByTool(tool: last.tool, args: last.args, resultText: resultText)
+        }
+        if let window { return window.isEmpty ? "la finestra è cambiata" : "ora la finestra è «\(short(window, max: 60))»" }
+        if untargetedTools.contains(last.tool) { return nil }
+        if let e = changed.first(where: { targets.contains($0.id) }), let p = elementPhrase(e) { return p }
+        if let e = removed.first(where: { targets.contains($0.id) && !$0.secure && !$0.label.isEmpty }) {
+            return "è sparito «\(short(e.label, max: 60))»"
+        }
+        if ["click", "click_many"].contains(last.tool), let selection, !selection.isEmpty, !targets.isEmpty {
+            return "ora è selezionato «\(short(selection, max: 60))»"
+        }
+        return nil
+    }
+
+    /// `replace_text` reads the field back: «Replaced and verified» is evidence even where the outcome
+    /// sees nothing (web editors).
+    private static func textVerifiedByTool(tool: String, args: [String: Any], resultText: String) -> String? {
+        guard tool == "replace_text", resultText.hasPrefix("Replaced and verified"),
+              let replace = args["replace"] as? String, !replace.isEmpty else { return nil }
+        return "l'app ha riletto il campo con il testo nuovo"
+    }
+
+    /// A changed element as evidence, or nil when it says nothing (no label, a password field). The text of
+    /// a field is never quoted: it may be what was typed.
+    static func elementPhrase(_ e: ElementLine) -> String? {
+        guard !e.secure, !e.label.isEmpty || e.checked == nil && e.value.map(\.isEmpty) == false && textInputLineRoles.contains(e.role) else { return nil }
+        let label = short(e.label, max: 40)
+        if let on = e.checked {
+            if e.role == "radiobutton" { return on ? "ora è scelto «\(label)»" : nil }
+            if e.role == "switch" { return "«\(label)» ora è \(on ? "acceso" : "spento")" }
+            return "la casella «\(label)» ora è \(on ? "spuntata" : "vuota")"
+        }
+        if textInputLineRoles.contains(e.role) {
+            return label.isEmpty || e.label == e.value ? "è cambiato il testo nel campo" : "è cambiato il testo in «\(label)»"
+        }
+        if let v = e.value, !v.isEmpty {
+            if Double(v) != nil { return "«\(label)» ora vale \(v)" }
+            return "«\(label)» ora è «\(short(v, max: 50))»"
+        }
+        return "è cambiato «\(label)»"
+    }
+
+    /// The step whose result is the evidence: the tool itself, or the last step of `act` that is not a `wait`.
+    private static func lastStep(tool: String, args: [String: Any]) -> (tool: String, args: [String: Any]) {
+        guard tool == "act", let last = (args["steps"] as? [[String: Any]])?.last(where: { ($0["tool"] as? String) != "wait" }),
+              let name = last["tool"] as? String else {
+            return (tool, args)
+        }
+        return (name, last)
+    }
+
+    /// A string or a number from the model's JSON («40», 40): the number as written.
+    private static func text(_ v: Any?) -> String? {
+        if let s = v as? String { return s }
+        if let n = v as? NSNumber { return n.stringValue }
+        return nil
+    }
+
+    /// The text a writing tool puts on screen, or nil for the other tools.
+    private static func typedText(tool: String, args: [String: Any]) -> String? {
+        switch tool {
+        case "type_text", "edit_text": return (args["text"] as? String).map { String($0.suffix(tool == "edit_text" ? 40 : 1000)) }
+        case "replace_text": return args["replace"] as? String
+        case "set_value":
+            // A text field set to a text: the value must show it; a number is judged like any change.
+            guard let v = text(args["value"]), Double(v) == nil else { return nil }
+            return v
+        default: return nil
+        }
+    }
+
+    /// The elements an action was aimed at: their change is the evidence.
+    private static func targetIDs(tool: String, args: [String: Any]) -> Set<Int> {
+        var out: Set<Int> = []
+        for k in ["id", "from_id", "to_id"] { if let i = int(args[k]) { out.insert(i) } }
+        for i in (args["ids"] as? [Any]) ?? [] { if let i = int(i) { out.insert(i) } }
+        return out
+    }
+
+    /// Keys as they are said: «cmd+shift+n» → «comando maiuscole N», «return» → «Invio». Pure.
+    static func spokenKeys(_ keys: String) -> String {
+        let names = ["cmd": "comando", "command": "comando", "shift": "maiuscole", "alt": "opzione", "option": "opzione",
+                     "opt": "opzione", "ctrl": "controllo", "control": "controllo", "fn": "fn", "return": "Invio",
+                     "enter": "Invio", "escape": "Esc", "esc": "Esc", "tab": "Tab", "delete": "Cancella", "backspace": "Cancella",
+                     "space": "Spazio", "up": "freccia su", "down": "freccia giù", "left": "freccia sinistra",
+                     "right": "freccia destra", "pageup": "pagina su", "pagedown": "pagina giù", "home": "Inizio", "end": "Fine"]
+        return keys.split(separator: " ").map { combo in
+            combo.split(separator: "+").map { part in
+                let k = part.lowercased()
+                return names[k] ?? (k.count <= 3 ? k.uppercased() : String(part))
+            }.joined(separator: " ")
+        }.joined(separator: ", ")
+    }
+
+    /// What the app did, in Italian after «ho»: «cliccato «Invia»», «scritto il testo in «Nome» e premuto
+    /// «Invio»». Typed text is never quoted (it may be a password); password fields are never named.
+    static func actionPhrase(tool: String, args: [String: Any], label: (Int) -> String?) -> String {
+        if tool == "act" {
+            let phrases = ((args["steps"] as? [[String: Any]]) ?? []).compactMap { step -> String? in
+                guard let name = step["tool"] as? String, name != "wait" else { return nil }
+                return actionPhrase(tool: name, args: step, label: label)
+            }
+            switch phrases.count {
+            case 0: return "eseguito i passi"
+            case 1: return phrases[0]
+            case 2, 3: return phrases.dropLast().joined(separator: ", ") + " e " + phrases.last!
+            default: return phrases.prefix(2).joined(separator: ", ") + " e altri \(phrases.count - 2) passi"
+            }
+        }
+        func element(_ key: String) -> String? {
+            guard let id = int(args[key]) else { return nil }
+            return label(id).flatMap { $0.isEmpty ? nil : "«\(short($0, max: 40))»" } ?? "l'elemento indicato"
+        }
+        func quoted(_ key: String, max: Int = 40) -> String {
+            "«\(short(text(args[key]) ?? "", max: max))»"
+        }
+        switch tool {
+        case "click":
+            let target = element("id") ?? "il punto indicato"
+            switch args["method"] as? String {
+            case "double": return "fatto doppio clic su \(target)"
+            case "right": return "aperto il menu di \(target)"
+            default: return "cliccato \(target)"
+            }
+        case "click_many":
+            let ids = (args["ids"] as? [Any]) ?? []
+            return ids.count == 1 ? "cliccato \(int(ids.first).flatMap(label).map { "«\(short($0, max: 40))»" } ?? "un elemento")"
+                : "cliccato \(ids.count) elementi"
+        case "type_text": return "scritto il testo" + (element("id").map { " in \($0)" } ?? "")
+        case "press_keys": return "premuto «\(short(spokenKeys((args["keys"] as? String) ?? ""), max: 60))»"
+        case "menu": return "scelto «\(short(((args["path"] as? String) ?? "").replacingOccurrences(of: " > ", with: " › "), max: 60))»"
+        case "perform_action": return "eseguito \(quoted("action")) su \(element("id") ?? "l'elemento indicato")"
+        case "set_value":
+            let target = element("id") ?? "il valore"
+            guard let v = text(args["value"]), Double(v) != nil else { return "compilato \(target)" }
+            return "impostato \(target) a \(v)"
+        case "drag": return "trascinato \(element("from_id") ?? "dal punto indicato") su \(element("to_id") ?? "il punto indicato")"
+        case "open_app": return "aperto \(quoted("name"))"
+        case "open_url":
+            let raw = (args["url"] as? String) ?? ""
+            let host = URL(string: raw.contains("://") ? raw : "https://" + raw)?.host ?? raw
+            return "aperto «\(short(host, max: 50))»"
+        case "replace_text": return "sostituito il testo"
+        case "edit_text": return "modificato il testo"
+        default: return "eseguito l'azione"
+        }
     }
 
     private func escalate(_ reason: String) {

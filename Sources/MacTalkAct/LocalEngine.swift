@@ -264,6 +264,8 @@ final class LocalEngine: AgentEngine {
     }
 
     func cancel() { runningTask?.cancel() }
+    // No «Risposte rapide» (Story 11.4): the local engine gets no outcome of its actions (it observes on its own)
+    // and its final turn runs on the Mac; AgentRunner keeps the switch off for it.
 
     func shutdown() { runningTask?.cancel() }
 }

@@ -480,9 +480,10 @@ final class ClaudeCLI: @unchecked Sendable {
             scheduleIdleEnd(s)
             throw ClaudeCLIError.noOutput(m)
         } catch ClaudeCLIError.failed(let m) where lock.withLock({ interrupted }) && s.process.process.isRunning {
-            // Interrupted on purpose (scalata): the session stays for the next Instant request. The cursor
-            // stays too: the outcome of this request comes from the fast level, so it is sent next time.
-            lock.withLock { s.requests += 1; s.lastUsed = Date(); interrupted = false }
+            // Interrupted on purpose (scalata, or a final action answered by the app, Story 11.4): the session
+            // stays. It saw the memory up to this request but not the answer, which comes from the fast level
+            // or from the app: the cursor stops before this request's entry, so the next message carries it.
+            lock.withLock { s.requests += 1; s.lastUsed = Date(); s.cursor = memory.lastSeq; interrupted = false }
             scheduleIdleEnd(s)
             throw ClaudeCLIError.failed(m)
         } catch {

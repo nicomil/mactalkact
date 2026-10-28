@@ -21,12 +21,19 @@ final class MCPServer: @unchecked Sendable {
     }
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "local.mactalkact.mcp")
-    private let tools: [[String: Any]]
+    /// The tool list, read at every `tools/list` (it follows «Risposte rapide», Story 11.4).
+    private let toolList: @Sendable () async -> [[String: Any]]
     private let handler: ToolHandler
     static let serverName = "mactalk"
 
     init(tools: [[String: Any]], handler: @escaping ToolHandler) {
-        self.tools = tools
+        nonisolated(unsafe) let fixed = tools
+        self.toolList = { fixed }
+        self.handler = handler
+    }
+
+    init(toolList: @escaping @Sendable () async -> [[String: Any]], handler: @escaping ToolHandler) {
+        self.toolList = toolList
         self.handler = handler
     }
 
@@ -160,7 +167,7 @@ final class MCPServer: @unchecked Sendable {
         case "ping":
             return reply([:])
         case "tools/list":
-            return reply(["tools": tools])
+            return reply(["tools": await toolList()])
         case "tools/call":
             let name = params["name"] as? String ?? ""
             let args = params["arguments"] as? [String: Any] ?? [:]
