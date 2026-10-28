@@ -7,7 +7,7 @@
 # Stati: backlog · ready-for-dev · in-progress · review · done
 
 generated: 10-26-2026 23:10
-last_updated: 10-28-2026 01:46
+last_updated: 10-28-2026 12:22
 project: mactalkact
 project_key: NOKEY
 tracking_system: file-system
@@ -67,26 +67,41 @@ development_status:
   6-6-misura-finale: done
   epic-6-retrospective: optional
 
-  epic-7: in-progress
-  7-1-riga-di-base-il-banco-misura-fase-per-fase-anche-fuori-dal-b: review
-  7-2-sessione-lunga-sorvegliata-e-cli-sotto-controllo: review
-  7-3-livello-istantaneo-per-i-comandi-a-un-passo: review
-  7-4-osservazione-a-costo-fisso: review
-  7-5-misura-finale-della-velocità: review
+  epic-7: done
+  7-1-riga-di-base-il-banco-misura-fase-per-fase-anche-fuori-dal-b: done
+  7-2-sessione-lunga-sorvegliata-e-cli-sotto-controllo: done
+  7-3-livello-istantaneo-per-i-comandi-a-un-passo: done
+  7-4-osservazione-a-costo-fisso: done
+  7-5-misura-finale-della-velocità: done
   epic-7-retrospective: optional
 
-  epic-8: in-progress
-  8-1-le-frasi-spurie-non-arrivano-all-agente: review
-  8-2-evidenza-prima-del-fatto: review
-  8-3-lettura-locale-del-testo-nelle-immagini: review
-  8-4-spike-le-azioni-dirette-via-apple-events-reggono-su-macos-27: review
+  epic-8: done
+  8-1-le-frasi-spurie-non-arrivano-all-agente: done
+  8-2-evidenza-prima-del-fatto: done
+  8-3-lettura-locale-del-testo-nelle-immagini: done
+  8-4-spike-le-azioni-dirette-via-apple-events-reggono-su-macos-27: done
   epic-8-retrospective: optional
 
-  epic-9: in-progress
-  9-1-server-degli-strumenti-chiuso: review
-  9-2-conferma-legata-alla-singola-azione-e-un-solo-orologio-del-t: review
-  9-3-campi-sicuri-e-livelli-di-accesso-per-app: review
-  9-4-suite-di-sicurezza-e-copertura-del-riconoscimento: review
-  9-5-classificatore-on-device-come-secondo-strato: review
+  epic-9: done
+  9-1-server-degli-strumenti-chiuso: done
+  9-2-conferma-legata-alla-singola-azione-e-un-solo-orologio-del-t: done
+  9-3-campi-sicuri-e-livelli-di-accesso-per-app: done
+  9-4-suite-di-sicurezza-e-copertura-del-riconoscimento: done
+  9-5-classificatore-on-device-come-secondo-strato: done
   epic-9-retrospective: optional
+
+  epic-10: backlog
+  10-1-accessgate-unico-stesso-comportamento: backlog
+  10-2-la-corsia-locale-passa-dal-cancello: backlog
+  10-3-giudizio-anticipato-del-secondo-strato: backlog
+  epic-10-retrospective: optional
+
+  epic-11: backlog
+  11-1-riga-di-base-del-ciclo-3-e-cli-riverificate: backlog
+  11-2-sessione-pronta-quando-inizio-a-parlare: backlog
+  11-3-scalata-sotto-il-secondo: backlog
+  11-4-risposta-scritta-dall-app: backlog
+  11-5-spike-ricerca-in-mail-sotto-il-secondo: backlog
+  11-6-misura-finale-del-ciclo-3: backlog
+  epic-11-retrospective: optional
 action_items: []
