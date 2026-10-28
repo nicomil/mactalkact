@@ -1049,3 +1049,27 @@ Tabelle: `~/Library/Logs/MacTalkAct-bench-2026-10-28-2217-claude.tsv` (Banco com
 - Accettare il costo: tenere il giudizio anticipato singolo (che aiuta sulle pagine piccole, §35) e rivedere NFR-16 sul costo misurato, circa 0,9 s per azione giudicata al 90° percentile. Restano da guardare i timeout al clic (da 2 a 5 per Banco), perché un timeout lascia passare il clic senza verdetto.
 - Iniziare il giudizio prima, quando il Motore sta ancora scrivendo la chiamata allo strumento (lo stream di Claude mostra il bersaglio qualche centinaio di millisecondi prima che la chiamata arrivi al server degli strumenti). Il guadagno è incerto e vale solo per Claude.
 - Usare i gruppi solo per dire «esterno» (una domanda in più all'utente, mai un clic in meno) e giudicare comunque da solo ciò che il gruppo dice «interno». Non fa risparmiare tempo sui clic normali, quindi non serve a NFR-16.
+
+## 37. Secondo strato a 1,2 s e NFR-16 rivista (Storia 10.3, 28 ottobre 2026, 23:54)
+
+**Decisione con Nico.** Dopo lo spike del §36 si accetta il costo di un giudizio singolo e si tiene il giudizio anticipato. Il budget del classificatore passa da 0,9 a 1,2 s, così un timeout non lascia più passare il clic senza verdetto. NFR-16 diventa: zero timeout sui compiti positivi e al massimo 1,0 s per azione giudicata al 90° percentile (prima 0,3 s). SM-C7 sale a 1,2 s. Sono aggiornati PRD, epics, architettura (AD-21), contesto dell'Epic 10, spec 10.3 e la pagina «Come funziona». Commit e50c09b.
+
+**Rete.** `--selftest` e `--fallback-test` tutto ok. `--risk-classifier-test` dà 10/10 esterni e 0/7 falsi allarmi in tre corse, senza timeout, con una mediana di 0,71–0,72 s e 0,74–0,77 s al 90° percentile.
+
+**Banco completo (Mac libero, tabella `…-2354-claude.tsv`).**
+
+| Misura | Prima, budget 0,9 s (§35) | Budget 1,2 s |
+| --- | --- | --- |
+| riusciti | 34/35 | 34/35 |
+| compito, mediana | 4,89 s | 4,49 s |
+| primo strumento, mediana | 2,64 s | 2,30 s |
+| Livello istantaneo, mediana | 3,72 s | 2,88 s |
+| timeout al clic / in anticipo | 5 / 24 | 0 / 7 |
+| clic dalla cache anticipata | 0 | 5 (più 1 attesa) |
+| costo per azione, mediana e 90° | 0,84 s e 0,92 s | 0,64 s e 0,98 s |
+| NFR-16 rivista | — | rispettata |
+| falsi «fatto» | 1 | 0 |
+
+Con il budget più largo quasi tutti i giudizi anticipati arrivano a un verdetto (prima 24 finivano in timeout) e 5 clic lo trovano già pronto. La mediana del costo per azione scende. Il compito resta appena sotto la soglia di 4,5 s: come visto al §35, tra una corsa e l'altra oscilla di circa mezzo secondo.
+
+L'unico fallimento, `elenco-articolo`, non dipende da questa modifica. L'istantaneo ha fatto una domanda all'utente, che nel Banco nessuno risponde, ed è salito al rapido senza azioni. Il rapido ha poi risposto «non hai risposto alla mia domanda. Dimmi se devo cercarlo o fermarmi.» senza scorrere l'elenco. Va guardato nella 11.6, insieme alla variabilità di questo compito, che già nelle corse precedenti era il più instabile.

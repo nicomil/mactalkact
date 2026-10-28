@@ -2,7 +2,7 @@
 title: 'Storia 10.3 — Giudizio anticipato del secondo strato'
 type: 'feature'
 created: '2026-10-28'
-status: 'in-review'
+status: 'done'
 baseline_commit: '0d62a2c7b4e3cce74ef934a7677f51249f3b7233'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -78,6 +78,7 @@ context:
 
 - 28/10 sera, Mac libero: suite Claude 15/15 con e senza secondo strato (NFR-14 ok). **NFR-16 non rispettato:** 112 verdetti in anticipo ma 0 clic serviti dalla cache anticipata, 2 timeout al clic, costo per azione 0,87 s alla mediana e 0,93 s al 90°. Il Motore clicca prima che la coda arrivi al controllo giusto. Resta in review: serve una decisione con Nico (§32).
 - 28/10, 22:17: con la priorità ai controlli nominati 4 clic su 8 dalla cache anticipata sui compiti brevi, 0 sul Banco completo con 5 timeout al clic. NFR-16 ancora non rispettato (§35).
+- 28/10, 23:54, deciso con Nico: spike del giudizio a gruppi scartato (§36); budget del classificatore 1,2 s e NFR-16 rivista (zero timeout, ≤ 1,0 s al 90°). Banco completo: 0 timeout al clic, 5 clic dalla cache anticipata, 90° 0,98 s, NFR-16 rispettata (§37).
 
 ## Spec Change Log
 
