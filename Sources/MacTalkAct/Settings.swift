@@ -131,6 +131,8 @@ final class AppSettings: ObservableObject {
         /// Long session of Claude (FR-42): one process kept open between requests.
         static let longSession = true
         static let sessionMaxRequests = 8
+        /// Story 11.2 (FR-59): the Long sessions start when the wake phrase is heard or the key is pressed.
+        static let prepareSessionOnWake = true
         /// Instant level (FR-43): one-step commands with a known target.
         static let instantLevel = true
         static let instantModel = "claude-haiku-5-5"
@@ -231,6 +233,7 @@ final class AppSettings: ObservableObject {
     @Published var agentTimeout: Double { didSet { defaults.set(agentTimeout, forKey: "agentTimeout") } }
     @Published var longSession: Bool { didSet { defaults.set(longSession, forKey: "longSession") } }
     @Published var sessionMaxRequests: Int { didSet { defaults.set(sessionMaxRequests, forKey: "sessionMaxRequests") } }
+    @Published var prepareSessionOnWake: Bool { didSet { defaults.set(prepareSessionOnWake, forKey: "prepareSessionOnWake") } }
     @Published var instantLevel: Bool { didSet { defaults.set(instantLevel, forKey: "instantLevel") } }
     @Published var instantModel: String { didSet { defaults.set(instantModel, forKey: "instantModel") } }
     @Published var instantEffort: String { didSet { defaults.set(instantEffort, forKey: "instantEffort") } }
@@ -369,6 +372,7 @@ final class AppSettings: ObservableObject {
         agentTimeout = double("agentTimeout", Defaults.agentTimeout)
         longSession = bool("longSession", Defaults.longSession)
         sessionMaxRequests = d.object(forKey: "sessionMaxRequests") as? Int ?? Defaults.sessionMaxRequests
+        prepareSessionOnWake = bool("prepareSessionOnWake", Defaults.prepareSessionOnWake)
         instantLevel = bool("instantLevel", Defaults.instantLevel)
         instantModel = d.string(forKey: "instantModel") ?? Defaults.instantModel
         instantEffort = d.string(forKey: "instantEffort") ?? Defaults.instantEffort
@@ -445,6 +449,7 @@ final class AppSettings: ObservableObject {
             agentMaxSteps = Defaults.agentMaxSteps; agentMaxTurns = Defaults.agentMaxTurns
             agentTimeout = Defaults.agentTimeout
             longSession = Defaults.longSession; sessionMaxRequests = Defaults.sessionMaxRequests
+            prepareSessionOnWake = Defaults.prepareSessionOnWake
             instantLevel = Defaults.instantLevel; instantModel = Defaults.instantModel; instantEffort = Defaults.instantEffort
             fixedCostObservation = Defaults.fixedCostObservation; riskClassifier = Defaults.riskClassifier; evidenceBeforeDone = Defaults.evidenceBeforeDone
             cleanDictation = Defaults.cleanDictation

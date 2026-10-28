@@ -90,6 +90,23 @@ enum DebugCLI {
             check("niente di nuovo: blocco vuoto", log.promptBlock(after: log.snapshot.lastSeq).isEmpty)
             log.clear()
             check("dimentica: generazione nuova", log.generation == g0 + 1 && log.entries.isEmpty)
+            // Story 11.2: expire() with an injected clock. After `maxAge` of silence the memory empties and
+            // the generation grows, so the Long session that saw the old one starts again.
+            if !AppSettings.shared.privateModeActive {
+                let clocked = ConversationLog()
+                let fakeNow = Box(Date())
+                clocked.now = { fakeNow.value }
+                clocked.add(request: "apri la mail", outcome: "fatto", app: "Mail")
+                let g = clocked.generation
+                fakeNow.value += clocked.maxAge - 1
+                check("expire: prima della scadenza la memoria resta", clocked.snapshot.generation == g && clocked.entries.count == 1)
+                fakeNow.value += 2
+                let expired = clocked.snapshot
+                check("expire: dopo la scadenza memoria vuota e generazione nuova", expired.generation == g + 1 && clocked.entries.isEmpty)
+                check("expire: la sessione di prima riparte (memoria azzerata)",
+                      SessionPolicy.restartReason(requests: 1, maxRequests: 8, idle: 1, configChanged: false, memoryChanged: g != expired.generation) == "memoria azzerata")
+                check("expire: memoria vuota, nessun'altra generazione", clocked.snapshot.generation == g + 1)
+            }
             // Story 8.2: each interaction keeps outcome and changes, at most 300 words, evidence included.
             let countWas = AppSettings.shared.conversationMemoryCount
             AppSettings.shared.conversationMemoryCount = 10
@@ -1563,6 +1580,272 @@ extension DebugCLI {
                   quit.text == AccessGate.denied("cmd+q") && unknown.isError && !unknown.text.contains("NOT done")
                   && questions.count == 2 && tools.confirmationsAsked == 1 && tools.refusals == 2)
         }
+
+        print("Sessione pronta all'ascolto (Storia 11.2):")
+        /// Polls `condition` until it holds or `seconds` pass: no fixed sleeps on timing-sensitive checks.
+        func eventually(_ seconds: Double = 3, _ condition: () -> Bool) async -> Bool {
+            let deadline = Date().addingTimeInterval(seconds)
+            while !condition() {
+                if Date() > deadline { return false }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            return true
+        }
+        do {
+            // Who may prepare: one row per case of the story's matrix (pure), with the exact reasons.
+            func block(on: Bool = true, chosen: EngineID = .claude, using: EngineID? = .claude, running: Bool = false,
+                       since: TimeInterval = 60, privacy: String? = nil, privacyRead: Box<Bool>? = nil) -> String? {
+                AgentRunner.prepareBlock(switchOn: on, chosen: chosen, using: using, running: running, sinceLast: since,
+                                         privateReason: { privacyRead?.value = true; return privacy })
+            }
+            check("Claude scelto e disponibile, nessun blocco: prepara", block() == nil)
+            let read = Box(false)
+            check("due Parole in 3 s: un solo avvio, senza rileggere l'app in primo piano",
+                  block(since: 3, privacyRead: read) == "già fatto da meno di 5 s" && !read.value && block(since: 5.1) == nil)
+            check("modalità privata o app riservata: il motivo di PrivacyGuard", block(privacy: "modalità privata") == "modalità privata"
+                  && block(privacy: "«Password» è un'app riservata") == "«Password» è un'app riservata")
+            check("interruttore spento: niente", block(on: false) == "interruttore spento")
+            let otherEngine = "Motore diverso da Claude o non disponibile"
+            check("Motore Codex, o Claude in pausa con la riserva: niente", block(chosen: .codex, using: .codex) == otherEngine
+                  && block(using: .codex) == otherEngine && block(using: nil) == otherEngine)
+            check("richiesta in corso: niente", block(running: true) == "richiesta in corso")
+            let wake = ["computer"]
+            func prepares(_ live: String, speaking: Bool = false) -> Bool {
+                Coordinator.preparesSession(wake: WakeWord.extract(live, phrases: wake), speaking: speaking)
+            }
+            check("Parola nel parziale: prepara", prepares("Computer apri la posta") && prepares("allora computer"))
+            check("ascolto continuo senza Parola (Chiacchiera, finestra aperta): niente",
+                  !prepares("apri la posta") && !prepares("ciao amore vieni qui"))
+            check("la risposta parlata dell'app con «computer»: niente", !prepares("il computer è pronto", speaking: true))
+        }
+        do {
+            // ClaudeCLI with the fake claude: it writes `init` only after the first message, like the real one.
+            let fake = FileManager.default.currentDirectoryPath + "/Tests/fixtures/claude/finto-claude"
+            let base = ClaudeCLI.Config(model: "finto", systemPrompt: "prova", effort: "low")
+            func askResult(_ cli: ClaudeCLI, _ text: String, generation: Int = 0, lastSeq: Int = 0, timeout: TimeInterval = 10,
+                           restarts: Box<[String]>? = nil, phases: Box<[EnginePhase]>? = nil,
+                           sent: Box<[Int?]>? = nil) async -> Result<String, Error> {
+                let sink: PhaseSink = { p in DispatchQueue.main.async { phases?.value.append(p) } }
+                do {
+                    let data = try await cli.runInSession(base, memory: MemorySnapshot(generation: generation, lastSeq: lastSeq), maxRequests: 8,
+                                                          timeout: timeout, message: { seq in sent?.value.append(seq); return seq.map { "dopo \($0): \(text)" } ?? "tutto: \(text)" },
+                                                          onPhase: sink, onRestart: { r in restarts?.value.append(r) })
+                    try? await Task.sleep(for: .milliseconds(50)) // the phases arrive on the main queue
+                    return .success(String(data: data, encoding: .utf8) ?? "")
+                } catch { return .failure(error) }
+            }
+            func ask(_ cli: ClaudeCLI, _ text: String, generation: Int = 0, lastSeq: Int = 0, restarts: Box<[String]>? = nil,
+                     phases: Box<[EnginePhase]>? = nil, sent: Box<[Int?]>? = nil) async -> String? {
+                try? await askResult(cli, text, generation: generation, lastSeq: lastSeq, restarts: restarts, phases: phases, sent: sent).get()
+            }
+            let cli = ClaudeCLI()
+            cli.executablePath = { fake }
+            let started = cli.prepareSession(base, generation: 0)
+            check("preparazione avviata; una seconda subito dopo non avvia altro", started && !cli.prepareSession(base, generation: 0))
+            let up = await eventually { cli.hasLiveSession }
+            check("un processo, nessun cursore (non ha visto niente)", up && cli.spawns == 1 && cli.liveCursor(memory: MemorySnapshot(generation: 0, lastSeq: 0)) == nil)
+            let phases = Box<[EnginePhase]>([]), sent = Box<[Int?]>([])
+            let r1 = await ask(cli, "uno", phases: phases, sent: sent)
+            check("la richiesta trova la sessione pronta: riusata, messaggio completo, nessun processo in più",
+                  r1 == "ricevuto: tutto: uno" && sent.value == [nil] && phases.value.contains(.sessionReused)
+                  && !phases.value.contains(.sessionStarted) && cli.spawns == 1)
+            check("primo uso della sessione pronta: non conta come riusata (nessuna ripetizione se muore subito)", !cli.lastAttemptReused)
+            // A message written by the preparation would have its own `result`, read here instead of «uno».
+            check("nessun messaggio prima della richiesta: il primo result è il suo, init letto dopo",
+                  r1 == "ricevuto: tutto: uno" && phases.value.contains(.serverConnected))
+            let r2 = await ask(cli, "due", lastSeq: 1)
+            check("la seconda richiesta riusa la sessione preparata col cursore", r2 == "ricevuto: dopo 1: due" && cli.spawns == 1 && cli.lastAttemptReused)
+            check("sessione viva: nessuna nuova preparazione", !cli.prepareSession(base, generation: 0))
+            cli.shutdown()
+
+            // A request while the process is still starting waits for it and uses it.
+            let slow = ClaudeCLI()
+            slow.executablePath = { Thread.sleep(forTimeInterval: 0.6); return fake }
+            _ = slow.prepareSession(base, generation: 0)
+            let waitPhases = Box<[EnginePhase]>([])
+            let r3 = await ask(slow, "tre", phases: waitPhases)
+            check("Frase finita durante la preparazione: la attende e usa quel processo",
+                  r3 == "ricevuto: tutto: tre" && slow.spawns == 1 && waitPhases.value.contains(.sessionReused))
+            slow.shutdown()
+
+            // The wait is bounded by the turn's time.
+            let stuck = ClaudeCLI()
+            stuck.executablePath = { Thread.sleep(forTimeInterval: 1.5); return fake }
+            _ = stuck.prepareSession(base, generation: 0)
+            let waitStarted = Date()
+            var timedOut = false
+            if case .failure(ClaudeCLIError.timeout) = await askResult(stuck, "lenta", timeout: 0.3) { timedOut = true }
+            check("preparazione più lunga del turno: errore di tempo, senza aspettarla tutta", timedOut && Date().timeIntervalSince(waitStarted) < 1.2)
+            _ = await eventually { stuck.hasLiveSession }
+            stuck.shutdown()
+
+            // «stop» while waiting: nothing is sent, the process stays unused for the next request.
+            let stopped = ClaudeCLI()
+            stopped.executablePath = { Thread.sleep(forTimeInterval: 0.5); return fake }
+            _ = stopped.prepareSession(base, generation: 0)
+            let stopSent = Box<[Int?]>([])
+            let stopTask = Task { await askResult(stopped, "fermati", sent: stopSent) }
+            _ = await eventually { stopped.debugRequestOpen }
+            stopped.cancelCurrent()
+            var interrupted = false
+            if case .failure(ClaudeCLIError.failed(let m)) = await stopTask.value, m.contains("interrotto") { interrupted = true }
+            let afterStopSent = Box<[Int?]>([])
+            let r6 = await ask(stopped, "dopo lo stop", sent: afterStopSent)
+            check("«stop» durante la preparazione: niente inviato, la richiesta dopo usa lo stesso processo col messaggio completo",
+                  interrupted && stopSent.value.isEmpty && r6 == "ricevuto: tutto: dopo lo stop" && afterStopSent.value == [nil] && stopped.spawns == 1)
+            stopped.shutdown()
+
+            // A preparation that fails leaves the normal start.
+            let path = Box<String?>(nil)
+            let failing = ClaudeCLI()
+            failing.executablePath = { path.value }
+            _ = failing.prepareSession(base, generation: 0)
+            _ = await eventually { !failing.debugPreparing } // the failed preparation is over
+            path.value = fake
+            let failPhases = Box<[EnginePhase]>([])
+            let r4 = await ask(failing, "quattro", phases: failPhases)
+            check("preparazione fallita: avvio normale", r4 == "ricevuto: tutto: quattro" && failing.spawns == 1
+                  && failPhases.value.contains(.sessionStarted))
+            failing.shutdown()
+
+            // The memory changed (expiry) after the preparation: the session has seen nothing, it takes the new one.
+            let adopt = ClaudeCLI()
+            adopt.executablePath = { fake }
+            _ = adopt.prepareSession(base, generation: 0)
+            _ = await eventually { adopt.hasLiveSession }
+            let adoptRestarts = Box<[String]>([])
+            let r5 = await ask(adopt, "cinque", generation: 1, restarts: adoptRestarts)
+            check("memoria cambiata prima del primo uso: nessun riavvio, stesso processo", r5 == "ricevuto: tutto: cinque"
+                  && adoptRestarts.value.isEmpty && adopt.spawns == 1 && adopt.liveCursor(memory: MemorySnapshot(generation: 1, lastSeq: 0)) == 1)
+            adopt.shutdown()
+
+            // «dimentica» after the preparation: the Coordinator closes the sessions with today's reason.
+            let forgot = ClaudeCLI()
+            forgot.executablePath = { fake }
+            _ = forgot.prepareSession(base, generation: 0)
+            _ = await eventually { forgot.hasLiveSession }
+            forgot.endSession(reason: "memoria azzerata")
+            let forgotPhases = Box<[EnginePhase]>([])
+            let r7 = await ask(forgot, "sette", generation: 1, phases: forgotPhases)
+            check("«dimentica» dopo la preparazione: chiusa con «memoria azzerata», la richiesta riparte",
+                  forgot.lastEndReason == "memoria azzerata" && r7 == "ricevuto: tutto: sette" && forgotPhases.value.contains(.sessionStarted)
+                  && forgot.spawns == 2)
+            forgot.shutdown()
+
+            // A prepared session never used closes with the idle rule of today.
+            let idle = ClaudeCLI()
+            idle.executablePath = { fake }
+            idle.maxIdle = 0.3
+            _ = idle.prepareSession(base, generation: 0)
+            let closed = await eventually { idle.lastEndReason != nil }
+            check("pronta e mai usata: chiusa «inattiva da 10 minuti»", closed && idle.lastEndReason == "inattiva da 10 minuti"
+                  && !idle.hasLiveSession)
+            check("dopo la chiusura si può preparare di nuovo", idle.prepareSession(base, generation: 0))
+            _ = await eventually { idle.hasLiveSession }
+            idle.shutdown()
+
+            // Private mode or «dimentica» while the process is still starting: the session does not come back.
+            let closing = ClaudeCLI()
+            closing.executablePath = { Thread.sleep(forTimeInterval: 0.4); return fake }
+            _ = closing.prepareSession(base, generation: 0)
+            closing.endSession(reason: "memoria azzerata")
+            let spawned = await eventually { closing.spawns == 1 }
+            let orphanGone = await eventually { !closing.lastSpawnRunning }
+            check("chiusura durante la preparazione: la sessione non torna e il processo è chiuso",
+                  spawned && orphanGone && !closing.hasLiveSession)
+            closing.shutdown()
+        }
+        do {
+            // Through AgentRunner and ClaudeEngine, with the fake claude and the real tool server.
+            let fake = FileManager.default.currentDirectoryPath + "/Tests/fixtures/claude/finto-claude"
+            let settings = AppSettings.shared
+            let (longWas, prepareWas) = (settings.longSession, settings.prepareSessionOnWake)
+            settings.longSession = true
+            settings.prepareSessionOnWake = true
+            defer { settings.longSession = longWas; settings.prepareSessionOnWake = prepareWas }
+            let privacyReads = Box(0)
+            func makeAgent() async -> (AgentRunner, ClaudeEngine)? {
+                let agent = AgentRunner(executor: Executor(), settings: settings)
+                try? await agent.start()
+                guard let claude = agent.engines[.claude] as? ClaudeEngine else { agent.shutdown(); return nil }
+                claude.debugExecutable = fake
+                claude.refreshStatus(force: true)
+                _ = await eventually(2) { claude.cliStatus.isVerified }
+                agent.overrideChoice = (.claude, false)
+                privacyReads.value = 0
+                agent.privacyCheck = { privacyReads.value += 1; return nil }
+                return (agent, claude)
+            }
+            if let (agent, claude) = await makeAgent() {
+                defer { agent.shutdown() }
+                if agent.currentChoice()?.engine == .claude {
+                    let levels = agent.prepareSession(generation: 0)
+                    let expected = settings.instantLevel ? 2 : 1
+                    let again = agent.prepareSession(generation: 0)
+                    let up = await eventually { claude.debugLiveSessions == expected }
+                    check("Parola o tasto: rapido\(settings.instantLevel ? " e istantaneo" : "") preparati; la seconda entro 5 s non rilegge la privacy e non avvia nulla",
+                          up && levels.count == expected && again.isEmpty && privacyReads.value == 1 && claude.debugSpawns == expected)
+                    // The fake echoes the whole message (the elements of the window in front): not in the output.
+                    let detailWas = Log.forceDetail
+                    Log.forceDetail = false
+                    let answer = (try? await agent.run("prova", context: ScreenContext(), deep: false)) ?? ""
+                    Log.forceDetail = detailWas
+                    let p = agent.lastPhases
+                    let ready = (p[.session] ?? 9) + (p[.mcp] ?? 9)
+                    check(String(format: "la richiesta usa la sessione pronta: nessun processo nuovo, sessione + mcp %.3f s", ready),
+                          answer.hasPrefix("ricevuto:") && claude.debugSpawns == expected && ready < 0.2)
+                } else {
+                    check("Claude disponibile per la prova con AgentRunner", false)
+                }
+            } else {
+                check("AgentRunner con Claude", false)
+            }
+            if let (agent, claude) = await makeAgent() {
+                defer { agent.shutdown() }
+                agent.privacyCheck = { "modalità privata" }
+                let privateLevels = agent.prepareSession(generation: 0)
+                agent.privacyCheck = { nil }
+                settings.prepareSessionOnWake = false
+                let offLevels = agent.prepareSession(generation: 0)
+                settings.prepareSessionOnWake = true
+                agent.overrideChoice = (.codex, false)
+                let codexLevels = agent.prepareSession(generation: 0)
+                check("privato, interruttore spento, Motore Codex: nessun avvio", privateLevels.isEmpty && offLevels.isEmpty
+                      && codexLevels.isEmpty && claude.debugSpawns == 0)
+                agent.overrideChoice = (.claude, false)
+                // Turning the switches off closes the prepared sessions never used.
+                let prepared = agent.prepareSession(generation: 0)
+                _ = await eventually { claude.debugLiveSessions == prepared.count }
+                settings.prepareSessionOnWake = false
+                let offClosed = await eventually { claude.debugLiveSessions == 0 }
+                settings.prepareSessionOnWake = true
+                check("«Sessione pronta all'ascolto» spenta: chiuse le sessioni pronte mai usate", !prepared.isEmpty && offClosed)
+                let prepared2 = agent.prepareSession(generation: 0, force: true)
+                _ = await eventually { claude.debugLiveSessions == prepared2.count }
+                settings.longSession = false
+                let longClosed = await eventually { claude.debugLiveSessions == 0 }
+                check("Sessione lunga spenta dopo la preparazione: sessioni chiuse («Sessione lunga spenta»)",
+                      !prepared2.isEmpty && longClosed && claude.debugLastEndReason(.fast) == "Sessione lunga spenta")
+                check("Sessione lunga spenta: comportamento di oggi, nessun avvio", agent.prepareSession(generation: 0, force: true).isEmpty)
+                settings.longSession = true
+            }
+        }
+
+        print("«Vuoi che faccia qualcosa?» nel Coordinator (FR-48, Storia 11.2):")
+        do {
+            let ask = Coordinator.handling(of: .askIntent("il treno arriva alle nove", reason: "prova"), mode: .session)
+            check("chiede: finestra no, sessione mani libere non tenuta viva",
+                  ask == Coordinator.DecisionHandling(opensWindow: false, keepsSessionAlive: false))
+            let agentDecision = Coordinator.handling(of: .agent("apri la posta", level: .fast, reason: "prova"), mode: .session)
+            check("una richiesta all'Agente in mani libere apre la finestra e tiene viva la sessione",
+                  agentDecision.opensWindow && agentDecision.keepsSessionAlive)
+            check("in ascolto con la parola: chiede senza aprire la finestra",
+                  !Coordinator.handling(of: .askIntent("x", reason: "prova"), mode: .wakeWord).opensWindow)
+            let off = Coordinator.handling(of: .agent("apri la posta", level: .fast, reason: "prova"), mode: .off)
+            let wakeWord = Coordinator.handling(of: .agent("apri la posta", level: .fast, reason: "prova"), mode: .wakeWord)
+            check("tasto per parlare: nessuna finestra, nessuna sessione tenuta viva", !off.opensWindow && !off.keepsSessionAlive)
+            check("ascolto con la parola: finestra sì, sessione mani libere no", wakeWord.opensWindow && !wakeWord.keepsSessionAlive)
+        }
         return failures == 0
     }
 }
@@ -1612,6 +1895,22 @@ extension DebugCLI {
         _ = await ask("E il mare?")
         try? await Task.sleep(for: .milliseconds(100))
         check("memoria azzerata: riavvio con motivo", restarts == ["memoria azzerata"] && phases.value.contains(.sessionStarted), "\(restarts)")
+        // Story 11.2: the session prepared while the user speaks (no message before the request).
+        cli.endSession(reason: "prova della sessione pronta")
+        memory = MemorySnapshot(generation: 2, lastSeq: 0)
+        let spawnsBefore = cli.spawns
+        check("sessione pronta: preparazione avviata", cli.prepareSession(config, generation: 2))
+        try? await Task.sleep(for: .seconds(2))
+        phases.value = []
+        let c = await ask("E il sole?")
+        try? await Task.sleep(for: .milliseconds(100))
+        check("sessione pronta: la richiesta la usa, un solo processo", c != nil && phases.value.contains(.sessionReused)
+              && !phases.value.contains(.sessionStarted) && cli.spawns == spawnsBefore + 1, "\(phases.value) · processi \(cli.spawns - spawnsBefore)")
+        phases.value = []
+        let d = await ask("E la luna?")
+        try? await Task.sleep(for: .milliseconds(100))
+        check("sessione pronta: la seconda richiesta riusa la sessione preparata", d != nil && phases.value.contains(.sessionReused)
+              && cli.spawns == spawnsBefore + 1 && cli.lastAttemptReused)
         cli.shutdown()
         return failures == 0
     }
@@ -2455,10 +2754,17 @@ extension DebugCLI {
     /// `--agent-bench [file] --engine claude|codex|local [--only id,id] [--server URL --model NAME]`:
     /// runs every task with one engine and checks the state it leaves (page, files, events, URL).
     /// Each request is split into phases (FR-41). It acts on the screen: run it only when the Mac is idle.
+    /// `cold` (`--cold`): Claude's sessions are closed before every task, as after a pause. `prepare`
+    /// (`--prepare`): the session is prepared 1.5 s before the request, as with the wake phrase said at
+    /// the start of the Frase (Story 11.2).
     static func agentBench(path: String, engine: EngineID, only: Set<String>, server: (url: String, model: String)?,
-                           mode: LocalEngine.Mode? = nil) async {
+                           mode: LocalEngine.Mode? = nil, cold: Bool = false, prepare: Bool = false) async {
         let tasks = loadBench(path).filter { only.isEmpty || only.contains($0.id) }
         guard !tasks.isEmpty else { print("Nessun compito in \(path)"); return }
+        if (cold || prepare) && engine != .claude {
+            print("--cold e --prepare valgono solo con --engine claude (la Sessione lunga è di Claude)")
+            return
+        }
         guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else { print("Safari assente"); return }
         let previous = AX.frontmostApplication()
         let ex = Executor()
@@ -2485,7 +2791,7 @@ extension DebugCLI {
         await closeBenchPages(ex)
         agent.refreshAvailability()
         try? await Task.sleep(for: .seconds(2))
-        print("Banco di prova · motore \(engine.rawValue)\(engine == .local ? " (\((mode ?? LocalEngine.defaultMode).rawValue))" : "") · \(tasks.count) compiti · \(agent.availability(of: engine))")
+        print("Banco di prova · motore \(engine.rawValue)\(engine == .local ? " (\((mode ?? LocalEngine.defaultMode).rawValue))" : "") · \(tasks.count) compiti · \(agent.availability(of: engine))\(cold ? " · a freddo" : "")\(prepare ? " · sessione pronta 1,5 s prima" : "")")
 
         let validator = LocalActionValidator { spoken in
             ex.findApp(spoken).map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
@@ -2516,6 +2822,8 @@ extension DebugCLI {
             var screenshot = false
             /// Second layer (Story 10.3): what this task added to the gate's counters.
             var secondLayer = AccessGate.SecondLayerStats()
+            /// `--prepare` (Story 11.2): the levels prepared before the request (empty: none started).
+            var prepared: [AgentLevel]?
             var sumOK: Bool { skipped != nil || phases.isEmpty || abs(phases.values.reduce(0, +) + router - total) <= 0.2 }
         }
         var rows: [Row] = []
@@ -2592,6 +2900,15 @@ extension DebugCLI {
                 _ = await router.decide(task.request, editable: { false }, state: state)
                 firstResponse = Date().timeIntervalSince(routerStarted)
             }
+            // Story 11.2: after a pause (`--cold`) and with the wake phrase said at the start of the Frase (`--prepare`).
+            if cold { agent.endSessions(reason: "banco a freddo") }
+            var preparedLevels: [AgentLevel]?
+            if prepare, !kind.isPhrase {
+                preparedLevels = agent.prepareSession(generation: 0, force: true)
+                let names = preparedLevels?.map(\.rawValue).joined(separator: ", ") ?? ""
+                print("      sessione pronta: \(names.isEmpty ? "nessuna avviata (già viva, o non preparabile)" : names)")
+                try? await Task.sleep(for: .seconds(1.5))
+            }
             // The judgements in advance of the previous task land on that task, not on this one.
             await agent.tools.gate.anticipationSettled()
             let layerBefore = agent.tools.gate.stats
@@ -2651,6 +2968,7 @@ extension DebugCLI {
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
             row.router = routerTime
             row.firstResponse = firstResponse
+            row.prepared = preparedLevels
             if case .webmail = kind, ranAgent { row.webmailFirstToken = agent.lastFirstTokenAt }
             row.readText = ranAgent ? agent.tools.readTextSeconds.first : nil
             await agent.tools.gate.anticipationSettled()
@@ -2771,7 +3089,18 @@ extension DebugCLI {
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         // The verdict in a file of its own, next to the table: the TSV stays a plain table.
-        let summary = "soglie NFR-12 riviste (mediane su \(measured.count) compiti con azioni, motore \(engine.rawValue)): " + verdicts.joined(separator: " · ")
+        // Only the fast and Instant levels are prepared: the deep tasks («medio») stay out, and so do
+        // tasks without both phases or (with --prepare) without a session started before the request.
+        let sessionRows = withPhases.filter { r in
+            r.task.level != "medio" && r.phases[.session] != nil && r.phases[.mcp] != nil && (!prepare || r.prepared?.isEmpty == false)
+        }
+        let sessionAndMCP = median(sessionRows.map { $0.phases[.session]! + $0.phases[.mcp]! })
+        let sessionVerdict = sessionRows.isEmpty ? "non misurata" : (sessionAndMCP < 0.2 ? "sotto 0,2 s" : "NON sotto 0,2 s")
+        print(String(format: "  sessione + mcp: mediana %.2f s su %d compiti%@%@ · obiettivo con la sessione pronta < 0,2 s: %@ (esclusi i compiti profondi, quelli senza le due fasi%@)",
+                     sessionAndMCP, sessionRows.count, cold ? " · a freddo" : "", prepare ? " · sessione pronta" : "", sessionVerdict,
+                     prepare ? " e quelli senza sessione avviata prima" : ""))
+        let summary = "soglie NFR-12 riviste (mediane su \(measured.count) compiti con azioni, motore \(engine.rawValue)\(cold ? ", a freddo" : "")\(prepare ? ", sessione pronta" : "")): " + verdicts.joined(separator: " · ")
+            + String(format: "\nsessione + mcp: mediana %.2f s su %d compiti, obiettivo < 0,2 s con la sessione pronta: %@", sessionAndMCP, sessionRows.count, sessionVerdict)
             + "\nprima risposta visibile: \(firstResponseText)"
             + "\nriavvii della Sessione lunga: \(restartsText)"
             + "\nsecondo strato: \(layerText)"

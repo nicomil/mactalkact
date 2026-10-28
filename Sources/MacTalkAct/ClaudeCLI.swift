@@ -164,9 +164,13 @@ final class ClaudeCLI: @unchecked Sendable {
         }
     }
 
-    /// Stops an in-flight request ("stop!").
+    /// Stops an in-flight request ("stop!"). Before the message is written (waiting for a preparation,
+    /// starting the process) the request is marked, so it ends without sending anything.
     func cancelCurrent() {
-        lock.withLock { current }?.terminate()
+        lock.withLock { () -> Running? in
+            if requestOpen, current == nil { stopRequested = true }
+            return current
+        }?.terminate()
     }
 
     /// Ends the turn in progress but keeps a Long session alive (scalata, FR-43): the CLI answers
@@ -196,20 +200,25 @@ final class ClaudeCLI: @unchecked Sendable {
         spare = nil
         session?.process.terminate()
         session = nil
+        sessionEpoch += 1 // a preparation still starting closes its process
         lock.unlock()
     }
 
     // MARK: Long session (FR-42, AD-6)
 
     /// One `claude` process kept open between requests: stdin stays open, every message gets
-    /// its own `result`, the prompt cache stays warm. Started at the first request, never in advance.
+    /// its own `result`, the prompt cache stays warm. Started at the first request or, with «Sessione
+    /// pronta all'ascolto», when the user starts talking to the app (Story 11.2, AD-6 amended).
     private final class Session {
         let process: Running
         var lines: AsyncLineSequence<FileHandle.AsyncBytes>.AsyncIterator
-        let generation: Int
+        /// A prepared session that has seen nothing adopts the generation of its first request.
+        var generation: Int
         var cursor: Int
         var requests = 0
         var lastUsed = Date()
+        /// Started in advance and not used yet: the first request sends the full message.
+        var prepared = false
 
         init(process: Running, generation: Int) {
             self.process = process
@@ -224,19 +233,52 @@ final class ClaudeCLI: @unchecked Sendable {
     private(set) var lastAttemptReused = false
     /// The turn in progress was interrupted on purpose: its error result does not end the session.
     private var interrupted = false
+    /// A preparation starting the process right now (Story 11.2): a request waits for it.
+    private var preparing: Task<Void, Never>?
+    /// A request is using (or about to start) the Long session: no preparation meanwhile.
+    private var inRequest = false
+    /// A request on the Long session has started (it may still wait for a preparation).
+    private var requestOpen = false
+    /// «stop» arrived before the message was written: the request ends without sending it.
+    private var stopRequested = false
+    /// Grows when the session is closed: a preparation started before closes its own process.
+    private var sessionEpoch = 0
+    /// Why the Long session was closed last time (log and `--fallback-test`).
+    private(set) var lastEndReason: String?
+    /// Idle time after which the session is closed; shorter only in `--fallback-test`.
+    var maxIdle: TimeInterval {
+        get { lock.withLock { _maxIdle } }
+        set { lock.withLock { _maxIdle = newValue } }
+    }
+    private var _maxIdle = SessionPolicy.maxIdle
+    private let countLock = NSLock()
+    private var spawnCount = 0
+    private var lastProcess: Process?
+    /// `claude` processes started by this instance (`--fallback-test`: never two per level).
+    var spawns: Int { countLock.withLock { spawnCount } }
+    /// Debug only: the last process started is still running.
+    var lastSpawnRunning: Bool { countLock.withLock { lastProcess?.isRunning ?? false } }
+    /// Debug only: a preparation is starting the process right now.
+    var debugPreparing: Bool { lock.withLock { preparing != nil } }
+    /// Debug only: a request on the Long session has started (it may be waiting for a preparation).
+    var debugRequestOpen: Bool { lock.withLock { requestOpen } }
+    /// Debug only: a Long session is open with a running process.
+    var hasLiveSession: Bool { lock.withLock { session?.process.process.isRunning == true } }
 
     /// The entry of this request is added right after it returns: the session has seen it.
     static func cursor(after memory: MemorySnapshot) -> Int { memory.lastSeq + 1 }
 
     /// The cursor of the live session, if any: the engine composes the short message on its own actor.
+    /// A session prepared and never used has seen nothing: no cursor, the full message goes.
     func liveCursor(memory: MemorySnapshot) -> Int? {
-        lock.withLock { session.flatMap { $0.generation == memory.generation && $0.process.process.isRunning ? $0.cursor : nil } }
+        lock.withLock { session.flatMap { $0.generation == memory.generation && $0.process.process.isRunning && !$0.prepared ? $0.cursor : nil } }
     }
 
     /// Ends a session that stays idle for `SessionPolicy.maxIdle`: no process waits for hours.
+    /// A prepared session never used follows the same rule.
     private func scheduleIdleEnd(_ s: Session) {
         let used = lock.withLock { s.lastUsed }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + SessionPolicy.maxIdle) { [weak self] in
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + maxIdle) { [weak self] in
             guard let self else { return }
             let idle = self.lock.withLock { self.session === s && s.lastUsed == used }
             if idle { self.endSession(reason: "inattiva da 10 minuti") }
@@ -247,10 +289,85 @@ final class ClaudeCLI: @unchecked Sendable {
 
     /// Closes the Long session (shutdown, private mode, settings changed).
     func endSession(reason: String) {
-        let s = lock.withLock { () -> Session? in defer { session = nil }; return session }
-        guard let s else { return }
+        let ended = lock.withLock { () -> (Session, Bool)? in
+            defer { session = nil }
+            sessionEpoch += 1 // a preparation in progress must not bring the session back
+            return session.map { ($0, $0.prepared) }
+        }
+        guard let (s, prepared) = ended else { return }
         s.process.terminate()
-        Log.info("claude: sessione chiusa, \(reason)")
+        lock.withLock { lastEndReason = reason }
+        Log.info("claude: sessione chiusa\(prepared ? " (pronta, mai usata)" : ""), \(reason)")
+    }
+
+    /// Closes the session only if it was prepared and never used (engine changed, switch turned off).
+    func endPreparedSession(reason: String) {
+        let unused = lock.withLock { session?.prepared == true && current == nil && !requestOpen }
+        if unused { endSession(reason: reason) }
+    }
+
+    // MARK: Session ready when the user speaks (Story 11.2, FR-59)
+
+    /// Starts the Long session now, before the request, unless one is alive, being prepared or in use.
+    /// Checked with the real CLI (2.1.312, 28/10): `claude -p --input-format stream-json` connects to
+    /// the MCP servers as soon as it starts (initialize and tools/list ~1.2 s after launch), but writes
+    /// `init` only after the first message. So the preparation is the start of the process: nothing is
+    /// written to stdin and no token is spent; `init` arrives ~0.03 s after the request's message.
+    /// Returns whether a preparation started.
+    @discardableResult
+    func prepareSession(_ config: Config, generation: Int) -> Bool {
+        lock.withLock { () -> Bool in
+            guard preparing == nil, !inRequest, current == nil else { return false }
+            if let s = session, s.process.process.isRunning { return false }
+            // Never a warm spare next to a Long session: one process per level.
+            spare?.terminate()
+            spare = nil
+            let epoch = sessionEpoch
+            // The task takes the lock only after this section: `preparing` is set before it can end.
+            preparing = Task.detached(priority: .userInitiated) { [weak self] in
+                self?.startPrepared(config, generation: generation, epoch: epoch)
+            }
+            return true
+        }
+    }
+
+    private func startPrepared(_ config: Config, generation: Int, epoch: Int) {
+        do {
+            let proc = try spawn(config)
+            let s = Session(process: proc, generation: generation)
+            s.prepared = true
+            let kept = lock.withLock { () -> Bool in
+                defer { preparing = nil }
+                guard sessionEpoch == epoch, session?.process.process.isRunning != true else { return false }
+                session = s
+                return true
+            }
+            guard kept else { proc.terminate(); return }
+            Log.info("claude: sessione pronta all'ascolto (\(config.model), \(config.effort))")
+            scheduleIdleEnd(s)
+        } catch {
+            lock.withLock { preparing = nil }
+            Log.info("claude: sessione pronta non avviata, \(error.localizedDescription)")
+        }
+    }
+
+    /// Waits for a preparation in progress, then marks the session as in use (one process per level).
+    /// The wait is bounded by the turn's clock, and «stop» during it ends the request.
+    /// Polled, not awaited: the start of a process cannot be cancelled, the wait can.
+    private func beginRequest(clock: TurnClock?, timeout: TimeInterval) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            let waiting = lock.withLock { () -> Bool in
+                if preparing != nil { return true }
+                inRequest = true
+                return false
+            }
+            guard waiting else { return }
+            if Task.isCancelled || lock.withLock({ stopRequested }) { throw ClaudeCLIError.failed("interrotto dall'utente") }
+            let expired = clock.map { $0.remaining <= 0 && !$0.isPaused } ?? (Date() >= deadline)
+            if expired { throw ClaudeCLIError.timeout }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     /// Sends one message on the Long session, starting it again first when a rule says so.
@@ -258,18 +375,27 @@ final class ClaudeCLI: @unchecked Sendable {
     /// `onRestart` is called with the reason when a live session is replaced.
     func runInSession(_ config: Config, memory: MemorySnapshot, maxRequests: Int, timeout: TimeInterval, clock: TurnClock? = nil,
                       message: (Int?) -> String, onPhase: PhaseSink?, onRestart: (String) -> Void) async throws -> Data {
+        lock.withLock { requestOpen = true; stopRequested = false }
+        defer { lock.withLock { requestOpen = false; stopRequested = false } }
+        // A request during the preparation waits for it and uses that process (Story 11.2).
+        try await beginRequest(clock: clock, timeout: timeout)
+        defer { lock.withLock { inRequest = false } }
         // Never a warm spare next to a Long session: one process per level.
         lock.withLock { spare?.terminate(); spare = nil }
         var live = lock.withLock { session }
         if let s = live {
-            let (requests, lastUsed) = lock.withLock { (s.requests, s.lastUsed) }
+            let (requests, lastUsed) = lock.withLock { () -> (Int, Date) in
+                // A prepared session has seen nothing: it takes the memory of this request, no restart.
+                if s.prepared { s.generation = memory.generation }
+                return (s.requests, s.lastUsed)
+            }
             let old = s.process.config
             let reason = !s.process.process.isRunning ? "processo chiuso"
                 : SessionPolicy.restartReason(requests: requests, maxRequests: maxRequests,
                                               idle: Date().timeIntervalSince(lastUsed),
                                               configChanged: old != config,
                                               modelOrEffortChanged: old.model != config.model || old.effort != config.effort,
-                                              memoryChanged: s.generation != memory.generation)
+                                              memoryChanged: lock.withLock { s.generation } != memory.generation)
             if let reason {
                 endSession(reason: reason)
                 onRestart(reason)
@@ -278,9 +404,19 @@ final class ClaudeCLI: @unchecked Sendable {
         }
         let s: Session
         let text: String
+        var usedPrepared = false
         if let live {
             s = live
-            text = message(lock.withLock { live.cursor })
+            let (prepared, cursor) = lock.withLock { () -> (Bool, Int) in
+                defer { live.prepared = false }
+                return (live.prepared, live.cursor)
+            }
+            // A prepared session has seen nothing yet: the full message.
+            text = prepared ? message(nil) : message(cursor)
+            usedPrepared = prepared
+            if prepared {
+                Log.info(String(format: "claude: uso la sessione pronta, avviata %.1f s fa", Date().timeIntervalSince(s.process.started)))
+            }
             onPhase?(.sessionReused)
         } else {
             s = Session(process: try spawn(config), generation: memory.generation)
@@ -288,9 +424,16 @@ final class ClaudeCLI: @unchecked Sendable {
             text = message(nil)
             onPhase?(.sessionStarted)
         }
-        lock.withLock { lastAttemptReused = live != nil; interrupted = false }
+        // A prepared session never used is a fresh process: dying at once is not retried (FR-28).
+        lock.withLock { lastAttemptReused = live != nil && !usedPrepared; interrupted = false }
         lock.withLock { current = s.process }
         defer { lock.withLock { current = nil } }
+        // «stop» before anything was written: the session stays, unused, for the next request.
+        if Task.isCancelled || lock.withLock({ stopRequested }) {
+            lock.withLock { s.prepared = true }
+            scheduleIdleEnd(s)
+            throw ClaudeCLIError.failed("interrotto dall'utente")
+        }
 
         let line: [String: Any] = ["type": "user", "message": ["role": "user", "content": text]]
         var data = try JSONSerialization.data(withJSONObject: line)
@@ -449,6 +592,7 @@ final class ClaudeCLI: @unchecked Sendable {
         }
 
         try p.run()
+        countLock.withLock { spawnCount += 1; lastProcess = p }
         return Running(process: p, stdin: inPipe.fileHandleForWriting, stdout: outPipe.fileHandleForReading,
                        stderr: errBuffer, config: config)
     }

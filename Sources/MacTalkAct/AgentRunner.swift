@@ -234,6 +234,56 @@ final class AgentRunner {
         engines[choice.engine]?.prewarm()
     }
 
+    // MARK: Session ready when the user speaks (Story 11.2, FR-59)
+
+    /// When the last preparation started a process: at most one every `prepareEvery` seconds.
+    private var preparedAt = Date.distantPast
+    /// The last reason logged for not preparing, so a burst of partial texts writes it once.
+    private var lastBlockLog: (reason: String, at: Date)?
+    nonisolated static let prepareEvery: TimeInterval = 5
+    /// Debug commands only: the reason that keeps the data on the Mac, instead of the real one.
+    var privacyCheck: () -> String? = { PrivacyGuard.cloudBlockReason() }
+
+    /// Why the session is not prepared now, or nil to prepare it. Pure, tested by `--fallback-test`.
+    /// `privateReason` is read last and only when needed: it reads the app in front. The reasons are
+    /// fixed strings (log, tests); the privacy one is `PrivacyGuard`'s own.
+    nonisolated static func prepareBlock(switchOn: Bool, chosen: EngineID, using: EngineID?, running: Bool,
+                                         sinceLast: TimeInterval, privateReason: () -> String?) -> String? {
+        if !switchOn { return "interruttore spento" }
+        if chosen != .claude || using != .claude { return "Motore diverso da Claude o non disponibile" }
+        if running { return "richiesta in corso" }
+        if sinceLast < prepareEvery { return "già fatto da meno di 5 s" }
+        if let reason = privateReason() { return reason }
+        return nil
+    }
+
+    /// The single entry point of the preparation: the wake phrase in the partial text or the key
+    /// pressed. Starts Claude's missing Long sessions up to the connection to the tools, without
+    /// sending anything. `force`: the Bench (`--prepare`), without the switch and the throttle.
+    /// Returns the levels being prepared.
+    @discardableResult
+    func prepareSession(generation: Int, force: Bool = false) -> [AgentLevel] {
+        guard server != nil, let claude = engines[.claude] as? ClaudeEngine else { return [] }
+        let block = Self.prepareBlock(switchOn: force || settings.prepareSessionOnWake, chosen: chosenEngine,
+                                      using: currentChoice()?.engine, running: running,
+                                      sinceLast: force ? .infinity : Date().timeIntervalSince(preparedAt),
+                                      privateReason: privacyCheck)
+        if let block {
+            if lastBlockLog?.reason != block || Date().timeIntervalSince(lastBlockLog?.at ?? .distantPast) > Self.prepareEvery {
+                lastBlockLog = (block, Date())
+                Log.debug("Agente: sessione di Claude non preparata, \(block)")
+            }
+            return []
+        }
+        let levels = claude.prepareSessions(generation: generation)
+        if !levels.isEmpty {
+            // The throttle counts from a real start only.
+            preparedAt = Date()
+            Log.info("Agente: preparo la sessione di Claude (\(levels.map(\.rawValue).joined(separator: ", ")))")
+        }
+        return levels
+    }
+
     // MARK: Running
 
     /// Why a request stopped after the agent had already acted (AD-15).

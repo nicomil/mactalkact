@@ -183,7 +183,7 @@ Durante un compito l'HUD mostra cosa sta facendo («Cerco «LangChain»…», «
 
 L'app lancia `claude -p` senza strumenti, server MCP, hook né plugin, con un prompt di sistema dedicato e un JSON Schema per la risposta. Claude quindi decide soltanto: le azioni le esegue l'app.
 
-L'avvio di `claude` richiede circa 2 secondi. Con la **Sessione lunga** (predefinita) l'app tiene aperto un solo processo `claude` per livello e lo riusa tra una richiesta e l'altra. Non c'è avvio, e il prompt di sistema e gli strumenti restano nella cache del modello: dalla seconda richiesta Claude rilegge solo la parte nuova. La sessione parte alla prima richiesta, mai in anticipo. Riceve solo le voci della memoria di conversazione che non ha ancora visto, e non lascia file su disco (`--no-session-persistence`).
+L'avvio di `claude` richiede circa 2 secondi. Con la **Sessione lunga** (predefinita) l'app tiene aperto un solo processo `claude` per livello e lo riusa tra una richiesta e l'altra. Non c'è avvio, e il prompt di sistema e gli strumenti restano nella cache del modello: dalla seconda richiesta Claude rilegge solo la parte nuova. La sessione parte quando cominci a parlare all'app (vedi «Sessione pronta all'ascolto» qui sotto) oppure alla prima richiesta, mai all'avvio dell'app. Riceve solo le voci della memoria di conversazione che non ha ancora visto, e non lascia file su disco (`--no-session-persistence`).
 
 La sessione si riavvia da sola, scrivendo il motivo nel log e «Riavvio l'Agente» nell'HUD, in questi casi:
 - dopo 8 richieste (si regola nelle impostazioni);
@@ -194,6 +194,8 @@ La sessione si riavvia da sola, scrivendo il motivo nel log e «Riavvio l'Agente
 - entrando o uscendo dalla modalità privata.
 
 Se la sessione si chiude a metà senza aver fatto azioni, la richiesta viene ripetuta una volta. L'interruttore **Impostazioni › Agente › Claude › Sessione lunga** spento torna al comportamento di prima: un processo pronto, usato una volta per richiesta.
+
+**Sessione pronta all'ascolto** (predefinita). Quando la parola di attivazione compare nel testo che stai ancora dicendo («Computer apri…»), o quando premi il tasto per parlare, l'app avvia le Sessioni lunghe che mancano: quella del livello rapido e, se il Livello istantaneo è attivo, quella istantanea. Così, mentre finisci la frase, `claude` parte e si collega agli strumenti, e anche la prima richiesta dopo una pausa non paga l'avvio (fino a qualche secondo a freddo). Prima della fine della frase non parte nessun messaggio, quindi non si consuma l'abbonamento. Si avvia al massimo un processo ogni 5 secondi, e solo se l'agente è attivo con l'abbonamento (non con la chiave API), il Motore scelto è Claude ed è disponibile, la Sessione lunga è attiva, la versione di `claude` è verificata e nessuna richiesta è in corso. Non succede mai in modalità privata, con un'app o un sito riservati in primo piano, mentre l'app parla, né in ascolto continuo senza la parola di attivazione (chiacchiere, finestra di conversazione aperta senza «Computer»). Il tasto per parlare prepara la sessione anche quando poi la frase diventa una Dettatura o un comando rapido: in quel caso il processo resta inutilizzato fino a 10 minuti, senza consumare token. Una sessione preparata e mai usata segue le regole di sempre: si chiude dopo 10 minuti di inattività e si riavvia se cambia la configurazione; con «dimentica» o la modalità privata si chiude subito. Se la memoria è scaduta da sola prima del primo uso, la sessione non ha visto niente e la usa così com'è. Spegnere questo interruttore, o scegliere un Motore diverso da Claude, chiude le sessioni preparate e mai usate. Se la richiesta arriva mentre il processo sta ancora partendo, lo aspetta (entro il tempo del turno; «stop» la ferma senza inviare niente) e usa quello: mai due processi per lo stesso livello. Non c'è nessun ping per tenerla viva. L'interruttore **Impostazioni › Agente › Claude › Sessione pronta all'ascolto** spento torna al comportamento di prima: la sessione parte alla richiesta. Codex e il Motore locale non cambiano.
 
 La Sessione lunga richiede `claude` 2.1.299 o successivo. L'app legge la versione con `claude --version` e la mostra in **Stato e diagnostica**, insieme a quella di `codex` (minima 0.131.0). Con una versione non verificata, o se `claude` parte senza il login dell'abbonamento, l'app usa un processo per richiesta. Le versioni minime vanno rilette entro il **1° novembre 2026**.
 
@@ -272,7 +274,11 @@ Se il server è spento l'app usa il modello Apple e lo dice. Un indirizzo fuori 
 .build/debug/MacTalkAct --agent-bench --engine local                  # modello Apple (agisce davvero!)
 .build/debug/MacTalkAct --agent-bench --engine local --model qwen3.5:4b   # modello servito da Ollama
 .build/debug/MacTalkAct --agent-bench --engine claude --only posta-apri,tabella-tutti
+.build/debug/MacTalkAct --agent-bench --engine claude --only posta-apri,tabella-tutti --cold             # sessioni chiuse prima di ogni compito, come dopo una pausa
+.build/debug/MacTalkAct --agent-bench --engine claude --only posta-apri,tabella-tutti --cold --prepare   # e sessione pronta 1,5 s prima della richiesta
 ```
+
+Con `--cold` e `--prepare` il riepilogo stampa anche la mediana di «sessione» + «mcp» (obiettivo con la sessione pronta: sotto 0,2 s).
 
 ## Struttura del codice
 
@@ -335,7 +341,7 @@ say -v Alice -o /tmp/t.aiff "Scorri giù"
 tail -f ~/Library/Logs/MacTalkAct.log              # cosa sente e decide l'app, in tempo reale
 .build/debug/MacTalkAct --agent-test "apri la Calcolatrice"   # un compito completo dell'agente (agisce davvero!)
 .build/debug/MacTalkAct --agent-test "…" --engine codex       # lo stesso con un motore preciso (claude, codex, local), senza riserva
-.build/debug/MacTalkAct --fallback-test            # catena di riserva con motori finti: nessuna azione ripetuta dopo un limite; fasi; Sessione lunga con un claude finto
+.build/debug/MacTalkAct --fallback-test            # catena di riserva con motori finti: nessuna azione ripetuta dopo un limite; fasi; Sessione lunga e sessione pronta all'ascolto con un claude finto
 .build/debug/MacTalkAct --session-test             # Sessione lunga con il claude vero: due risposte brevi (usa l'abbonamento)
 .build/debug/MacTalkAct --apple-events-spike       # Storia 8.4: azioni dirette via Apple Events, solo con il consenso già dato; --avvia apre Calendario e Mail
 .build/debug/MacTalkAct --local-vision-test        # Storia 8.3: il modello Apple sul Mac con lo screenshot di 5 pagine del Banco

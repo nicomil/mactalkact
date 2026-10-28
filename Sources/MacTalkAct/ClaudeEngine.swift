@@ -69,9 +69,12 @@ final class ClaudeEngine: AgentEngine {
         return level == .deep || !useFastModel ? .deep : .fast
     }
 
+    /// Debug commands only (`--fallback-test`): the `claude` to use instead of the user's.
+    var debugExecutable: String?
+
     /// The spawn may happen on a background queue: capture the path setting now.
     private func refreshExecutable() {
-        let custom = settings.claudePath
+        let custom = debugExecutable ?? settings.claudePath
         cliDeep.executablePath = { ClaudeCLI.locate(custom: custom) }
         cliFast.executablePath = { ClaudeCLI.locate(custom: custom) }
         cliInstant.executablePath = { ClaudeCLI.locate(custom: custom) }
@@ -123,7 +126,8 @@ final class ClaudeEngine: AgentEngine {
         guard availability == .available else { return }
         refreshExecutable()
         if cliStatus == .unverified(nil) { refreshStatus() }
-        // The Long session starts with the first request, never in advance (AD-6).
+        // The Long session starts with the first request or when the user starts talking to the app
+        // (`prepareSessions`, Story 11.2): never at launch, no keep-alive (AD-6 amended).
         if usesSession { return }
         var pairs: [(ClaudeCLI, ClaudeCLI.Config)] = []
         if let c = config(.deep) { pairs.append((cliDeep, c)) }
@@ -165,6 +169,51 @@ final class ClaudeEngine: AgentEngine {
     /// Long session only with a verified CLI and the switch on (FR-42, FR-45, NFR-15).
     private var usesSession: Bool { settings.longSession && cliStatus.isVerified }
 
+    /// Story 11.2 (FR-59): the wake phrase was heard or the key pressed. Starts the missing Long sessions
+    /// of the fast level and, with the Instant level on, of the Instant one; nothing is sent before
+    /// the end of the Frase. Only with the Long session in use (switch on, CLI verified). The other
+    /// checks (engine, privacy, throttle) are AgentRunner's. Returns the levels being prepared.
+    @discardableResult
+    func prepareSessions(generation: Int) -> [AgentLevel] {
+        guard availability == .available else { return [] }
+        refreshExecutable()
+        guard usesSession else { return [] }
+        watchLongSession()
+        var levels = [effective(.fast)]
+        if settings.instantLevel { levels.append(.instant) }
+        return levels.filter { level in
+            guard let c = config(level) else { return false }
+            return cli(level).prepareSession(c, generation: generation)
+        }
+    }
+
+    /// Debug only: `claude` processes started by the three levels, and the reason of the last close.
+    var debugSpawns: Int { cliDeep.spawns + cliFast.spawns + cliInstant.spawns }
+    var debugLiveSessions: Int { [cliDeep, cliFast, cliInstant].filter(\.hasLiveSession).count }
+    func debugLastEndReason(_ level: AgentLevel) -> String? { cli(effective(level)).lastEndReason }
+    func debugMaxIdle(_ seconds: TimeInterval) { for c in [cliDeep, cliFast, cliInstant] { c.maxIdle = seconds } }
+
+    /// Switching the Long session off closes the sessions, prepared ones included. Switching «Sessione
+    /// pronta all'ascolto» off, or the engine away from Claude, closes the prepared ones never used.
+    private func watchLongSession() {
+        guard longSessionWatch == nil else { return }
+        longSessionWatch = settings.$longSession.dropFirst().sink { [weak self] on in
+            if !on { self?.endSessions(reason: "Sessione lunga spenta") }
+        }
+        settings.$prepareSessionOnWake.dropFirst().sink { [weak self] on in
+            if !on { self?.endPreparedSessions(reason: "Sessione pronta all'ascolto spenta") }
+        }.store(in: &watches)
+        settings.$agentEngine.dropFirst().sink { [weak self] engine in
+            if engine != .claude { self?.endPreparedSessions(reason: "Motore cambiato") }
+        }.store(in: &watches)
+    }
+    private var watches = Set<AnyCancellable>()
+
+    /// Closes the sessions prepared and never used; the others keep today's rules.
+    func endPreparedSessions(reason: String) {
+        for c in [cliDeep, cliFast, cliInstant] { c.endPreparedSession(reason: reason) }
+    }
+
     /// Ends both Long sessions (memory emptied, private mode, switch turned off).
     func endSessions(reason: String) {
         cliDeep.endSession(reason: reason)
@@ -182,11 +231,7 @@ final class ClaudeEngine: AgentEngine {
         let level = effective(request.level)
         guard let config = config(level) else { throw AgentEngineError.failed("server strumenti non avviato") }
         refreshExecutable()
-        if longSessionWatch == nil {
-            longSessionWatch = settings.$longSession.dropFirst().sink { [weak self] on in
-                if !on { self?.endSessions(reason: "Sessione lunga spenta") }
-            }
-        }
+        watchLongSession()
         let cli = cli(level)
         var inSession = usesSession
         while true {

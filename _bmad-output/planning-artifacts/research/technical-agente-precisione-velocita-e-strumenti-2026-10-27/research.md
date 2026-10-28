@@ -748,6 +748,45 @@ Cosa dice:
 
 Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-28-1240-claude.tsv`, esito delle soglie in `…-1240-claude.soglie.txt`.
 
+## 29. Sessione pronta all'ascolto (Storia 11.2, 28 ottobre 2026)
+
+**Che cosa è cambiato.** Quando la Parola di attivazione compare nel testo parziale, o quando si preme il tasto per parlare, il Coordinator chiama `AgentRunner.prepareSession`. È l'unico punto d'ingresso e controlla, nell'ordine: l'interruttore «Sessione pronta all'ascolto» (predefinito acceso), il Motore scelto (deve essere Claude e il selettore deve sceglierlo davvero, quindi non in pausa né sostituito dalla riserva), che non ci sia una richiesta in corso e che siano passati almeno 5 s dall'ultimo avvio vero di un processo. Solo alla fine legge `PrivacyGuard.cloudBlockReason()` (modalità privata, app o sito riservati), perché legge l'app in primo piano. Il motivo del mancato avvio va nel log dettagliato, una volta per raffica. Il Coordinator non prepara mentre l'app parla (la sua risposta può contenere «computer"). Poi `ClaudeEngine.prepareSessions` avvia le Sessioni lunghe che mancano: quella del livello rapido (`effective(.fast)`) e, con il Livello istantaneo attivo, quella istantanea. Questo succede solo se la Sessione lunga è in uso (interruttore acceso e `CLIStatus` verificato). Il testo parziale avvia qualcosa solo se contiene la Parola: la Chiacchiera in ascolto continuo e la finestra di conversazione aperta senza «Computer» non avviano nulla.
+
+**Che cosa fa la CLI prima del primo messaggio (verificato con `claude` 2.1.312).** La storia chiedeva di fermarsi all'evento `init` con i server MCP connessi. La CLI vera però non scrive niente su stdout finché non riceve il primo messaggio: in 8 s di attesa a stdin aperto non arriva nessuna riga, nemmeno `init`. Si collega comunque ai server MCP appena parte. Con un server MCP di prova che registra le richieste, `initialize`, `notifications/initialized` e `tools/list` arrivano circa 1,2 s dopo l'avvio, senza nessun messaggio dell'utente. Per questo la preparazione si limita ad avviare il processo, come prevede la spec per questo caso: non scrive niente su stdin e non consuma token. L'`init` si legge poi durante la richiesta, come prima. Con il server degli strumenti dell'app (`--mcp-serve`, HTTP) e Haiku 5.5, il tempo dal messaggio all'`init` è questo:
+
+| Avvio | Dal messaggio all'`init` | Dal messaggio al `result` («Rispondi solo: ok») |
+| --- | --- | --- |
+| a freddo (processo e messaggio insieme) | 0,51 · 0,44 · 0,44 s | 1,34 · 2,47 · 1,51 s |
+| processo avviato 3 s prima | 0,03 · 0,04 · 0,04 s | 0,77 · 1,59 · 0,79 s |
+
+Il caso «`init` non arriva entro 10 s» della matrice quindi non si presenta: la preparazione non aspetta l'`init`, e la richiesta lo legge come oggi.
+
+**Regole della sessione preparata.** È una Sessione lunga come le altre, segnata `prepared` finché non riceve la prima richiesta. Non ha cursore della memoria, quindi la prima richiesta le manda il messaggio completo, e la fase è `sessionReused`. Se non viene usata si chiude dopo 10 minuti di inattività con il motivo di sempre: nel log compare «sessione chiusa (pronta, mai usata), inattiva da 10 minuti». Alla richiesta si riavvia con i motivi di oggi (configurazione, modello o effort cambiati). Con «dimentica» e la modalità privata il Coordinator la chiude subito con «memoria azzerata»; se invece la memoria è scaduta da sola prima del primo uso, la sessione, che non ha visto niente, prende la generazione della richiesta invece di ripartire. Il primo uso di una sessione preparata non conta come «riusata» per la ripetizione di FR-28: un processo nuovo che muore subito non si ripete. Una richiesta che arriva mentre il processo sta partendo aspetta la preparazione e usa quel processo (`beginRequest`); l'attesa è limitata dall'orologio del turno, e «stop» la interrompe senza inviare niente. Spegnere l'interruttore o scegliere un altro Motore chiude le sessioni preparate e mai usate. Mentre una richiesta usa la sessione non si prepara niente, e se la sessione viene chiusa durante la preparazione (modalità privata, «dimentica», app chiusa) il processo appena avviato si chiude: mai due processi per lo stesso livello. Non c'è nessun ping di mantenimento. Codex e il Motore locale non cambiano.
+
+**Rete.**
+- `--fallback-test` è tutto ok, con 36 controlli nuovi (con i motivi esatti di ogni blocco, il throttle che non rilegge la privacy, l'attesa limitata dal turno, «stop» durante la preparazione, il processo orfano chiuso, gli interruttori spenti che chiudono le sessioni pronte e i rami del Coordinator con il tasto per parlare e con la parola). Ci sono le righe della matrice in forma pura (chi può preparare, Parola nel parziale o no, throttle senza rileggere l'app in primo piano, privato, app riservata, interruttore, Motore). Con il claude finto, che come quello vero scrive `init` solo dopo il primo messaggio, si controllano: preparazione e riuso con un solo processo; nessun messaggio prima della richiesta; la seconda richiesta che riusa la sessione col cursore; la Frase finita durante la preparazione; la preparazione fallita che lascia l'avvio normale; la memoria cambiata che riavvia con «memoria azzerata»; la chiusura per inattività con il motivo di oggi; la chiusura durante la preparazione. Attraverso `AgentRunner` e `ClaudeEngine` veri sul claude finto: rapido e istantaneo preparati, un secondo avvio entro 5 s bloccato, la richiesta che usa la sessione pronta senza processi nuovi (sessione + mcp 0,001 s), e nessun avvio con privato, interruttore spento, Motore Codex o Sessione lunga spenta. In più, il debito di `.askIntent` nel Coordinator: `Coordinator.handling(of:mode:)` decide ora che cosa fa `perform` (HUD, finestra, sessione mani libere tenuta viva, armato), e il test controlla che «Vuoi che faccia qualcosa?» mostri l'HUD senza aprire la finestra né tenere viva la sessione.
+- `--selftest` è tutto ok, con 4 controlli nuovi: il debito di `ConversationLog.expire()`, ora con un orologio iniettabile (`now`). Prima della scadenza la memoria resta; dopo, la memoria è vuota, la generazione cresce e la sessione di prima riparte con «memoria azzerata».
+- `--session-test` (claude vero) è tutto ok, con 3 controlli nuovi: la sessione preparata 2 s prima viene usata dalla richiesta con un solo processo, e la seconda richiesta la riusa.
+
+**Banco (da fare dopo il «via» di Nico, perché usa mouse e tastiera).** Il Banco ha due opzioni nuove. `--cold` chiude le sessioni di Claude prima di ogni compito, come dopo una pausa. `--prepare` prepara la sessione 1,5 s prima della richiesta, come la Parola detta a inizio Frase. Il riepilogo stampa la mediana di «sessione» + «mcp» e la scrive nel file `….soglie.txt`. Il confronto da fare, sulla stessa decina di compiti brevi di pagina:
+
+```
+.build/debug/MacTalkAct --agent-bench Tests/bench/agente.tsv --engine claude --only <compiti> --cold
+.build/debug/MacTalkAct --agent-bench Tests/bench/agente.tsv --engine claude --only <compiti> --cold --prepare
+```
+
+| Fase, mediana | `--cold` | `--cold --prepare` | Obiettivo |
+| --- | --- | --- | --- |
+| sessione + mcp | — | — | < 0,2 s con `--prepare` |
+| primo strumento | — | — | — |
+| compito | — | — | — |
+
+Per riferimento, la riga di base (§28) ha 4,8 s di MCP sul primo compito a freddo e 3,0 s a un riavvio.
+
+Il Banco rifiuta `--cold`/`--prepare` con un Motore diverso da Claude, stampa per ogni compito i livelli preparati e calcola la mediana di «sessione»+«mcp» escludendo i compiti profondi, quelli senza le due fasi e (con `--prepare`) quelli senza sessione avviata prima, con il verdetto contro 0,2 s.
+
+**Da notare.** Il tasto per parlare prepara la sessione anche quando poi la Frase va a un comando rapido o alla Dettatura: il processo resta pronto e, se non viene usato, si chiude dopo 10 minuti senza consumare token. Con il Livello istantaneo attivo le sessioni preparate sono due. Una sessione rapida o istantanea già viva, ma che alla richiesta si riavvierà (per esempio perché ha raggiunto le 8 richieste), non viene sostituita in anticipo: in quel caso il riavvio paga ancora l'avvio. È un possibile passo successivo.
+
 ## 30. AccessGate unico, stesso comportamento (Storia 10.1, 28 ottobre 2026)
 
 **Che cosa è cambiato.** I controlli sono usciti da `AgentTools` e ora stanno in `AccessGate.swift`. Si tratta del livello di accesso dell'app, del campo password, di «conferma ogni azione», del secondo strato con la sua cache e della domanda di conferma con il suo bersaglio, insieme ai conteggi e alle righe del log. `AgentTools` raccoglie i fatti (l'elemento risolto, le azioni da giudicare) e passa al gate ogni chiamata con origine `.model`. Anche le regole fisse (Invia, Elimina, scorciatoie, Invio in una chat) si decidono nel gate: `AgentTools` gli passa le etichette lette sullo schermo. Messaggi, domande e righe del log non cambiano.

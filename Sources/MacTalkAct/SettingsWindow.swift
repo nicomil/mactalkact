@@ -459,6 +459,10 @@ private struct AgentSection: View {
                     .disabled(!settings.longSession)
                 Text("Un solo processo per livello, riusato per 10 minuti: niente avvio e prompt già in cache. Si riavvia da solo dopo le richieste indicate, dopo 10 minuti di inattività, al cambio di modello o effort, con «dimentica la conversazione» e con la modalità privata. Spento: un processo nuovo per ogni richiesta, come prima. Serve «claude» 2.1.299 o successivo.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("Sessione pronta all'ascolto", isOn: $settings.prepareSessionOnWake)
+                    .disabled(!settings.longSession)
+                Text("Quando dici «\(settings.firstWakePhrase)» o premi il tasto per parlare, Claude si avvia e si collega agli strumenti mentre finisci la frase, così anche la prima richiesta dopo una pausa parte subito. Non invia niente prima della fine della frase, quindi non consuma l'abbonamento. Solo con l'abbonamento e nessuna richiesta in corso; mai in modalità privata, su un'app riservata, con un altro Motore o in ascolto continuo senza la parola di attivazione. Il tasto per parlare la prepara anche se poi la frase è una Dettatura o un comando rapido: il processo resta fermo fino a 10 minuti, senza token. Spento: Claude si avvia alla richiesta, come prima, e le sessioni preparate e mai usate si chiudono.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .onAppear { claudeFound = settings.claudeExecutable; codexFound = settings.codexExecutable }

@@ -47,6 +47,8 @@ final class ConversationLog {
     /// that saw another generation starts again, so it forgets too.
     private(set) var generation = 0
     private var nextSeq = 1
+    /// The clock of the memory: injectable, so a test can make 10 minutes pass (Story 11.2).
+    var now: () -> Date = { Date() }
     var snapshot: MemorySnapshot { expire(); return MemorySnapshot(generation: generation, lastSeq: entries.last?.seq ?? nextSeq - 1) }
     var maxEntries: Int { max(1, AppSettings.shared.conversationMemoryCount) }
     var maxAge: TimeInterval { AppSettings.shared.conversationMemoryMinutes * 60 }
@@ -55,7 +57,7 @@ final class ConversationLog {
         // Private mode: nothing is remembered, not even in RAM.
         guard !AppSettings.shared.privateModeActive else { return }
         expire()
-        entries.append(Entry(seq: nextSeq, time: Date(), request: request, outcome: outcome, app: app, changes: Array(changes.suffix(6))))
+        entries.append(Entry(seq: nextSeq, time: now(), request: request, outcome: outcome, app: app, changes: Array(changes.suffix(6))))
         nextSeq += 1
         if entries.count > maxEntries { entries.removeFirst(entries.count - maxEntries) }
     }
@@ -67,7 +69,7 @@ final class ConversationLog {
 
     /// Drops everything if the last interaction is older than `maxAge`.
     func expire() {
-        if let last = entries.last, Date().timeIntervalSince(last.time) > maxAge { clear() }
+        if let last = entries.last, now().timeIntervalSince(last.time) > maxAge { clear() }
     }
 
     /// The `<recent>` block sent to the agent. Empty when there is nothing recent.

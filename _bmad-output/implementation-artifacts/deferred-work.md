@@ -70,3 +70,17 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-10-2-corsia-locale-nel-cancello.md`
   summary: Asserire il limite di 20 ms del gate della Corsia locale sullo stesso collegamento dell'app (fabbrica comune dell'ambiente del gate).
   evidence: `--route-test` stampa «entro/OLTRE 20 ms» su una copia del collegamento e non fallisce; asserzioni a tempo rumorose sul build.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-2-sessione-pronta-all-ascolto.md`
+  summary: Banco di prova del Coordinator (o un aggancio iniettabile) per i punti che avviano la preparazione (Parola nel parziale, tasto per parlare) e per i rami di `perform`.
+  evidence: oggi solo le funzioni pure sono provate; togliere la chiamata in `handleLive` non farebbe fallire nulla.
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-2-sessione-pronta-all-ascolto.md`
+  summary: Sostituire in anticipo una sessione viva che si riavvierà alla richiesta (richieste esaurite, inattività vicina al limite, configurazione cambiata).
+  evidence: §29; oggi quella richiesta paga ancora l'avvio a freddo.
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-2-sessione-pronta-all-ascolto.md`
+  summary: Test che non scrivono le impostazioni vere (`UserDefaults` isolato o impostazioni iniettate).
+  evidence: `--fallback-test` cambia `AppSettings.shared` e lo ripristina con `defer`; un'interruzione a metà lascerebbe le preferenze cambiate.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-2-sessione-pronta-all-ascolto.md`
+  summary: Trovare la verifica di `--fallback-test` che è fallita una volta su otto con il Mac carico e renderla indipendente dai tempi.
+  evidence: 28/10 pomeriggio, load average 8–13; il controllo non è stato catturato e non si è ripetuto in 7 corse.

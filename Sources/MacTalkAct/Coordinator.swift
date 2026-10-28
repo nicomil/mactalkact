@@ -160,6 +160,21 @@ final class Coordinator {
         prewarmRouter()
     }
 
+    /// Story 11.2 (FR-59): the user is talking to the app (wake phrase in the partial text, key pressed).
+    /// Claude's Long sessions start now, so the request finds them ready; nothing is sent before the
+    /// end of the Frase. AgentRunner checks the engine, the privacy, the switch and the 5 s throttle.
+    private func prepareAgent() {
+        guard settings.useAI, settings.backend == .subscription else { return }
+        agent.prepareSession(generation: conversation.log.snapshot.generation)
+    }
+
+    /// The partial text starts Claude only when it carries the wake phrase (`wake`, from
+    /// `WakeWord.extract`): chatter in continuous listening, or the conversation window open without
+    /// «Computer», starts nothing, nor does the app's own spoken reply. Pure, tested by `--fallback-test`.
+    nonisolated static func preparesSession(wake: String?, speaking: Bool) -> Bool {
+        wake != nil && !speaking
+    }
+
     private func prewarmRouter() {
         let r = router
         r.classifier.prewarm()
@@ -414,6 +429,7 @@ final class Coordinator {
         Sound.listen()
         hud.show(.listening, "Ti ascolto…")
         wakeModels()
+        prepareAgent()
         let continuous = mode != .off
         pttStart = Task {
             do { try await engine.beginPushToTalk(continuous: continuous) } catch {
@@ -462,6 +478,7 @@ final class Coordinator {
         }
         guard mode != .off, !busy, !live.isEmpty else { return }
         let wake = WakeWord.extract(live, phrases: settings.wakePhraseList)
+        if Self.preparesSession(wake: wake, speaking: speaker.isSpeaking) { prepareAgent() }
         let addressed = mode == .session || conversation.isArmed || pending != nil || wake != nil
         if addressed {
             hud.show(.listening, wake.map { $0.isEmpty ? "Dimmi pure…" : $0 } ?? live)
@@ -571,11 +588,32 @@ final class Coordinator {
     /// Measure of the first visible response of the sentence being handled (Story 11.1).
     private var firstResponse = FirstResponseMeter()
 
+    /// What `perform` does around a decision (FR-48). Pure, tested by `--fallback-test`.
+    struct DecisionHandling: Equatable {
+        /// The conversation window opens afterwards (sentences without the wake phrase are evaluated).
+        var opensWindow: Bool
+        /// The hands-free session's idle timer starts again: the session stays open.
+        var keepsSessionAlive: Bool
+    }
+
+    nonisolated static func handling(of decision: RouteDecision, mode: Mode) -> DecisionHandling {
+        switch decision {
+        case .ignore, .arm, .number, .askIntent:
+            // «Vuoi che faccia qualcosa?» asks without opening the window and without keeping the
+            // hands-free session alive; the others act on their own path.
+            return DecisionHandling(opensWindow: false, keepsSessionAlive: false)
+        default:
+            return DecisionHandling(opensWindow: mode != .off, keepsSessionAlive: mode == .session)
+        }
+    }
+
     /// How long «Vuoi che faccia qualcosa?» stays up (FR-48).
     static let askIntentSeconds = 8.0
     private var askIntentShownAt = Date.distantPast
 
     private func perform(_ decision: RouteDecision, screen: () -> ScreenContext) async {
+        let handling = Self.handling(of: decision, mode: mode)
+        if handling.keepsSessionAlive { restartSessionIdle() }
         switch decision {
         case .ignore:
             if hud.model.phase == .listening && !conversation.isWindowOpen { hud.hide() }
@@ -602,10 +640,9 @@ final class Coordinator {
             break
         }
 
-        if mode == .session { restartSessionIdle() }
         busy = true
         cancelRequested = false
-        var reopen = mode != .off
+        var reopen = handling.opensWindow
         defer {
             busy = false
             if reopen { openConversation() }

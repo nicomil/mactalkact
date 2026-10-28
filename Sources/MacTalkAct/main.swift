@@ -31,7 +31,8 @@ if arguments.contains("--agent-bench") {
     let mode = argument(after: "--local-mode").flatMap(LocalEngine.Mode.init(rawValue:))
     MainActor.assumeIsolated { _ = NSApplication.shared }
     Task { @MainActor in
-        await DebugCLI.agentBench(path: path, engine: engine, only: only, server: server, mode: mode)
+        await DebugCLI.agentBench(path: path, engine: engine, only: only, server: server, mode: mode,
+                                  cold: arguments.contains("--cold"), prepare: arguments.contains("--prepare"))
         exit(0)
     }
     dispatchMain()
