@@ -87,6 +87,6 @@ development_status:
   9-2-conferma-legata-alla-singola-azione-e-un-solo-orologio-del-t: review
   9-3-campi-sicuri-e-livelli-di-accesso-per-app: review
   9-4-suite-di-sicurezza-e-copertura-del-riconoscimento: review
-  9-5-classificatore-on-device-come-secondo-strato: backlog
+  9-5-classificatore-on-device-come-secondo-strato: in-progress
   epic-9-retrospective: optional
 action_items: []

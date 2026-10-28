@@ -318,6 +318,8 @@ final class AgentRunner {
         // One monotonic clock for the whole request, split into contiguous phases (FR-41, AD-18).
         let timer = PhaseTimer()
         tools.onCall = { start in timer.tool(start) }
+        tools.onClassified = { timer.carve(.classifier, seconds: $0) }
+        if settings.riskClassifier { tools.riskClassifier.prewarm() }
         defer {
             running = false
             tools.onCall = nil

@@ -461,7 +461,7 @@ enum BenchPhase: String, CaseIterable, Sendable {
     case actions = "azioni"
     /// The model thinking between two tools.
     case reasoning = "ragionamento"
-    /// The safety classifier (Story 9.5); zero until it exists.
+    /// The on-device safety classifier (Story 9.5).
     case classifier = "classificatore"
     case finalTurn = "turno_finale"
     case close = "chiusura"
@@ -491,6 +491,17 @@ final class PhaseTimer: @unchecked Sendable {
     /// Opens `phase` now. Also used to go back to `.session` when another engine takes over.
     func mark(_ phase: BenchPhase) {
         lock.withLock { move(to: phase) }
+    }
+
+    /// Time spent in `phase` inside the current one (the classifier during a tool call): it is
+    /// counted there and taken away from the current phase.
+    func carve(_ phase: BenchPhase, seconds: Double) {
+        lock.withLock {
+            guard finished == nil, seconds > 0 else { return }
+            let d = Duration.milliseconds(Int64(seconds * 1000))
+            segments.append((phase, d))
+            since = since + d
+        }
     }
 
     /// Start (`true`) or end (`false`) of a tool call.

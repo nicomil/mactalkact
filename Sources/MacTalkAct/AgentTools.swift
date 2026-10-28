@@ -373,6 +373,29 @@ final class AgentTools {
                         verb: "faccia", scenario: "app con conferma per ogni azione")) {
             return Self.denied("\(Self.toolWords[name] ?? name) in \(app)")
         }
+        // Second layer (Story 9.5, FR-55): where the fixed rules do not ask, the on-device model may
+        // add a confirmation. «Conferma ogni azione» already asked for this call.
+        if level.scope != .confirmAll, AppSettings.shared.riskClassifier, let action = riskAction(name, args, app: app) {
+            let verdict: RiskVerdict
+            if let cached = riskCache[action.cacheKey] {
+                verdict = cached
+            } else {
+                verdict = await (riskJudge ?? riskClassifier.judge)(action)
+                // The verdict does not depend on the request: kept across requests, but never a timeout.
+                if verdict.source.hasPrefix("on-device") {
+                    if riskCache.count > 500 { riskCache.removeAll() }
+                    riskCache[action.cacheKey] = verdict
+                }
+                onClassified?(verdict.seconds)
+                Log.info(String(format: "Sicurezza: secondo strato · %@ «%d caratteri» · %@ · %@ · %.2f s", name, action.label.count,
+                                verdict.external ? "esterno" : "interno", verdict.source, verdict.seconds))
+            }
+            if verdict.external,
+               !(await gate(Self.levelTarget(name, args), label: action.label, verb: Self.riskVerb[name] ?? "faccia",
+                            scenario: "secondo strato")) {
+                return Self.denied(action.label)
+            }
+        }
         if Self.effectfulTools.contains(name) {
             effectfulCalls += 1
             if firstEffectAt == nil { firstEffectAt = Date() }
@@ -382,6 +405,54 @@ final class AgentTools {
         } catch {
             return .error(error.localizedDescription)
         }
+    }
+
+    // MARK: Second layer (Story 9.5)
+
+    let riskClassifier = OnDeviceRiskClassifier()
+    /// Replaces the model in the tests: a fixed verdict, so the gate around it is what is tested.
+    var riskJudge: ((RiskAction) async -> RiskVerdict)?
+    /// Seconds spent judging, for the «classificatore» phase of the Banco.
+    var onClassified: ((Double) -> Void)?
+    /// One verdict per action (tool, label, role, app, window), across requests; emptied at 500.
+    private var riskCache: [String: RiskVerdict] = [:]
+    private static let riskVerb = ["click": "clicchi", "perform_action": "esegua", "menu": "scelga"]
+
+    /// The action as the second layer sees it, or nil when it has nothing to judge: a tool without
+    /// external effects of its own, or an action the fixed rules already stop (they ask on their own).
+    private func riskAction(_ name: String, _ a: [String: Any], app: String) -> RiskAction? {
+        var label = "", role = ""
+        switch name {
+        case "click":
+            if let id = Self.int(a["id"]) {
+                guard let item = try? resolve(id) else { return nil }
+                (label, role) = (item.label, item.role)
+            } else if let x = Self.double(a["x"]), let y = Self.double(a["y"]), let shot = lastShot {
+                label = AX.labelAt(shot.screenPoint(imageX: x, imageY: y)) ?? ""
+            }
+            // Modifiers or a right click do not press a button.
+            if (a["method"] as? String) == "right" { return nil }
+            if Safety.isRiskyLabel(label) { return nil }
+        case "perform_action":
+            guard let id = Self.int(a["id"]), let item = try? resolve(id) else { return nil }
+            let action = (a["action"] as? String) ?? ""
+            if Safety.isRiskyLabel(item.label) || Safety.isRiskyLabel(action) { return nil }
+            (label, role) = (item.label + (action.isEmpty ? "" : " → \(action)"), item.role)
+        case "menu":
+            let path = (a["path"] as? String) ?? ""
+            guard !path.isEmpty, let last = path.components(separatedBy: ">").last?.trimmingCharacters(in: .whitespaces),
+                  !Safety.isRiskyLabel(last) else { return nil }
+            (label, role) = (path, "menu")
+        default:
+            return nil
+        }
+        // Fields, boxes, tabs and rows send nothing out by themselves: no verdict, no latency.
+        let inert: Set<String> = ["AXTextField", "AXTextArea", "AXCheckBox", "AXRadioButton", "AXTab", "AXStaticText", "AXRow",
+                                  "AXCell", "AXPopUpButton", "AXComboBox", "AXSlider", "AXDisclosureTriangle", "AXSearchField", "AXImage"]
+        if inert.contains(role) { return nil }
+        // Nothing to name and nothing around it: the model would only guess.
+        guard !label.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return RiskAction(tool: name, label: label, role: role, app: app, window: Self.frontWindowTitle(), request: currentRequest)
     }
 
     /// The tools a «solo clic» app allows.

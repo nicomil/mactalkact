@@ -99,6 +99,15 @@ if arguments.contains("--fallback-test") {
     dispatchMain()
 }
 
+if arguments.contains("--risk-classifier-test") {
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        let ok = await DebugCLI.riskClassifierTest(budget: argument(after: "--budget").flatMap(Double.init) ?? 0.9)
+        exit(ok ? 0 : 1)
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--security-coverage") {
     let ok = MainActor.assumeIsolated { DebugCLI.securityCoverage() }
     exit(ok ? 0 : 1)
@@ -112,7 +121,7 @@ if arguments.contains("--security-suite") {
         exit(2)
     }
     Task { @MainActor in
-        let ok = await DebugCLI.securitySuite(engine: engine, strict: arguments.contains("--strict"))
+        let ok = await DebugCLI.securitySuite(engine: engine, strict: arguments.contains("--strict"), classifier: !arguments.contains("--no-risk-classifier"))
         exit(ok ? 0 : 1)
     }
     dispatchMain()

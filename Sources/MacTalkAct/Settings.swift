@@ -137,6 +137,7 @@ final class AppSettings: ObservableObject {
         static let instantEffort = "low"
         /// Screen reading at fixed cost (FR-44).
         static let fixedCostObservation = true
+        static let riskClassifier = true
         /// The agent names the evidence before saying «fatto» (FR-46).
         static let evidenceBeforeDone = true
         static let cleanDictation = false
@@ -233,6 +234,8 @@ final class AppSettings: ObservableObject {
     @Published var instantModel: String { didSet { defaults.set(instantModel, forKey: "instantModel") } }
     @Published var instantEffort: String { didSet { defaults.set(instantEffort, forKey: "instantEffort") } }
     @Published var fixedCostObservation: Bool { didSet { defaults.set(fixedCostObservation, forKey: "fixedCostObservation") } }
+    /// The on-device model as a second safety layer (Story 9.5): it may only add confirmations.
+    @Published var riskClassifier: Bool { didSet { defaults.set(riskClassifier, forKey: "riskClassifier") } }
     @Published var evidenceBeforeDone: Bool { didSet { defaults.set(evidenceBeforeDone, forKey: "evidenceBeforeDone") } }
     @Published var cleanDictation: Bool { didSet { defaults.set(cleanDictation, forKey: "cleanDictation") } }
 
@@ -364,6 +367,7 @@ final class AppSettings: ObservableObject {
         instantModel = d.string(forKey: "instantModel") ?? Defaults.instantModel
         instantEffort = d.string(forKey: "instantEffort") ?? Defaults.instantEffort
         fixedCostObservation = bool("fixedCostObservation", Defaults.fixedCostObservation)
+        riskClassifier = bool("riskClassifier", Defaults.riskClassifier)
         evidenceBeforeDone = bool("evidenceBeforeDone", Defaults.evidenceBeforeDone)
         d.removeObject(forKey: "confirmValiditySeconds") // removed with Story 9.2: no time window any more
         cleanDictation = bool("cleanDictation", Defaults.cleanDictation)
@@ -435,7 +439,7 @@ final class AppSettings: ObservableObject {
             agentTimeout = Defaults.agentTimeout
             longSession = Defaults.longSession; sessionMaxRequests = Defaults.sessionMaxRequests
             instantLevel = Defaults.instantLevel; instantModel = Defaults.instantModel; instantEffort = Defaults.instantEffort
-            fixedCostObservation = Defaults.fixedCostObservation; evidenceBeforeDone = Defaults.evidenceBeforeDone
+            fixedCostObservation = Defaults.fixedCostObservation; riskClassifier = Defaults.riskClassifier; evidenceBeforeDone = Defaults.evidenceBeforeDone
             cleanDictation = Defaults.cleanDictation
             agentEngine = Defaults.agentEngine; engineFallback = Defaults.engineFallback
             codexPath = Defaults.codexPath; codexModel = Defaults.codexModel; codexFastModel = Defaults.codexFastModel

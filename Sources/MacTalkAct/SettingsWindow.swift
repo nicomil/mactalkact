@@ -704,6 +704,12 @@ private struct PrivacySection: View {
                 .font(.system(.callout, design: .monospaced)).frame(height: 90)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
         }
+        Card(title: "Secondo controllo delle azioni",
+             footer: "Le regole fisse chiedono conferma per Invia, Elimina, Paga e simili. Il modello Apple sul Mac guarda anche le altre azioni e può aggiungere una domanda quando un pulsante sconosciuto sembra mandare, pagare o eliminare qualcosa. Non toglie mai una domanda. Aggiunge fino a 0,7 s, solo alle azioni che le regole non riconoscono.") {
+            ToggleRow(title: "Usa il modello Apple come secondo controllo",
+                      help: OnDeviceRiskClassifier.isAvailable ? "Resta tutto sul Mac." : "Apple Intelligence non è attiva: il secondo controllo non può funzionare.",
+                      isOn: $settings.riskClassifier)
+        }
         Card(title: "Dati inviati a Claude e Codex",
              footer: "Le immagini (screenshot) non si possono mascherare: nelle finestre riservate non vengono fatte. La tua richiesta arriva così come l'hai detta. Le password non vengono mai lette dai campi password.") {
             ToggleRow(title: "Nascondi numeri di carta, IBAN, codici fiscali e codici segreti",
