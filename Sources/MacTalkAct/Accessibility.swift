@@ -110,28 +110,40 @@ enum AX {
 
     /// The label of the element under a screen point, or of its first labelled ancestor (a click by x/y).
     static func labelAt(_ point: CGPoint) -> String? {
+        let chain = labelsAt(point)
+        // The risky name wins wherever it is in the chain: «Laura» inside «Invia a Laura», a card
+        // dropped on a card of the «Cestino» column, an icon inside «Elimina conversazione».
+        return chain.first(where: Safety.isRiskyLabel) ?? chain.first
+    }
+
+    /// The names around a point, from the innermost element up to the page or the window (whose
+    /// title says nothing about the point and is left out). Scroll areas are crossed, not a stop.
+    static func labelsAt(_ point: CGPoint) -> [String] {
         var el: AXUIElement?
         guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &el) == .success,
-              var current = el else { return nil }
+              var current = el else { return [] }
         func own(_ e: AXUIElement) -> String? {
             [string(e, kAXTitleAttribute), string(e, kAXDescriptionAttribute)]
                 .compactMap { $0 }.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         }
-        for _ in 0..<5 {
+        var labels: [String] = []
+        func add(_ s: String?) {
+            guard let s, !s.trimmingCharacters(in: .whitespaces).isEmpty, !labels.contains(s) else { return }
+            labels.append(s)
+        }
+        for _ in 0..<8 {
             let r = role(current)
-            // The page or the window is not the target: their title says nothing about the point.
-            if ["AXWebArea", "AXWindow", "AXApplication", "AXScrollArea"].contains(r) { return nil }
-            if let label = own(current) { return label }
-            if r == "AXStaticText", let text = string(current, kAXValueAttribute), !text.isEmpty { return text }
-            // A group without a name (a column, a drop zone): its heading or first text names it.
+            if ["AXWebArea", "AXWindow", "AXApplication"].contains(r) { break }
+            if r != "AXScrollArea" { add(own(current)) }
+            if r == "AXStaticText" { add(string(current, kAXValueAttribute)) }
+            // A group without a name (a column, a drop zone): its heading names it.
             if r == "AXGroup", let heading = children(current).first(where: { ["AXHeading", "AXStaticText"].contains(role($0)) }) {
-                if let label = own(heading) ?? string(heading, kAXValueAttribute) ?? children(heading).compactMap({ string($0, kAXValueAttribute) }).first,
-                   !label.isEmpty { return label }
+                add(own(heading) ?? string(heading, kAXValueAttribute) ?? children(heading).compactMap { string($0, kAXValueAttribute) }.first)
             }
-            guard let parent = value(current, kAXParentAttribute) else { return nil }
+            guard let parent = value(current, kAXParentAttribute) else { break }
             current = parent as! AXUIElement
         }
-        return nil
+        return labels
     }
 
     /// A web area with children within the first nodes of the window (Electron/Chromium ready).

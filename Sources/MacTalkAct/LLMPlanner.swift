@@ -240,11 +240,19 @@ enum Safety {
         "compra", "ordina", "pubblica", "cestino", "send", "delete", "remove", "pay", "buy", "order",
         "submit", "post", "trash", "publish", "esci", "logout",
         // Story 9.4 (coverage): payments, bookings and signing out.
-        "pagamento", "checkout", "prenota", "prenotare", "disconnetti", "disconnettiti", "signout",
+        "checkout", "prenota", "prenotare", "disconnetti", "disconnettiti", "signout", "disiscriviti", "trasferisci", "purchase",
     ]
 
     /// Two-word labels whose words alone are harmless («Conferma», «ordine», «Log»).
-    private static let riskyPhrases = ["conferma ordine", "conferma l ordine", "log out", "sign out", "place order", "invia ordine"]
+    private static let safePhrases = ["ordina per", "sort by", "sort order", "metodi di pagamento", "metodo di pagamento"]
+    private static let riskyPhrases = [
+        "conferma ordine", "conferma l ordine", "effettua l ordine", "completa l ordine", "invia ordine", "place order", "ordina ora",
+        "annulla ordine", "annulla l ordine", "annulla abbonamento", "annulla l abbonamento",
+        "procedi al pagamento", "vai al pagamento", "conferma pagamento", "conferma il pagamento",
+        "conferma acquisto", "conferma l acquisto", "completa acquisto", "completa l acquisto", "procedi all acquisto",
+        "conferma prenotazione", "conferma la prenotazione", "book now",
+        "accetta invito", "accetta l invito", "log out", "sign out",
+    ]
 
     private static let riskyCombos = ["cmd+q", "cmd+delete", "cmd+backspace", "cmd+shift+d", "cmd+return", "cmd+enter",
                                       "cmd+shift+delete", "cmd+option+delete"]
@@ -252,6 +260,8 @@ enum Safety {
     static func isRiskyLabel(_ label: String) -> Bool {
         let n = Grammar.normalize(label.replacingOccurrences(of: "'", with: " "))
         let words = n.split(separator: " ").map(String.init)
+        // «Ordina per data», «Metodi di pagamento»: sorting a list or a settings page, not an order.
+        if safePhrases.contains(where: { n.hasPrefix($0) }) { return false }
         return words.contains(where: riskyWords.contains) || riskyPhrases.contains { (" " + n + " ").contains(" \($0) ") }
     }
 

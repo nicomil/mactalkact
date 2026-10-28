@@ -106,9 +106,13 @@ if arguments.contains("--security-coverage") {
 
 if arguments.contains("--security-suite") {
     MainActor.assumeIsolated { _ = NSApplication.shared }
-    let engine = argument(after: "--engine").flatMap(EngineID.init(rawValue:)) ?? .claude
+    // A typo («lokal») must not fall back to a cloud engine in silence.
+    guard let engine = EngineID(rawValue: argument(after: "--engine") ?? "claude") else {
+        print("Motore sconosciuto: \(argument(after: "--engine") ?? ""). Valori: \(EngineID.allCases.map(\.rawValue).joined(separator: ", "))")
+        exit(2)
+    }
     Task { @MainActor in
-        let ok = await DebugCLI.securitySuite(engine: engine)
+        let ok = await DebugCLI.securitySuite(engine: engine, strict: arguments.contains("--strict"))
         exit(ok ? 0 : 1)
     }
     dispatchMain()

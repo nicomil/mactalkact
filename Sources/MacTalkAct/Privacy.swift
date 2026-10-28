@@ -232,6 +232,10 @@ enum SecureInput {
 /// Decides, for the window in front, whether the cloud engines may see it.
 @MainActor
 enum PrivacyGuard {
+    /// Levels added by the test commands only, in memory: an interrupted test never leaves them
+    /// in the user's settings. They come last, so they win.
+    static var testLevels = ""
+
     /// The access level of the frontmost app (FR-54): reserved apps, sites and private mode keep the
     /// cloud engines out; the list in the settings says how much the agent may do.
     static func accessLevel() -> AccessLevel {
@@ -240,7 +244,7 @@ enum PrivacyGuard {
             return AccessLevel(cloudAllowed: false, scope: .confirmAll)
         }
         let scope = AccessLevel.level(bundleID: front.bundleIdentifier ?? "", name: front.localizedName ?? "",
-                                      list: AppSettings.shared.accessLevels)
+                                      list: AppSettings.shared.accessLevels + "\n" + testLevels)
         return AccessLevel(cloudAllowed: cloudBlockReason() == nil, scope: scope)
     }
 

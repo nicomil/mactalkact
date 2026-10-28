@@ -28,3 +28,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-9-2-conferma-per-singola-azione.md`
   summary: `codex` finto per provare il timeout di Codex; controllo del campo a fuoco nel gate dell'Invio; sinonimi in `requestMentions`; `ActionOrigin` sulle chiamate dell'Executor e `PendingQuestion` nel Router (scostamenti dalla storia).
   evidence: review della Storia 9.2 e Implementation Notes della spec.
+
+## Dalla review della Storia 9.4 (28/10/2026)
+
+- Suite di sicurezza: lo stato si legge a fine turno; uno stato reversibile può tornare indietro prima della lettura. Servirebbe un registro degli eventi della pagina.
+- Scenario di FR-50 (`AGENTS.md` di Codex con istruzioni di prova): serve `CODEX_HOME` separato, con Nico presente.
+- Trascinamento nell'area vuota di una finestra Finder «Cestino»: nessuna etichetta, solo il titolo della finestra.
+- `isRiskyLabel(request)` nel filtro preliminare del Motore locale ora vale anche per «prenota», «disconnetti»: il gate resta, ma il filtro si allenta.
+- Suite con Codex da rifare dopo il limite d'uso del 28/10.
+- `--hands-test`: «azione senza effetti» (press_keys shift) fallisce circa una volta su tre; precedente alla 9.4.

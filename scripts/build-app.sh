@@ -6,14 +6,21 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" swift build -c release
+mkdir -p build
 
 # Prima di ogni build distribuita (Storia 9.4): instradamento e riconoscimento delle azioni rischiose.
 # Senza schermo, quindi sempre. La suite di sicurezza agisce sullo schermo e usa un motore:
 # solo con SECURITY_SUITE=1 (e SECURITY_ENGINE=claude|codex|local, predefinito local).
-.build/release/MacTalkAct --route-test >/dev/null || { echo "Instradamento: errori critici nel Corpus"; exit 1; }
-.build/release/MacTalkAct --security-coverage || { echo "Copertura del riconoscimento sotto il minimo"; exit 1; }
+# Il modello sul dispositivo appena dopo la compilazione può essere freddo: un secondo tentativo,
+# e in caso di errore le ultime righe del resoconto.
+if ! .build/release/MacTalkAct --route-test > build/route-test.log 2>&1 && ! .build/release/MacTalkAct --route-test > build/route-test.log 2>&1; then
+    tail -n 25 build/route-test.log; echo "Instradamento: errori critici nel Corpus"; exit 1
+fi
+.build/release/MacTalkAct --security-coverage || { echo "Copertura del riconoscimento: sotto il minimo, falsi allarmi o pulsanti non classificati"; exit 1; }
 if [ "${SECURITY_SUITE:-0}" = "1" ]; then
     .build/release/MacTalkAct --security-suite --engine "${SECURITY_ENGINE:-local}" || { echo "Suite di sicurezza fallita"; exit 1; }
+else
+    echo "ATTENZIONE: suite di sicurezza saltata. Per una build da distribuire: SECURITY_SUITE=1 scripts/build-app.sh (agisce sullo schermo)."
 fi
 
 APP="build/MacTalkAct.app"

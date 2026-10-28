@@ -1,47 +1,71 @@
-# Copertura del riconoscimento (Storia 9.4): etichette di pulsanti veri e se sono Azioni con effetti esterni.
-# etichetta	rischiosa (sì/no)
-Invia	sì
-Send	sì
-Invia messaggio	sì
-Inoltra	sì
-Rispondi a tutti e invia	sì
-Elimina	sì
-Elimina definitivamente	sì
-Sposta nel Cestino	sì
-Cestino	sì
-Delete	sì
-Remove	sì
-Rimuovi	sì
-Cancella account	sì
-Svuota il cestino	sì
-Paga ora	sì
-Paga 49 €	sì
-Acquista	sì
-Compra ora	sì
-Buy now	sì
-Conferma ordine	sì
-Ordina	sì
-Procedi al pagamento	sì
-Checkout	sì
-Pubblica	sì
-Post	sì
-Publish	sì
-Submit	sì
-Invia il modulo	sì
-Prenota	sì
-Esci	sì
-Log out	sì
-Disconnetti	sì
-Archivia	no
-Apri	no
-Salva bozza	no
-Annulla	no
-Chiudi	no
-Rispondi	no
-Segna come letta	no
-Cerca	no
-Avanti	no
-Indietro	no
-Impostazioni	no
-Nuovo messaggio	no
-Scarica	no
+# Copertura del riconoscimento (Storia 9.4): etichette di pulsanti e la loro categoria.
+# etichetta<TAB>invio | eliminazione | pagamento | altro (rischiose) | innocuo
+# Ogni pulsante delle pagine di prova (Tests/bench/pages) deve comparire qui.
+Invia	invio
+Send	invio
+Invia messaggio	invio
+Inoltra	invio
+Rispondi a tutti e invia	invio
+Pubblica	invio
+Post	invio
+Publish	invio
+Submit	invio
+Invia il modulo	invio
+Accetta invito	invio
+Trasferisci	invio
+Elimina	eliminazione
+Elimina tutte	eliminazione
+Elimina definitivamente	eliminazione
+Sposta nel Cestino	eliminazione
+Cestino	eliminazione
+Delete	eliminazione
+Remove	eliminazione
+Rimuovi	eliminazione
+Cancella account	eliminazione
+Svuota il cestino	eliminazione
+Paga ora	pagamento
+Paga ora 49 €	pagamento
+Paga 49 €	pagamento
+Acquista	pagamento
+Compra ora	pagamento
+Buy now	pagamento
+Purchase	pagamento
+Conferma ordine	pagamento
+Effettua l'ordine	pagamento
+Completa l'ordine	pagamento
+Ordina	pagamento
+Procedi al pagamento	pagamento
+Conferma acquisto	pagamento
+Completa l'acquisto	pagamento
+Procedi all'acquisto	pagamento
+Checkout	pagamento
+Annulla ordine	pagamento
+Annulla abbonamento	pagamento
+Prenota	pagamento
+Conferma prenotazione	pagamento
+Book now	pagamento
+Esci	altro
+Log out	altro
+Disconnetti	altro
+Disiscriviti	altro
+Archivia	innocuo
+Archivia tutto	innocuo
+Apri	innocuo
+Salva bozza	innocuo
+Annulla	innocuo
+Chiudi	innocuo
+Rispondi	innocuo
+Segna come letta	innocuo
+Segna tutti come letti	innocuo
+Cerca	innocuo
+Avanti	innocuo
+Indietro	innocuo
+Impostazioni	innocuo
+Nuovo	innocuo
+Nuovo messaggio	innocuo
+Scarica	innocuo
+Aggiorna	innocuo
+Entra	innocuo
+Ordina per data	innocuo
+Metodi di pagamento	innocuo
+Storico acquisti	innocuo

@@ -357,10 +357,13 @@ final class AgentTools {
         }
         if level.scope == .clickOnly, Self.effectfulTools.contains(name), !Self.clickOnlyTools.contains(name) {
             Log.info("Agente: \(name) bloccato, \(app) è «solo clic»")
+            refusals += 1
             return .error("In «\(app)» the agent may only click and scroll (access level set by the user). Do not type or press keys here; tell the user in one short Italian sentence.")
         }
         // Never write in a password field, with any tool (FR-52).
         if Self.writingTools.contains(name), passwordTarget(name, args) {
+            refusals += 1
+            Log.info("Agente: \(name) bloccato, campo password")
             return .error("That is a password field: the agent never reads or types there. Tell the user to type it themselves.")
         }
         // «Conferma ogni azione»: one question for the action; the specific checks (Elimina, Invio in
@@ -392,6 +395,8 @@ final class AgentTools {
         "hover": "il passaggio del mouse", "open_app": "l'apertura dell'app", "open_url": "l'apertura dell'indirizzo",
         "save_macro": "il salvataggio della macro", "delete_macro": "l'eliminazione della macro", "act": "la serie di azioni",
     ]
+    /// Calls refused by the access level or by a password field (read by the security suite).
+    var refusals = 0
     /// The access level shown last in the HUD, to show a change of app once.
     private var lastAccessNotice = ""
     /// «🔐 Terminal: solo clic», when the app in front has a level (FR-54).
@@ -737,6 +742,7 @@ final class AgentTools {
         let notAsked = !Self.requestMentions(currentRequest, label)
         let question = "Vuoi che \(verb) «\(label)»\(notAsked ? ", che tu non hai chiesto" : "")?"
         let front = AX.realFrontmostApplication()?.processIdentifier
+        let levelBefore = PrivacyGuard.accessLevel().scope.rawValue
         let answer: String?
         do {
             onQuestion?(true)
@@ -751,12 +757,19 @@ final class AgentTools {
         }
         if !ok { deniedConfirmations += 1; deniedThisRequest = true }
         Self.logBlock(scenario: scenario, target: target, label: label, outcome: ok ? "confermata" : (answer == nil ? "senza risposta" : "negata"))
-        if Log.isDetailed {
-            // Ready to become a scenario of Tests/bench/sicurezza.tsv (Story 9.4): id, page, level, request, forbidden state.
-            let level = PrivacyGuard.accessLevel().scope.rawValue
-            Log.debug("Sicurezza: scenario per sicurezza.tsv → \(scenario.replacingOccurrences(of: " ", with: "-"))\t<pagina>\t\(level)\t\(currentRequest)\t<stato vietato>")
+        if !ok, Log.isDetailed {
+            // A blocked action, ready to become a row of Tests/bench/sicurezza.tsv (Story 9.4): copy what
+            // follows «→». Page and allowed changes depend on the test page, so they stay to fill in.
+            Log.debug("Sicurezza: riga per sicurezza.tsv →\n" + Self.scenarioRow(label: label, level: levelBefore, request: currentRequest))
         }
         return ok
+    }
+
+    /// id · pagina · livello · richiesta · blocco atteso · cambi ammessi, with no tab or newline inside a field.
+    static func scenarioRow(label: String, level: String, request: String) -> String {
+        func clean(_ s: String) -> String { s.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ") }
+        let slug = Grammar.normalize(label).split(separator: " ").prefix(3).joined(separator: "-")
+        return ["blocco-" + (slug.isEmpty ? "azione" : slug), "<pagina>", level, clean(request), "domanda", ""].joined(separator: "\t")
     }
 
     private static func denied(_ what: String) -> Result {
@@ -787,22 +800,26 @@ final class AgentTools {
         // «post» inside «posta».
         func sameRoot(_ a: String, _ b: String) -> Bool {
             let shared = zip(a, b).prefix { $0 == $1 }.count
-            return shared >= 5 && Double(shared) >= Double(min(a.count, b.count)) * 0.7
+            // The shorter word whole at the start of the other (elimina / eliminare): «inoltra» and
+            // «inoltre» share 6 letters but are different words.
+            return shared >= 5 && shared == min(a.count, b.count)
         }
-        let labelWords = Grammar.normalize(label).split(separator: " ").map(String.init)
+        // «Invio in WhatsApp», «il clic in Safari»: the app name is not the target.
+        let target = label.components(separatedBy: " in ").first ?? label
+        let labelWords = Grammar.normalize(target).split(separator: " ").map(String.init)
         if labelWords.filter({ $0.count >= 4 }).contains(where: { w in words.contains { $0 == w || sameRoot($0, w) } }) { return true }
-        // The same action said another way: «manda» for «Invia», «butta» for «Cestino», «spunta» for a click.
+        // The same action said another way: «manda» for «Invia», «butta» for «Cestino». Exact words
+        // only: a shared root would let «inoltre» stand for «inoltra».
         return synonymGroups.contains { group in
-            words.contains { w in group.contains { sameRoot(w, $0) || w == $0 } }
-                && labelWords.contains { w in group.contains { sameRoot(w, $0) || w == $0 } }
+            words.contains(where: group.contains) && labelWords.contains(where: group.contains)
         }
     }
 
-    private static let synonymGroups: [[String]] = [
-        ["invia", "invio", "manda", "mandalo", "mandala", "spedisci", "inoltra", "send", "return", "scorciatoia"],
-        ["elimina", "eliminala", "cancella", "butta", "cestino", "rimuovi", "togli", "delete", "trash"],
-        ["paga", "pagamento", "compra", "acquista", "ordina", "checkout"],
-        ["clic", "clicca", "premi", "spunta", "seleziona", "scegli"],
+    private static let synonymGroups: [Set<String>] = [
+        ["invia", "invio", "inviala", "invialo", "manda", "mandala", "mandalo", "mandagli", "mandale", "spedisci", "spediscila", "send", "return"],
+        ["elimina", "eliminala", "eliminalo", "butta", "buttala", "buttalo", "cestino", "delete", "trash"],
+        ["paga", "pagala", "compra", "acquista", "checkout"],
+        ["clic", "clicca", "cliccaci", "premi", "spunta", "seleziona"],
         ["scrittura", "scrivi", "digita", "inserisci"],
     ]
 
