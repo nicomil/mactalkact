@@ -35,7 +35,6 @@
 - Scenario di FR-50 (`AGENTS.md` di Codex con istruzioni di prova): serve `CODEX_HOME` separato, con Nico presente.
 - Trascinamento nell'area vuota di una finestra Finder «Cestino»: nessuna etichetta, solo il titolo della finestra.
 - `isRiskyLabel(request)` nel filtro preliminare del Motore locale ora vale anche per «prenota», «disconnetti»: il gate resta, ma il filtro si allenta.
-- Suite con Codex da rifare dopo il limite d'uso del 28/10.
 - `--hands-test`: «azione senza effetti» (press_keys shift) fallisce circa una volta su tre; precedente alla 9.4.
 
 ## Dalla review della Storia 9.5 (28/10/2026)
