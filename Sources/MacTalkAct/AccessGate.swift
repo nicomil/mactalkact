@@ -279,7 +279,7 @@ final class AccessGate {
     /// Keys of this request whose cached verdict was taken in advance, for the log («dalla cache (anticipato)»).
     private var anticipatedKeys: Set<String> = []
 
-    /// The budget of one verdict (0.9 s): a click waits for a judgement in progress only for what is
+    /// The budget of one verdict (1.2 s): a click waits for a judgement in progress only for what is
     /// left of it.
     private var judgeBudget: Double { Self.seconds(riskClassifier.budget) }
 

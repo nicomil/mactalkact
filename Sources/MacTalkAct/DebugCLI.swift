@@ -2566,7 +2566,7 @@ extension DebugCLI {
     /// `Tests/bench/classificatore.tsv`, which the fixed rules do not recognize. It fails below 8/10
     /// of the external actions caught or above 2 false alarms on the harmless ones; timeouts and
     /// errors count as missed, never as right. No screen; the model is warm (the real use is not).
-    static func riskClassifierTest(budget: Double = 0.9, path: String = "Tests/bench/classificatore.tsv", batch: Int = 0) async -> Bool {
+    static func riskClassifierTest(budget: Double = 1.2, path: String = "Tests/bench/classificatore.tsv", batch: Int = 0) async -> Bool {
         guard OnDeviceRiskClassifier.isAvailable else { print("Modello Apple non disponibile (Apple Intelligence spenta?)"); return false }
         var rows: [[String]] = []
         for raw in ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(whereSeparator: \.isNewline) where !raw.hasPrefix("#") {
@@ -3771,15 +3771,15 @@ extension DebugCLI {
             + " · compito mediana \(seconds(quickRows.map(\.total), "%.1f s")) / \(seconds(modelRows.map(\.total), "%.1f s"))"
             + " · «Risposte rapide» \(AppSettings.shared.quickReplies ? "accese" : "spente")"
         print("  risposte composte dall'app: \(quickText)")
-        // NFR-16 (Story 10.3): on the positive tasks no timeout of the second layer, at most 0.3 s per action at the 90th percentile.
+        // NFR-16 (revised with Nico on 28/10, ricerca §36): on the positive tasks no timeout of the second layer, at most 1.0 s per judged action at the 90th percentile.
         let positives = measured.filter(\.ok)
         let layerCosts = positives.flatMap(\.secondLayer.costs)
         let layerTimeouts = positives.map(\.secondLayer.timeouts).reduce(0, +)
         func total(_ k: KeyPath<AccessGate.SecondLayerStats, Int>) -> Int { positives.map { $0.secondLayer[keyPath: k] }.reduce(0, +) }
-        let layerText = String(format: "%d azioni giudicate su %d compiti riusciti · %d verdetti in anticipo (%d senza verdetto, %d fermati per un clic) · %d dalla cache anticipata · %d attese · %d giudicati al clic · costo per azione mediana %.2f s, 90° %.2f s · timeout al clic %d, in anticipo %d · NFR-16 (zero timeout, 90° ≤ 0,3 s): %@",
+        let layerText = String(format: "%d azioni giudicate su %d compiti riusciti · %d verdetti in anticipo (%d senza verdetto, %d fermati per un clic) · %d dalla cache anticipata · %d attese · %d giudicati al clic · costo per azione mediana %.2f s, 90° %.2f s · timeout al clic %d, in anticipo %d · NFR-16 (zero timeout, 90° ≤ 1,0 s): %@",
                                layerCosts.count, positives.count, total(\.anticipated), total(\.anticipatedFailed), total(\.cancelled), total(\.hits),
                                total(\.waited), total(\.misses), median(layerCosts), p90(layerCosts), layerTimeouts, total(\.anticipatedTimeouts),
-                               layerCosts.isEmpty ? "non misurato" : (layerTimeouts == 0 && p90(layerCosts) <= 0.3 ? "rispettato" : "NON rispettato"))
+                               layerCosts.isEmpty ? "non misurato" : (layerTimeouts == 0 && p90(layerCosts) <= 1.0 ? "rispettato" : "NON rispettato"))
         print("  secondo strato: \(layerText)")
         print("  FoundationModels nel secondo strato (tutti i compiti): \(ran.map(\.secondLayer.concurrentStarts).reduce(0, +)) giudizi partiti mentre un altro era in corso · \(ran.map(\.secondLayer.errors).reduce(0, +)) errori (rate limit, guardrail)")
         print("  somma delle fasi = totale entro 0,2 s: \(ran.allSatisfy(\.sumOK) ? "sì, su ogni compito" : "NO su \(ran.filter { !$0.sumOK }.map(\.task.id).joined(separator: ", "))")")

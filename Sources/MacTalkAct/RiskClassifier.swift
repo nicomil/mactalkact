@@ -44,8 +44,9 @@ struct OnDeviceRiskCodes {
 /// only add a confirmation, never remove one. Offline and free; the text stays on the Mac.
 @MainActor
 final class OnDeviceRiskClassifier {
-    /// Beyond this the verdict is «timeout» and nothing changes (FR-55). 0.9 s rather than the 0.7 s of
-    /// the story: the model answers in 0.71 s (median) and 0.77 s (90th percentile) on this Mac.
+    /// Beyond this the verdict is «timeout» and nothing changes (FR-55). 1.2 s (decided by Nico on
+    /// 28/10, ricerca §36): at 0.9 s a Banco had 2 to 5 timeouts at the click, and a timeout lets the
+    /// click pass without a verdict. The model answers in about 0.75 s (median) and 0.92 s (90th percentile).
     let budget: Duration
     private var ready: LanguageModelSession?
 
@@ -63,7 +64,7 @@ final class OnDeviceRiskClassifier {
         return false
     }
 
-    init(budget: Duration = .milliseconds(900)) {
+    init(budget: Duration = .milliseconds(1200)) {
         self.budget = budget
     }
 

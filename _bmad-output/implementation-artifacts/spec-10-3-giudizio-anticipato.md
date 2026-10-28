@@ -58,7 +58,7 @@ context:
 
 **Acceptance Criteria:**
 - Given `--selftest`, when finisce, then ogni riga della matrice è coperta e verde.
-- Given il Banco con Claude (solo dopo il «via» di Nico), when misuro sui compiti positivi, then zero timeout del secondo strato e al massimo 0,3 s in più per azione al 90° percentile (NFR-16).
+- Given il Banco con Claude (solo dopo il «via» di Nico), when misuro sui compiti positivi, then zero timeout del secondo strato e al massimo 1,0 s per azione giudicata al 90° percentile, rivista il 28/10 sera (NFR-16).
 - Given `--security-suite --engine claude` con secondo strato acceso e con `--no-risk-classifier` (dopo il «via»), when finiscono, then passano uguali (NFR-14).
 
 ## Verification

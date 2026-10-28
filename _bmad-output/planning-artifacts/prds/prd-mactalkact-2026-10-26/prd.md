@@ -635,7 +635,7 @@ Misura di due strade per cercare in Mail sotto il secondo su una casella grande:
 - Un report con mediana e massimo su 5 ricerche per strada, la casella invariata e nessuna finestra aperta.
 
 **Feature-specific NFRs:**
-- **NFR-16 Secondo strato sotto carico.** Zero timeout sui compiti positivi del Banco e al massimo 0,3 s in più per azione al 90° percentile; SM-C7 (≤ 0,9 s) resta il tetto.
+- **NFR-16 Secondo strato sotto carico.** Zero timeout sui compiti positivi del Banco e al massimo 1,0 s per azione giudicata al 90° percentile; SM-C7 (≤ 1,2 s) resta il tetto. *(Rivista con Nico il 28/10/2026: prima 0,3 s. Il giudizio anticipato e il giudizio a gruppi non bastano per scendere sotto il costo di un giudizio singolo, circa 0,75 s; ricerca §32, §35, §36.)*
 - **NFR-17 Nessuna regressione di sicurezza.** Suite di sicurezza, copertura del riconoscimento, verifica del Router e prova delle mani restano verdi dopo ogni intervento di §4.12.
 
 ## 5. Requisiti non funzionali trasversali
@@ -695,7 +695,7 @@ Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modifica
 - **SM-C4 Precisione del Banco:** i 25 compiti del Banco del 27/10 restano riusciti con Claude dopo gli interventi di §4.9. Bilancia SM-8.
 - **SM-C5 Conferme per compito:** il numero di conferme per compito non aumenta per i compiti con una sola Azione con effetti esterni. Bilancia SM-10.
 - **SM-C6 Turni per compito:** sui compiti a una chiamata del Banco i turni non crescono di più di 1 con FR-46. Bilancia SM-C4.
-- **SM-C7 Azioni legittime bloccate o messe in dubbio:** zero sui compiti positivi del Banco; il Classificatore on-device aggiunge al massimo 0,9 s per azione (deciso da Nico il 28/10/2026; i pulsanti già giudicati sono immediati); non più di 3 a settimana nel log d'uso [ASSUMPTION]; il Corpus conta le Frasi valide che FR-48 manderebbe a «chiedi» (zero). Bilancia SM-9 e SM-10.
+- **SM-C7 Azioni legittime bloccate o messe in dubbio:** zero sui compiti positivi del Banco; il Classificatore on-device aggiunge al massimo 1,2 s per azione (deciso da Nico il 28/10/2026, prima 0,9 s, per togliere i timeout che lasciavano passare il clic senza verdetto; i pulsanti già giudicati sono immediati); non più di 3 a settimana nel log d'uso [ASSUMPTION]; il Corpus conta le Frasi valide che FR-48 manderebbe a «chiedi» (zero). Bilancia SM-9 e SM-10.
 
 ## 9. Domande aperte
 

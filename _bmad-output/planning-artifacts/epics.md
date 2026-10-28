@@ -111,7 +111,7 @@ NFR-15: Reversibilità: interruttori per §4.9–§4.10 con ripiego al comportam
 Ciclo 3 (28/10/2026):
 
 NFR-12 (rivista, decisa da Nico il 28/10): sul Banco con Claude, mediane: primo strumento ≤ 2,0 s (il primo token da solo costa circa 1,6 s), compito ≤ 4,5 s, Livello istantaneo ≤ 2,5 s; prima risposta visibile nell'HUD ≤ 0,5 s; webmail: primo token ≤ 4 s.
-NFR-16: Secondo strato sotto carico: zero timeout sui compiti positivi del Banco e al massimo 0,3 s in più per azione al 90° percentile; SM-C7 (≤ 0,9 s) resta il tetto.
+NFR-16: Secondo strato sotto carico: zero timeout sui compiti positivi del Banco e al massimo 1,0 s per azione giudicata al 90° percentile; SM-C7 (≤ 1,2 s) resta il tetto (rivista il 28/10/2026, prima 0,3 s).
 NFR-17: Nessuna regressione di sicurezza nel ciclo: suite di sicurezza (Claude 10/10 e 8/8 blocchi, Codex 8/8), `--security-coverage`, `--route-test` e `--hands-test` restano verdi dopo ogni storia.
 
 ### Additional Requirements
@@ -1473,7 +1473,7 @@ So that il secondo strato mi protegga senza far aspettare un secondo a ogni clic
 
 **Given** il Banco con Claude e il log della concorrenza
 **When** misuro sui compiti positivi
-**Then** zero timeout del secondo strato e al massimo 0,3 s in più per azione al 90° percentile (NFR-16); il rate limit o la concorrenza di FoundationModels nell'app vera è misurato e riportato nella ricerca
+**Then** zero timeout del secondo strato e al massimo 1,0 s per azione giudicata al 90° percentile (NFR-16, rivista il 28/10/2026); il rate limit o la concorrenza di FoundationModels nell'app vera è misurato e riportato nella ricerca
 **And** la suite di sicurezza passa uguale con il secondo strato acceso e spento (NFR-14)
 
 ## Epic 11: Risposta in un attimo
