@@ -39,7 +39,7 @@
 
 ## Dalla review della Storia 9.5 (28/10/2026)
 
-- Decisione di Nico: SM-C7 non rispettato (circa 0,9 s per clic su pulsanti non rischiosi, un timeout su tre sotto carico). Opzioni: budget più alto, secondo strato spento per default, o accettare il costo.
+- ~~Decisione SM-C7~~: Nico, 28/10: acceso, budget 0,9 s, soglia della PRD aggiornata.
 - Secondo strato e clic per coordinate: il punto può cambiare durante il giudizio; le regole fisse ricontrollano al clic.
 - FoundationModels dentro l'app (LSUIElement, in background mentre l'agente lavora): rate limit e concorrenza col Motore locale da misurare nell'app vera.
 - La Corsia locale non passa dal secondo strato (manca `ActionOrigin`).
@@ -49,3 +49,7 @@
 - Webmail: primo token a 12,7 s su Gmail (scalata dall'istantaneo 6,1 s, avvio MCP 3,5 s).
 - Mail via Apple Events: la ricerca su una casella da 45.915 messaggi richiede 3,43 s, oltre il limite di 3 s dello spike.
 - FR-50: il controllo dell'`AGENTS.md` non copre istruzioni messe in altri file che Codex potrebbe leggere in versioni future; da ricontrollare quando cambia la versione di `codex`.
+
+## Storia da pianificare nel prossimo ciclo (decisa da Nico il 28/10/2026)
+
+- **AccessGate unico con ActionOrigin (AD-21, AD-22).** Oggi il gate, i livelli di accesso per app e il secondo strato vivono in `AgentTools`: la Corsia locale (comandi semplici senza agente) non ci passa. Costruire `AccessGate` con `ActionOrigin` (`.user`, `.model`) e `ConfirmationGrant`, usato da agente e Corsia locale, e spostare lì i controlli di 9.2, 9.3 e 9.5 senza cambiarne il comportamento (la suite di sicurezza e `--hands-test` sono la rete).

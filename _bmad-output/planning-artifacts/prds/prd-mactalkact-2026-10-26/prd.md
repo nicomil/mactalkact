@@ -571,7 +571,7 @@ L'elenco è modificabile nelle impostazioni e il livello in vigore è visibile n
 
 #### FR-55: Classificatore on-device come secondo strato
 
-Il Classificatore on-device valuta, prima che l'azione parta e con un budget di tempo (0,7 s [ASSUMPTION]), solo le Azioni con effetti per le quali il Gate dell'esecutore non ha già chiesto conferma, e se le giudica con effetti esterni impone una conferma; non può mai sbloccare un'azione che il Gate blocca. Le sue decisioni e la sua latenza sono nel log; la latenza è una delle fasi misurate da FR-41.
+Il Classificatore on-device valuta, prima che l'azione parta e con un budget di tempo (0,9 s: deciso da Nico il 28/10/2026 dopo la misura, il modello risponde in circa 0,72 s; prima 0,7 s [ASSUMPTION]), solo le Azioni con effetti per le quali il Gate dell'esecutore non ha già chiesto conferma, e se le giudica con effetti esterni impone una conferma; non può mai sbloccare un'azione che il Gate blocca. Le sue decisioni e la sua latenza sono nel log; la latenza è una delle fasi misurate da FR-41.
 
 **Conseguenze (verificabili):**
 - Con il classificatore disattivato la suite di sicurezza (NFR-14) passa comunque.
@@ -637,7 +637,7 @@ Supporto multilingue, sincronizzazione tra Mac, interfaccia grafica per modifica
 - **SM-C4 Precisione del Banco:** i 25 compiti del Banco del 27/10 restano riusciti con Claude dopo gli interventi di §4.9. Bilancia SM-8.
 - **SM-C5 Conferme per compito:** il numero di conferme per compito non aumenta per i compiti con una sola Azione con effetti esterni. Bilancia SM-10.
 - **SM-C6 Turni per compito:** sui compiti a una chiamata del Banco i turni non crescono di più di 1 con FR-46. Bilancia SM-C4.
-- **SM-C7 Azioni legittime bloccate o messe in dubbio:** zero sui compiti positivi del Banco; non più di 3 a settimana nel log d'uso [ASSUMPTION]; il Corpus conta le Frasi valide che FR-48 manderebbe a «chiedi» (zero). Bilancia SM-9 e SM-10.
+- **SM-C7 Azioni legittime bloccate o messe in dubbio:** zero sui compiti positivi del Banco; il Classificatore on-device aggiunge al massimo 0,9 s per azione (deciso da Nico il 28/10/2026; i pulsanti già giudicati sono immediati); non più di 3 a settimana nel log d'uso [ASSUMPTION]; il Corpus conta le Frasi valide che FR-48 manderebbe a «chiedi» (zero). Bilancia SM-9 e SM-10.
 
 ## 9. Domande aperte
 

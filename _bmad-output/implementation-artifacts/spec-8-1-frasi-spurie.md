@@ -67,6 +67,8 @@ context: []
 - In un campo di testo il campo è il bersaglio: «Modifica la domanda» resta all'Agente.
 - Banco: 5 Frasi spurie da 4,8 s di mediana con Claude a 1,6 s col solo Router; Corpus 160/160.
 
+- **Confermato da Nico il 28/10/2026:** a mani libere i comandi brevi senza bersaglio chiaro fanno una domanda invece di agire.
+
 ## Spec Change Log
 
 ## Review Triage Log

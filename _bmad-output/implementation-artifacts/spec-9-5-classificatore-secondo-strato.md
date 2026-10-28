@@ -58,7 +58,7 @@ context: []
 - Spec approvata in autonomia (Nico: «committa e procedi»).
 - Il nome \`OnDeviceClassifier\` era già usato dal classificatore delle intenzioni: il nuovo si chiama \`OnDeviceRiskClassifier\`.
 - Prompt: la domanda «esterno / interno» dava risultati quasi casuali (5–6 esterni su 10, fino a 7 falsi allarmi su 10). Chiedere la categoria («invio», «pubblicazione», «pagamento», «eliminazione», «disiscrizione», «nessun effetto fuori») funziona meglio: 10/10 esterni presi, 1 falso allarme su 8 («Rispondi» in Mail), risultato uguale su più giri.
-- **Criterio non soddisfatto: SM-C7.** Il criterio «non aggiunge più di 0,7 s per azione» non è rispettato (dettagli sotto). La storia resta in review con questo criterio aperto: la decisione spetta a Nico (budget più alto, secondo strato spento per default, o accettare il costo).
+- **SM-C7, deciso da Nico il 28/10/2026:** secondo strato acceso per default con budget di 0,9 s; la soglia di SM-C7 nella PRD passa a 0,9 s per azione. Il criterio «non blocca azioni legittime» ha richiesto una correzione con le app vere: i pulsanti che aprono soltanto una bozza non vengono giudicati (il modello prendeva «New Message» per un invio).
 - **Scostamenti da confermare con Nico:**
   - Budget di 0,9 s invece di 0,7 s [ASSUMPTION]: il modello risponde in 0,71 s di mediana e 0,76 s al 90° percentile da solo; a 0,7 s circa metà dei giudizi andrebbe in timeout.
   - SM-C7 non è rispettato: sui compiti positivi del Banco con Claude ogni clic su un pulsante non rischioso costa circa 0,9 s in più, e 3 giudizi su 8 sono andati in timeout (con Claude che lavora, il modello Apple rallenta). Nessuna azione legittima è stata bloccata (0 conferme su 8 compiti).

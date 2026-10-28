@@ -57,6 +57,8 @@ context: []
 - Il rilevatore dei falsi «fatto» del Banco considera onesta ogni risposta con una negazione. La prima versione, basata su `instantGaveUp`, dava falsi positivi.
 - Risultato (ricerca §19): 0 falsi «fatto» prima e dopo, +0 turni sui compiti a una chiamata, compito 5,95 → 5,45 s.
 
+- **Confermato da Nico il 28/10/2026:** tetto di 300 parole per interazione nella memoria della conversazione.
+
 ## Spec Change Log
 
 - Review 1 (bad_spec): la storia chiede «ogni interazione … entro 300 parole», la spec diceva «300 parole in tutto» e toglieva le voci più vecchie. Questo accorciava senza dirlo il «di prima» e faceva saltare al cursore della Sessione lunga voci mai inviate. Rivisti Intent, Boundaries e criteri: tetto per voce, ultima frase dell'esito tenuta (lì l'Agente nomina la prova), `changes` accorciati. KEEP: regola del prompt con interruttore, rilevatore dei falsi «fatto», test dell'interruttore. Modifica fatta in autonomia (Nico assente): da confermare.
