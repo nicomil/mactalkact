@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Talks to Codex through `codex exec` with the user's ChatGPT login (FR-26).
@@ -87,6 +88,43 @@ final class CodexCLI: @unchecked Sendable {
         p.waitUntilExit()
         let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         return p.terminationStatus == 0 && text.lowercased().contains("logged in") && !text.lowercased().contains("not logged in")
+    }
+
+    // MARK: Global instructions (FR-50)
+
+    /// A global instruction file of Codex with text in it.
+    struct InstructionFile: Equatable {
+        let path: String
+        let text: String
+        /// SHA-256 of the text: what the user approves in the settings.
+        let hash: String
+        var shown: String { path.replacingOccurrences(of: NSHomeDirectory(), with: "~") }
+    }
+
+    static func codexHome() -> String {
+        ProcessInfo.processInfo.environment["CODEX_HOME"].flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory() + "/.codex"
+    }
+
+    /// Codex reads `$CODEX_HOME/AGENTS.md` (and `AGENTS.override.md`) as instructions even with
+    /// `--ignore-user-config` and `project_doc_max_bytes=0` (verified on 0.164 with a canary, 28/10/2026).
+    /// The project files in the working directory are ignored.
+    static func instructionFiles(home: String? = nil) -> [InstructionFile] {
+        let dir = home ?? codexHome()
+        return ["AGENTS.override.md", "AGENTS.md"].compactMap { name in
+            let path = (dir as NSString).appendingPathComponent(name)
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            let hash = SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+            return InstructionFile(path: path, text: text, hash: hash)
+        }
+    }
+
+    /// Whoever can write those files could give orders to the agent (FR-50): Codex is used only when
+    /// each of them is empty or has exactly the text the user approved. One changed character and
+    /// it is blocked again.
+    static func instructionFilesProblem(home: String? = nil, approved: Set<String> = []) -> String? {
+        guard let file = instructionFiles(home: home).first(where: { !approved.contains($0.hash) }) else { return nil }
+        return "\(file.shown) contiene istruzioni non approvate: Codex le leggerebbe come ordini. Approvale nelle impostazioni di Codex o svuota il file."
     }
 
     // MARK: Arguments

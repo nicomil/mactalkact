@@ -686,7 +686,7 @@ final class AgentTools {
 
         case "press_keys":
             guard let keys = a["keys"] as? String else { return .error("Missing keys") }
-            if Safety.isRiskyKeys(keys), !(await gate(.shortcut(keys: keys, window: Self.frontWindowTitle()), label: keys, verb: "prema")) {
+            if Safety.isRiskyKeys(keys, app: AX.frontmostApplication()?.bundleIdentifier), !(await gate(.shortcut(keys: keys, window: Self.frontWindowTitle()), label: keys, verb: "prema")) {
                 return Self.denied(keys)
             }
             if Self.containsSendKey(keys), let app = Self.composerApp(),

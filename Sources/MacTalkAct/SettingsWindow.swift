@@ -465,7 +465,7 @@ private struct AgentSection: View {
         .onChange(of: settings.claudePath) { _, _ in claudeFound = settings.claudeExecutable }
 
         Card(title: "Codex",
-             footer: "Usa il comando «codex» con l'accesso di ChatGPT. Codex vede solo gli strumenti di MacTalkAct: niente terminale, file, browser o configurazione personale.") {
+             footer: "Usa il comando «codex» con l'accesso di ChatGPT. Codex vede solo gli strumenti di MacTalkAct: niente terminale, file, browser o configurazione personale. Legge però le istruzioni di ~/.codex/AGENTS.md: se il file ha testo, Codex si usa solo dopo averlo approvato qui, e un cambiamento lo blocca di nuovo.") {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Percorso del comando «codex»")
                 TextField("vuoto = cerca da solo", text: $settings.codexPath)
@@ -474,6 +474,25 @@ private struct AgentSection: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             .onChange(of: settings.codexPath) { _, _ in codexFound = settings.codexExecutable }
+            ForEach(CodexCLI.instructionFiles().filter { !settings.approvedCodexInstructionSet.contains($0.hash) }, id: \.hash) { file in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Istruzioni non approvate in \(file.shown): Codex non si usa finché non le approvi.")
+                        .font(.caption).foregroundStyle(.orange)
+                    Text(String(file.text.prefix(600)))
+                        .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        .padding(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    Button("Approva questo contenuto") {
+                        settings.approvedCodexInstructions += (settings.approvedCodexInstructions.isEmpty ? "" : "\n") + file.hash
+                        context.recheckEngines()
+                    }
+                }
+            }
+            if !settings.approvedCodexInstructions.isEmpty {
+                Button("Revoca le approvazioni delle istruzioni di Codex") {
+                    settings.approvedCodexInstructions = ""
+                    context.recheckEngines()
+                }
+            }
             Picker("Compiti lunghi", selection: $settings.codexModel) { ForEach(codexModels, id: \.0) { Text($0.1).tag($0.0) } }
             Picker("Sforzo dei compiti lunghi", selection: $settings.codexDeepEffort) { ForEach(efforts, id: \.0) { Text($0.1).tag($0.0) } }
                 .pickerStyle(.segmented)

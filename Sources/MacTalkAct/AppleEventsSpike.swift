@@ -73,6 +73,14 @@ enum AppleEventsSpike {
                      set m to make new outgoing message with properties {subject:"Banco MacTalkAct spike", content:"prova", visible:false}
                      tell m to make new to recipient with properties {address:"prova@example.invalid"}
                      close m saving no
+                     -- Mail saves the draft in the account by itself: remove it, one message at a time.
+                     repeat with a in accounts
+                         try
+                             repeat with d in (every message of (mailbox "Drafts" of a) whose subject is "Banco MacTalkAct spike")
+                                 delete d
+                             end repeat
+                         end try
+                     end repeat
                  on error msg number n
                      try
                          delete (every outgoing message whose subject is "Banco MacTalkAct spike")

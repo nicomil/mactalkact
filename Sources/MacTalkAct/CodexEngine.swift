@@ -37,6 +37,10 @@ final class CodexEngine: AgentEngine {
             setAvailability(.missing)
             return
         }
+        if let problem = CodexCLI.instructionFilesProblem(approved: settings.approvedCodexInstructionSet) {
+            setAvailability(.unavailable(problem))
+            return
+        }
         Task.detached(priority: .utility) {
             let logged = CodexCLI.isLoggedIn(executable: path)
             await MainActor.run { [weak self] in
@@ -78,6 +82,11 @@ final class CodexEngine: AgentEngine {
 
     func run(_ request: AgentRequest) async throws -> String {
         guard let access = toolAccess() else { throw AgentEngineError.failed("server strumenti non avviato") }
+        // Checked at every request: a file written after the start must not be read as orders (FR-50).
+        if let problem = CodexCLI.instructionFilesProblem(approved: settings.approvedCodexInstructionSet) {
+            setAvailability(.unavailable(problem))
+            throw AgentEngineError.failed("Codex: \(problem)")
+        }
         let custom = settings.codexPath
         cli.executablePath = { CodexCLI.locate(custom: custom) }
         let config = CodexCLI.Config(model: model(for: request.level), effort: effort(for: request.level),

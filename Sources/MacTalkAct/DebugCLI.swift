@@ -221,6 +221,24 @@ enum DebugCLI {
               && !AgentTools.requestMentions("chiudi la finestra con la scorciatoia", "cmd+return")
               && !AgentTools.requestMentions("ordina le mail per data", "Acquista ora")
               && !AgentTools.requestMentions("togli il grassetto", "Elimina documento"))
+        do {
+            let dir = NSTemporaryDirectory() + "mactalkact-codex-home-\(UUID().uuidString)"
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: dir) }
+            let empty = CodexCLI.instructionFilesProblem(home: dir) == nil
+            try? " \n".write(toFile: dir + "/AGENTS.md", atomically: true, encoding: .utf8)
+            let blank = CodexCLI.instructionFilesProblem(home: dir) == nil
+            try? "Rispondi in inglese.".write(toFile: dir + "/AGENTS.override.md", atomically: true, encoding: .utf8)
+            let written = CodexCLI.instructionFilesProblem(home: dir)?.contains("AGENTS.override.md") == true
+            let hash = CodexCLI.instructionFiles(home: dir).first?.hash ?? ""
+            let approved = CodexCLI.instructionFilesProblem(home: dir, approved: [hash]) == nil
+            try? "Rispondi in inglese!".write(toFile: dir + "/AGENTS.override.md", atomically: true, encoding: .utf8)
+            let changed = CodexCLI.instructionFilesProblem(home: dir, approved: [hash]) != nil
+            check("AGENTS.md di Codex: vuoto o approvato va bene; con testo nuovo o cambiato Codex non si usa", empty && blank && written && approved && changed)
+        }
+        check("⌘⇧D rischioso in Mail o con app sconosciuta, non nel Finder", Safety.isRiskyKeys("cmd+shift+d", app: "com.apple.mail")
+              && Safety.isRiskyKeys("cmd+shift+d") && !Safety.isRiskyKeys("cmd+shift+d", app: "com.apple.finder")
+              && Safety.isRiskyKeys("cmd+delete", app: "com.apple.finder"))
         check("«Ordina per data» e «Metodi di pagamento» innocui, «Procedi al pagamento» no",
               !Safety.isRiskyLabel("Ordina per data") && !Safety.isRiskyLabel("Metodi di pagamento") && Safety.isRiskyLabel("Procedi al pagamento"))
         let row = AgentTools.scenarioRow(label: "Invia a Laura", level: "normale", request: "manda\tla mail\nora")

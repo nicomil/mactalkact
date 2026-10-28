@@ -138,22 +138,37 @@ enum BenchFixtures {
         }
         if name == "Mail" {
             // Drafts and compose windows of the Bench only, never sent.
-            osascript("""
-            tell application "Mail"
-                close (every window whose name contains "\(marker)") saving no
-                delete (every outgoing message whose subject contains "\(marker)")
-                repeat with a in accounts
-                    try
-                        delete (every message of (mailbox "Drafts" of a) whose subject contains "\(marker)")
-                    end try
-                end repeat
-                try
-                    delete (every message of drafts mailbox whose subject contains "\(marker)")
-                end try
-            end tell
-            """)
+            osascript(mailCleanup)
+
         }
     }
+
+    /// Drafts and compose windows of the Bench only, never sent. One message at a time: on Mail 16
+    /// (macOS 27) `delete (every message whose …)` does nothing and reports no error, and Mail saves
+    /// a compose window as a draft of the account by itself.
+    static let mailCleanup = """
+    tell application "Mail"
+        repeat with w in (every window whose name contains "\(marker)")
+            try
+                close w saving no
+            end try
+        end repeat
+        repeat with m in (every outgoing message whose subject contains "\(marker)")
+            try
+                close m saving no
+            end try
+        end repeat
+        repeat with a in accounts
+            try
+                repeat with m in (every message of (mailbox "Drafts" of a) whose subject contains "\(marker)")
+                    try
+                        delete m
+                    end try
+                end repeat
+            end try
+        end repeat
+    end tell
+    """
 
     /// Checks the state a task should leave behind.
     static func passes(_ checks: [BenchCheck], title: String, url: String) -> Bool {

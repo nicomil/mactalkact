@@ -265,9 +265,13 @@ enum Safety {
         return words.contains(where: riskyWords.contains) || riskyPhrases.contains { (" " + n + " ").contains(" \($0) ") }
     }
 
-    static func isRiskyKeys(_ keys: String) -> Bool {
+    /// `app` is the bundle id in front. ⌘⇧D sends only in Mail: in the Finder it opens the Desktop.
+    /// With the app unknown it stays risky.
+    static func isRiskyKeys(_ keys: String, app: String? = nil) -> Bool {
         let k = keys.lowercased().replacingOccurrences(of: " ", with: "")
-        return riskyCombos.contains(where: k.contains)
+        let hits = riskyCombos.filter { k.contains($0) }
+        if hits == ["cmd+shift+d"], let app, app != "com.apple.mail" { return false }
+        return !hits.isEmpty
     }
 
     static func isRisky(_ plan: Plan) -> Bool {

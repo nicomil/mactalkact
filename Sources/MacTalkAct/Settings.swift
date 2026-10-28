@@ -145,6 +145,7 @@ final class AppSettings: ObservableObject {
         static let agentEngine = EngineID.claude
         static let engineFallback = true
         static let codexPath = ""
+        static let approvedCodexInstructions = ""
         static let codexModel = "gpt-6.1-sol"
         static let codexFastModel = "gpt-6-luna"
         static let codexDeepEffort = "medium"
@@ -245,6 +246,11 @@ final class AppSettings: ObservableObject {
     /// Use the other engines when the chosen one is not available (FR-27).
     @Published var engineFallback: Bool { didSet { defaults.set(engineFallback, forKey: "engineFallback") } }
     @Published var codexPath: String { didSet { defaults.set(codexPath, forKey: "codexPath") } }
+    /// SHA-256 of the texts of `~/.codex/AGENTS.md` the user approved, one per line (FR-50).
+    @Published var approvedCodexInstructions: String { didSet { defaults.set(approvedCodexInstructions, forKey: "approvedCodexInstructions") } }
+    var approvedCodexInstructionSet: Set<String> {
+        Set(approvedCodexInstructions.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) })
+    }
     @Published var codexModel: String { didSet { defaults.set(codexModel, forKey: "codexModel") } }
     @Published var codexFastModel: String { didSet { defaults.set(codexFastModel, forKey: "codexFastModel") } }
     @Published var codexDeepEffort: String { didSet { defaults.set(codexDeepEffort, forKey: "codexDeepEffort") } }
@@ -375,6 +381,7 @@ final class AppSettings: ObservableObject {
         agentEngine = EngineID(rawValue: string("agentEngine", "")) ?? Defaults.agentEngine
         engineFallback = bool("engineFallback", Defaults.engineFallback)
         codexPath = string("codexPath", Defaults.codexPath)
+        approvedCodexInstructions = string("approvedCodexInstructions", Defaults.approvedCodexInstructions)
         codexModel = string("codexModel", Defaults.codexModel)
         codexFastModel = string("codexFastModel", Defaults.codexFastModel)
         codexDeepEffort = string("codexDeepEffort", Defaults.codexDeepEffort)
