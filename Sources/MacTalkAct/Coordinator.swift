@@ -480,14 +480,17 @@ final class Coordinator {
             return
         }
         let previous = routeChain
-        routeChain = Task { await previous?.value; await self.handle(text, addressed: addressed) }
+        // The Frase is handed over now: the first-response measure includes the wait in the chain (Story 11.1).
+        let heard = Date()
+        routeChain = Task { await previous?.value; await self.handle(text, addressed: addressed, heard: heard) }
     }
 
     // MARK: Routing
 
     /// Asks the router for a decision, logs it, and carries it out.
-    private func handle(_ raw: String, addressed: Bool) async {
-        guard !busy else { return }
+    /// `heard`: when the recognizer handed the Frase over, start of the «prima risposta visibile».
+    private func handle(_ raw: String, addressed: Bool, heard: Date) async {
+        guard !busy else { disarmFirstResponse(); return }
         let started = Date()
         var cached: ScreenContext?
         func screen() -> ScreenContext {
@@ -504,13 +507,27 @@ final class Coordinator {
         let reason = dictated && decision.label == "rapido" ? "grammatica: scrivi" : decision.reason
         Log.info("Instradamento: \(decision.label) · \(reason) · \(ms) ms · \(what)")
         if case .arm = decision {} else { conversation.disarm() }
+        // «Prima risposta visibile» (Story 11.1): from the Frase handed over by the recognizer to the
+        // first change of the HUD after this decision. An ignored sentence shows nothing: no line.
+        firstResponse.arm(started: heard, label: decision.label)
+        hud.onFirstShow = firstResponse.isArmed ? { [weak self] in
+            if let line = self?.firstResponse.shown() { Log.info(line) }
+        } : nil
 
         if dryRun {
             onDryRun?("DECISIONE: \(decision.label) · \(decision.reason) · \(ms) ms")
             if case .ignore = decision {} else { hud.show(.success, raw, detail: "(prova: \(decision.label))", autoHide: 2) }
+            disarmFirstResponse()
             return
         }
         await perform(decision, screen: screen)
+        // A path that never changed the HUD must not leave the measure to a later, unrelated show.
+        disarmFirstResponse()
+    }
+
+    private func disarmFirstResponse() {
+        firstResponse.disarm()
+        hud.onFirstShow = nil
     }
 
     /// Decisions that type the sentence as text.
@@ -523,6 +540,9 @@ final class Coordinator {
         default: return false
         }
     }
+
+    /// Measure of the first visible response of the sentence being handled (Story 11.1).
+    private var firstResponse = FirstResponseMeter()
 
     /// How long «Vuoi che faccia qualcosa?» stays up (FR-48).
     static let askIntentSeconds = 8.0

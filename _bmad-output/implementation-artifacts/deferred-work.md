@@ -53,3 +53,10 @@
 ## Storia da pianificare nel prossimo ciclo (decisa da Nico il 28/10/2026)
 
 - **AccessGate unico con ActionOrigin (AD-21, AD-22).** Oggi il gate, i livelli di accesso per app e il secondo strato vivono in `AgentTools`: la Corsia locale (comandi semplici senza agente) non ci passa. Costruire `AccessGate` con `ActionOrigin` (`.user`, `.model`) e `ConfirmationGrant`, usato da agente e Corsia locale, e spostare lì i controlli di 9.2, 9.3 e 9.5 senza cambiarne il comportamento (la suite di sicurezza e `--hands-test` sono la rete).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-1-riga-di-base-ciclo-3.md`
+  summary: Test del collegamento della «prima risposta visibile» nell'app (`HUDController.show` chiama `onFirstShow` una volta; il Coordinator lo toglie per `ignora`).
+  evidence: i selftest coprono solo `FirstResponseMeter`; il collegamento richiede un `NSPanel` vivo. Da verificare a mano nel log durante l'uso.
+- source_spec: `_bmad-output/implementation-artifacts/spec-11-1-riga-di-base-ciclo-3.md`
+  summary: Riga di base con Nico presente: webmail (primo token ≤ 4 s), Calendario e Mail sul Banco del ciclo 3.
+  evidence: senza `MACTALK_BENCH_WEBMAIL` e senza Nico la soglia webmail è «non misurata» (§28); serve prima della misura finale (Storia 11.6).

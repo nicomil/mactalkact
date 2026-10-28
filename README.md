@@ -212,6 +212,7 @@ Alla scalata il turno istantaneo si interrompe ma la sua sessione resta aperta p
 **Osservazione a costo fisso.** Delle liste lunghe si legge solo la parte visibile, al massimo 60 elementi per contenitore, con un budget di 0,9 s. Così la lettura dello schermo costa lo stesso su una webmail e su una pagina semplice; il resto si trova scorrendo o con una ricerca (`observe` con `query`). Al primo contatto con un'app Electron o Chromium l'app aspetta fino a 1 s che la pagina sia leggibile. Interruttore «Osservazione a costo fisso» in **Impostazioni › Agente**; spento, la lettura torna quella di prima.
 
 I numeri di ciascuna di queste parti (riga di base, Sessione lunga, Livello istantaneo, osservazione) sono nella ricerca `_bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md`, §13–§17. `--agent-bench` dichiara a ogni corsa se le soglie di velocità (NFR-12) sono rispettate, e scrive il verdetto in un file `…-soglie.txt` accanto alla tabella.
+Dal ciclo 3 valgono le soglie di NFR-12 rivista: primo strumento ≤ 2,0 s, compito ≤ 4,5 s, Livello istantaneo ≤ 2,5 s, prima risposta visibile ≤ 0,5 s e primo token sulla webmail ≤ 4 s. La riga di base è nel §28 della ricerca. Nell'uso vero il log riporta `Prima risposta visibile: N ms · <decisione>` al primo cambio dell'HUD dopo la decisione del Router, senza il testo della frase.
 
 
 ## Motori: Claude, Codex o il Mac

@@ -8,7 +8,7 @@ status: complete
 preset: 'deep'
 validation: 'high'
 created: '2026-10-27'
-updated: '2026-10-27'
+updated: '2026-10-28'
 claims_verified: 31
 claims_unverified: 4
 claims_disputed: 1
@@ -695,3 +695,55 @@ Su macOS 27 i tempi non sono quelli di Tahoe (timeout di minuti): cinque azioni 
 **Secondo strato e app vere.** In `mail-bozza` il modello Apple aveva giudicato «New Message» un invio, e il compito falliva per la domanda in più. Ora i pulsanti che aprono soltanto una bozza (Nuovo messaggio, Componi, Rispondi, Compose, Reply) non passano dal secondo strato: l'invio vero resta fermato dalle regole fisse. `--risk-classifier-test`: 10/10 esterni, 0 falsi allarmi su 7.
 
 **FR-50, `AGENTS.md` di Codex.** Con un canarino («inizia ogni risposta con CANARINO-50») in una `CODEX_HOME` separata, Codex lanciato da MacTalkAct ha obbedito in 2 compiti su 2, nonostante `--ignore-user-config` e `project_doc_max_bytes=0`. L'`AGENTS.md` di progetto nella cartella di lavoro invece è ignorato. Il file globale di Nico non era vuoto («Usa sempre la skill /caveman full»), quindi il Motore Codex lo riceveva da sempre. Correzione, scelta da Nico: Codex si usa solo se il file è vuoto o ha il testo approvato (SHA-256) nelle impostazioni, e ogni cambiamento lo blocca di nuovo. Il contenuto attuale è approvato.
+
+## 28. Riga di base del ciclo 3 e CLI riverificate (Storia 11.1, 28 ottobre 2026, 12:40)
+
+**Versioni delle CLI (rilettura prima del 1° novembre 2026).** Le CLI sono quelle che l'app trova da sola, non gli shim del terminale.
+
+| CLI | Versione installata | Minima di AD-14 | Esito |
+| --- | --- | --- | --- |
+| `claude` (`~/.local/bin/claude`) | 2.1.312 | 2.1.299 (Sessione lunga), 2.1.293 (Haiku 5.5) | verificata |
+| `codex` (`~/.local/bin/codex`) | 0.164.0-alpha.11.1 | 0.131.0 | verificata (una alpha di una versione successiva vale) |
+
+Le minime restano invariate. `--session-test` passa: due risposte dalla stessa Sessione lunga, la seconda riusa la sessione e legge la cache (3.232 token), «dimentica» la riavvia con motivo. L'interfaccia del flusso non è cambiata. Claude accetta ancora `--input-format stream-json` e `--include-partial-messages`, e `--bare` resta un'opzione esplicita, non il comportamento di `-p` (la scadenza [82] del 1° novembre non si è avverata per ora). Codex `exec --json` produce ancora `thread.started`, `turn.started`, `item.completed` (`agent_message`) e `turn.completed` con `usage`, cioè gli eventi che legge `CodexEventParser`.
+
+**Cosa misura ora il Banco.** Le soglie sono quelle di NFR-12 rivista e il report dichiara l'esito di tutte e cinque:
+- primo strumento ≤ 2,0 s;
+- compito ≤ 4,5 s;
+- Livello istantaneo ≤ 2,5 s;
+- prima risposta visibile ≤ 0,5 s;
+- primo token sulla webmail ≤ 4 s.
+
+La «prima risposta visibile» è il tempo del Router sulla richiesta, perché subito dopo la decisione l'app mostra «Ci penso…». Sui compiti con azioni il Router decide fuori dall'orologio del compito (come con il tasto per parlare), e la decisione non si usa. Sulle Frasi spurie coincide con la colonna `router_s`. Non è una fase, quindi la somma delle fasi resta uguale al totale. Il primo token sulla webmail va dall'inizio di `agent.run` al primo token del tentativo che risponde, scalata compresa. Il tempo del Router resta fuori. Nell'uso vero l'app scrive nel log `Prima risposta visibile: N ms · <decisione>` al primo cambio dell'HUD dopo la decisione: nessuna riga per una frase ignorata, mai il testo della Frase.
+
+**Riga di base.** Motore Claude, tutto attivo come lo lasciano gli Epic 7–9 (Sessione lunga, Livello istantaneo, osservazione a costo fisso, prova prima del «fatto», cancello e secondo strato). Sono 37 compiti: 30 con azioni (pagine, canvas, pagina grande, Finder), 5 Frasi spurie e 2 compiti webmail saltati (manca `MACTALK_BENCH_WEBMAIL`). Calendario e Mail restano esclusi perché Nico non era presente. Il confronto riguarda gli stessi 30 compiti con azioni della misura finale dell'Epic 7 (§17).
+
+| Misura (30 compiti con azioni) | Fine dell'Epic 7 (§17) | Riga di base ciclo 3 | Soglia rivista | Esito |
+| --- | --- | --- | --- | --- |
+| Primo strumento, mediana | 2,7 s | 3,6 s (90° 7,6 s) | ≤ 2,0 s | **non rispettata** |
+| Compito, mediana | 6,0 s | 8,5 s (90° 17,9 s) | ≤ 4,5 s | **non rispettata** |
+| Livello istantaneo, mediana | 4,9 s (13 compiti) | 6,7 s (14 compiti) | ≤ 2,5 s | **non rispettata** |
+| Prima risposta visibile, mediana (35 compiti) | — | 0,01 s (90° 1,60 s) | ≤ 0,5 s | rispettata |
+| Primo token sulla webmail | — | — | ≤ 4 s | **non misurata** |
+| Riusciti | 28/30 | 27/30 | — | — |
+| Frasi spurie, mediana | 4,8 s | 1,6 s | — | nessuna azione |
+
+| Fase, mediana | Fine dell'Epic 7 | Riga di base ciclo 3 |
+| --- | --- | --- |
+| scansione | 0,04 s | 0,04 s |
+| MCP | 0,08 s | 0,15 s (4,8 s sul primo compito a freddo, 3,0 s a un riavvio) |
+| primo token | 1,57 s | 1,97 s |
+| azioni con assestamento | 1,33 s | 1,39 s |
+| ragionamento tra le azioni | 1,09 s | 0,68 s |
+| classificatore (secondo strato) | — | 0,96 s sui 15 compiti in cui interviene |
+| turno finale | 1,49 s | 1,87 s |
+
+Livelli usati: 10 istantaneo, 4 istantaneo → rapido, 8 rapido, 8 profondo. La scalata ha una mediana di 5,0 s (obiettivo della Storia 11.3: ≤ 1 s): `elenco-articolo` e `sito-contatti` per una seconda chiamata, `menu-accessori` e `cursore-volume` per una risposta senza risultato. La Sessione lunga si è riavviata 5 volte. C'è stato un falso «fatto» (`tabella-una`).
+
+Cosa dice:
+1. **Rispetto alla fine dell'Epic 7 il compito è più lento di circa 2,5 s, e la causa è spiegata solo in parte.** Le variazioni delle mediane delle fasi danno insieme circa +1,4–1,5 s: il secondo strato (0,96 s dove interviene), il turno finale (+0,4 s, forse perché con la prova prima del «fatto» il modello scrive che cosa ha verificato) e il primo token (+0,4 s), meno il ragionamento tra le azioni (−0,4 s). Le mediane delle fasi non si sommano alla mediana del compito, quindi circa 1 s resta senza spiegazione. Va cercato compito per compito: più azioni, scalate più care, la variabilità del modello. Anche le condizioni del Banco sono cambiate: ora prima dell'orologio di ogni compito il Router decide sulla richiesta, e per le richieste brevi questo vuol dire un turno del modello Apple on-device, che può lasciare caldo o occupato il modello del secondo strato. Questa corsa è il punto di partenza su cui si giudicano le Storie 11.2–11.4, non il 6,0 s dell'Epic 7.
+2. **La prima reazione visibile è bimodale.** La mediana (0,01 s) rispetta la soglia. Però 15 compiti su 35 aspettano circa 1,6 s prima della decisione: le 5 Frasi spurie (il classificatore on-device) e 10 richieste brevi, fino a 6 parole, che passano dalla corsia locale (`LocalActionProposer`, un turno del modello Apple) prima di arrivare all'Agente. Per queste richieste l'HUD resta fermo sul testo ascoltato per 1,6 s. Il 90° percentile (1,60 s) è il numero da abbassare.
+3. **L'avvio di MCP a freddo pesa ancora:** 4,8 s sul primo compito e 3,0 s a un riavvio della Sessione lunga. È la leva della Storia 11.2.
+4. **La corsa ha avuto due interferenze.** In `posta-riunione` l'app in primo piano è passata al terminale durante il compito, e in `finder-apri` il clic è finito su Safari (una scheda Gmail aperta). Sono due dei tre fallimenti. In `posta-elimina` la somma delle fasi differisce dal totale di 0,5 s (la conferma e il secondo strato nello stesso compito), unico caso su 30. Va guardato nella Storia 11.6 prima della misura finale.
+
+Tabella: `~/Library/Logs/MacTalkAct-bench-2026-10-28-1240-claude.tsv`, esito delle soglie in `…-1240-claude.soglie.txt`.

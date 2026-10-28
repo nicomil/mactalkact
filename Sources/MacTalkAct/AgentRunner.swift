@@ -113,6 +113,8 @@ final class AgentRunner {
     private(set) var lastPhases: [BenchPhase: Double] = [:]
     private(set) var lastTotal: Double = 0
     private(set) var lastTurns: Int?
+    /// Seconds to the first token of the attempt that answered, scalata included (Story 11.1).
+    private(set) var lastFirstTokenAt: Double?
     /// Level used by the last attempt and the reason of a scalata, for the Bench (FR-43).
     private(set) var lastLevel: AgentLevel?
     private(set) var firstLevel: AgentLevel?
@@ -311,6 +313,7 @@ final class AgentRunner {
         lastPhases = [:]
         lastTotal = 0
         lastTurns = nil
+        lastFirstTokenAt = nil
         guard server != nil else { throw AgentEngineError.failed("server strumenti non avviato") }
         guard !running else { throw AgentEngineError.failed("sto già lavorando a un'altra richiesta") }
         tools.reset()
@@ -332,6 +335,7 @@ final class AgentRunner {
             lastPhases = phases
             lastTotal = total
             lastTurns = timer.turns
+            lastFirstTokenAt = timer.firstTokenAt
             Log.debug("Agente: fasi " + BenchPhase.allCases.compactMap { p in
                 phases[p].map { String(format: "%@ %.2fs", p.rawValue, $0) } }.joined(separator: " · "))
         }

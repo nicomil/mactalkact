@@ -18,6 +18,32 @@ final class HUDModel: ObservableObject {
     @Published var pillSize: CGSize = .zero
 }
 
+/// «Prima risposta visibile» (Story 11.1, NFR-12): from the end of the Frase (the moment speech
+/// recognition hands the text to the Router) to the first change of the HUD after the decision.
+/// Pure, so it can be tested without a HUD. The line it produces never contains the Frase.
+struct FirstResponseMeter {
+    private var armed: (started: Date, label: String)?
+
+    var isArmed: Bool { armed != nil }
+
+    /// Arms the measure after the Router's decision. An ignored sentence shows nothing, so it
+    /// never arms (and clears a measure left armed by an earlier sentence).
+    mutating func arm(started: Date, label: String) {
+        armed = label == "ignora" ? nil : (started, label)
+    }
+
+    /// The sentence is over without a change of the HUD: nothing is measured.
+    mutating func disarm() { armed = nil }
+
+    /// The first change of the HUD after the decision: the log line, once; nil afterwards.
+    mutating func shown(at now: Date = Date()) -> String? {
+        guard let a = armed else { return nil }
+        armed = nil
+        let ms = max(0, Int((now.timeIntervalSince(a.started) * 1000).rounded()))
+        return "Prima risposta visibile: \(ms) ms · \(a.label)"
+    }
+}
+
 /// The floating message at the bottom (or top) of the screen. It never takes focus and lets
 /// clicks through, so typing and clicking keep going to the app the user was working in.
 /// In automatic position it moves to the top when it would cover the caret or the pointer.
@@ -50,7 +76,15 @@ final class HUDController {
 
     var isVisible: Bool { panel.isVisible }
 
+    /// Called once, at the next `show`, then cleared (Story 11.1): the only point where the
+    /// «prima risposta visibile» is measured, because every change of the HUD goes through `show`.
+    var onFirstShow: (() -> Void)?
+
     func show(_ phase: HUDModel.Phase, _ title: String, detail: String = "", autoHide: TimeInterval? = nil, mini: Bool = false) {
+        if let first = onFirstShow {
+            onFirstShow = nil
+            first()
+        }
         hideTask?.cancel()
         let settings = AppSettings.shared
         model.compact = settings.hudCompact

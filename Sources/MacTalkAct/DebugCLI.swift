@@ -44,6 +44,17 @@ enum DebugCLI {
             check("ragionamento dopo l'ultima azione = turno finale", (phases[.finalTurn] ?? 0) > 0.02 && (phases[.reasoning] ?? 0) > (phases[.finalTurn] ?? 0))
             check("turni dal Motore", t.turns == 3)
             check("finish due volte non cambia", t.finish().phases == phases)
+            let tokenAt = t.firstTokenAt ?? 0
+            check("primo token dall'inizio della richiesta (Storia 11.1)", tokenAt > 0.1 && tokenAt < total)
+            let scalata = PhaseTimer()
+            scalata.mark(.session); scalata.event(.serverConnected); scalata.event(.firstToken)
+            let firstAttempt = scalata.firstTokenAt ?? 0
+            wait(); scalata.mark(.session); scalata.event(.serverConnected); wait(); scalata.event(.firstToken)
+            check("dopo una scalata conta il primo token del tentativo che risponde", (scalata.firstTokenAt ?? 0) > firstAttempt + 0.05)
+            let failed = PhaseTimer()
+            failed.mark(.session); failed.event(.serverConnected); failed.event(.firstToken)
+            failed.mark(.session); failed.event(.sessionStarted) // second attempt fails before its first token
+            check("secondo tentativo senza primo token: nessun valore", failed.firstTokenAt == nil)
             let e = PhaseTimer()
             wait(); e.mark(.session); e.event(.sessionStarted); wait()
             let (ep, et) = e.finish() // error before the first token: no final turn, the sum still holds
@@ -260,15 +271,48 @@ enum DebugCLI {
             check("in pausa il tempo non scende", abs(before - during) < 0.05)
             check("dopo la pausa riprende", clock.remaining < during && clock.remaining > during - 0.3)
         }
-        print("Soglie NFR-12 (Storia 7.5):")
+        print("Soglie NFR-12 riviste (Storia 11.1):")
         do {
             check("mediana pari = media dei due centrali", median([1, 2, 3, 4]) == 2.5 && median([3, 1, 2]) == 2 && median([]) == nil)
-            let v = nfr12Verdicts(firsts: [1.0, 1.4], totals: [5, 6, 7], instantTotals: [], engineIsClaude: true)
+            func verdicts(firsts: [Double] = [], totals: [Double] = [], instant: [Double] = [], responses: [Double] = [],
+                          webmail: [Double] = [], claude: Bool = true) -> [String] {
+                nfr12Verdicts(firsts: firsts, totals: totals, instantTotals: instant, firstResponses: responses,
+                              webmailFirstTokens: webmail, engineIsClaude: claude)
+            }
+            let v = verdicts(firsts: [1.0, 1.4], totals: [5, 6, 7], responses: [0.3, 0.6, 0.4])
+            check("cinque soglie, ognuna con esito", v.count == 5)
             check("sotto la soglia: rispettata", v[0].hasSuffix(": rispettata"))
             check("sopra la soglia: non rispettata", v[1].hasSuffix(": non rispettata"))
             check("niente valori: non misurata, mai 0 s", v[2] == "livello istantaneo: non misurata")
-            check("al limite: rispettata", nfr12Verdicts(firsts: [1.5], totals: [], instantTotals: [], engineIsClaude: true)[0].hasSuffix(": rispettata"))
-            check("altro motore: non applicabile", nfr12Verdicts(firsts: [1], totals: [1], instantTotals: [1], engineIsClaude: false).allSatisfy { $0.contains("non applicabile") })
+            check("primo strumento: soglia 2,0 s", v[0].contains("(soglia 2,0 s)")
+                  && verdicts(firsts: [2.0])[0].hasSuffix(": rispettata") && verdicts(firsts: [2.1])[0].hasSuffix(": non rispettata"))
+            check("prima risposta visibile: soglia 0,5 s", v[3] == "prima risposta visibile 0,40 s (soglia 0,5 s): rispettata"
+                  && verdicts(responses: [0.6])[3].hasSuffix(": non rispettata"))
+            check("nessun compito webmail: «primo token sulla webmail: non misurata»", v[4] == "primo token sulla webmail: non misurata")
+            check("primo token sulla webmail: soglia 4,0 s", verdicts(webmail: [3.9])[4] == "primo token sulla webmail 3,90 s (soglia 4,0 s): rispettata"
+                  && verdicts(webmail: [12.7])[4].hasSuffix(": non rispettata"))
+            let other = verdicts(firsts: [1], totals: [1], instant: [1], responses: [0.1], webmail: [1], claude: false)
+            check("altro motore: tutte e cinque non applicabile", other.count == 5 && other.allSatisfy { $0.contains("non applicabile") })
+        }
+        print("Prima risposta visibile (Storia 11.1):")
+        do {
+            let t0 = Date()
+            var meter = FirstResponseMeter()
+            meter.arm(started: t0, label: "istantaneo")
+            check("misura armata dopo la decisione", meter.isArmed)
+            let line = meter.shown(at: t0.addingTimeInterval(0.234))
+            check("riga al primo show", line == "Prima risposta visibile: 234 ms · istantaneo")
+            check("consumata al primo show: il secondo non conta", meter.shown(at: t0.addingTimeInterval(1)) == nil && !meter.isArmed)
+            meter.arm(started: t0, label: "ignora")
+            check("ignora: nessuna riga", !meter.isArmed && meter.shown(at: t0.addingTimeInterval(0.1)) == nil)
+            meter.arm(started: t0, label: "agente")
+            meter.arm(started: t0, label: "ignora")
+            check("un ignora dopo una decisione non mostrata la disarma", meter.shown() == nil)
+            meter.arm(started: t0, label: "numero")
+            meter.disarm()
+            check("frase finita senza cambiare l'HUD: nessuna riga dopo", meter.shown() == nil)
+            meter.arm(started: t0, label: "rapido")
+            check("nella riga solo tempo ed etichetta, mai la Frase", meter.shown(at: t0.addingTimeInterval(0.05)) == "Prima risposta visibile: 50 ms · rapido")
         }
         print("Compiti del Banco:")
         do {
@@ -1131,6 +1175,8 @@ extension DebugCLI {
             check("fase azioni presente", (p[.actions] ?? 0) > 0) // a read-only call can take a millisecond
             check("somma = totale del runner", abs(p.values.reduce(0, +) - agent.lastTotal) < 0.01)
             check("turni dal Motore", agent.lastTurns == 2)
+            let tokenAt = agent.lastFirstTokenAt ?? 0
+            check("primo token dall'inizio della richiesta (Storia 11.1)", tokenAt > 0.1 && tokenAt < agent.lastTotal)
             agent.shutdown()
         }
 
@@ -1766,11 +1812,15 @@ extension DebugCLI {
         return s.count % 2 == 1 ? s[s.count / 2] : (s[s.count / 2 - 1] + s[s.count / 2]) / 2
     }
 
-    /// NFR-12 (Story 7.5): first tool ≤ 1,5 s, task ≤ 4,5 s, Instant level ≤ 2,5 s per task, as medians.
-    /// «rispettata» / «non rispettata» / «non misurata»; with another engine the thresholds do not apply.
-    static func nfr12Verdicts(firsts: [Double], totals: [Double], instantTotals: [Double], engineIsClaude: Bool) -> [String] {
+    /// NFR-12 as revised for cycle 3 (Story 11.1), as medians: first tool ≤ 2,0 s, task ≤ 4,5 s,
+    /// Instant level ≤ 2,5 s per task, first visible response ≤ 0,5 s from the end of the Frase,
+    /// first token on the webmail ≤ 4 s. «rispettata» / «non rispettata» / «non misurata»;
+    /// with another engine the thresholds do not apply.
+    static func nfr12Verdicts(firsts: [Double], totals: [Double], instantTotals: [Double], firstResponses: [Double],
+                              webmailFirstTokens: [Double], engineIsClaude: Bool) -> [String] {
         let rows: [(String, [Double], Double)] = [
-            ("primo strumento", firsts, 1.5), ("compito", totals, 4.5), ("livello istantaneo", instantTotals, 2.5),
+            ("primo strumento", firsts, 2.0), ("compito", totals, 4.5), ("livello istantaneo", instantTotals, 2.5),
+            ("prima risposta visibile", firstResponses, 0.5), ("primo token sulla webmail", webmailFirstTokens, 4.0),
         ]
         return rows.map { name, values, limit in
             guard engineIsClaude else { return "\(name): non applicabile (le soglie valgono per Claude)" }
@@ -2269,6 +2319,11 @@ extension DebugCLI {
             let model: String; let note: String; let phases: [BenchPhase: Double]; let turns: Int?; let confirmations: Int; let blocked: Int
             /// Time of the Router's decision (Frasi spurie only): before the agent, outside its phases.
             var router: Double = 0
+            /// «Prima risposta visibile» (Story 11.1): the Router's time on the request, because the app
+            /// shows «Ci penso…» right after the decision. Not a phase: the sum of the phases is unchanged.
+            var firstResponse: Double?
+            /// Webmail only: from the start of the request to the first token of the attempt that answers.
+            var webmailFirstToken: Double?
             /// Level of the first attempt and the reason of a scalata (Story 7.3).
             var level = ""
             var escalation = ""
@@ -2334,13 +2389,26 @@ extension DebugCLI {
             }
             // Like the Router: one step on a known target goes to the Instant level (Story 7.3).
             // Decided before the clock starts: the Router's time is not part of the agent's phases.
+            // The labels of the screen, read once before the clock for the Instant check and the Router
+            // (the app reads them only on demand): both see the same snapshot.
+            let routerLabels = ScreenContext.capture(includeLabels: true).visibleLabels
             var instant = false
             if !kind.isPhrase, AppSettings.shared.instantLevel, engine == .claude, RouteHeuristics.isOneStep(task.request) {
-                let labels = ScreenContext.capture(includeLabels: true).visibleLabels
-                instant = RouteHeuristics.hasKnownTarget(task.request, knownApp: { ex.findApp($0) != nil }, labels: labels, memory: [])
+                instant = RouteHeuristics.hasKnownTarget(task.request, knownApp: { ex.findApp($0) != nil }, labels: routerLabels, memory: [])
             }
-            // The labels of the screen for the Router, read before the clock (the app reads them only on demand).
-            let phraseLabels = kind.isPhrase ? ScreenContext.capture(includeLabels: true).visibleLabels : []
+            // «Prima risposta visibile» (Story 11.1): the Router decides on the request like in the app
+            // (push to talk), outside the task's clock; the decision is not used, the agent runs as before.
+            var firstResponse: Double?
+            if !kind.isPhrase {
+                var state = RouterState()
+                state.listening = .pushToTalk
+                state.pushToTalk = true
+                state.instantLevel = AppSettings.shared.instantLevel && engine == .claude
+                state.knownTarget = { t in RouteHeuristics.hasKnownTarget(t, knownApp: { ex.findApp($0) != nil }, labels: routerLabels, memory: []) }
+                let routerStarted = Date()
+                _ = await router.decide(task.request, editable: { false }, state: state)
+                firstResponse = Date().timeIntervalSince(routerStarted)
+            }
             let started = Date()
             var note = ""
             var ranAgent = true
@@ -2353,9 +2421,10 @@ extension DebugCLI {
                 var state = RouterState()
                 state.listening = .session
                 state.windowOpen = true
-                state.knownTarget = { t in RouteHeuristics.hasKnownTarget(t, knownApp: { ex.findApp($0) != nil }, labels: phraseLabels, memory: []) }
+                state.knownTarget = { t in RouteHeuristics.hasKnownTarget(t, knownApp: { ex.findApp($0) != nil }, labels: routerLabels, memory: []) }
                 let decision = await router.decide(task.request, editable: { false }, state: state)
                 routerTime = Date().timeIntervalSince(started)
+                firstResponse = routerTime
                 switch decision {
                 case .agent(let text, let level, _):
                     do { note = try await agent.run(text, context: ctx, deep: level == .deep, instant: level == .instant) } catch { note = "errore: \(error.localizedDescription)" }
@@ -2395,9 +2464,15 @@ extension DebugCLI {
                           turns: ranAgent ? agent.lastTurns : nil, confirmations: ranAgent ? agent.tools.confirmationsAsked : 0,
                           blocked: ranAgent ? agent.tools.blockedCalls : 0)
             row.router = routerTime
+            row.firstResponse = firstResponse
+            if case .webmail = kind, ranAgent { row.webmailFirstToken = agent.lastFirstTokenAt }
             row.readText = ranAgent ? agent.tools.readTextSeconds.first : nil
             // A full screenshot (the image goes to the engine); a zoom with region is not counted.
             row.screenshot = ranAgent && agent.tools.callLog.contains { $0.hasPrefix("- screenshot") && !$0.contains("region") }
+            if let fr = firstResponse {
+                print(String(format: "      prima risposta visibile: %.2f s%@", fr,
+                             row.webmailFirstToken.map { String(format: " · primo token sulla webmail %.1f s", $0) } ?? ""))
+            }
             if let rt = row.readText { print(String(format: "      read_text: %.2f s%@", rt, row.screenshot ? " · anche screenshot" : " · senza screenshot")) }
             if ranAgent, !ok, !kind.isPhrase, claimed {
                 row.falseDone = true
@@ -2458,10 +2533,19 @@ extension DebugCLI {
         }
         // NFR-12 (Story 7.5): the outcome is stated, met or not. Rows that never ran stay out.
         let measured = ran.filter { !$0.task.kind.isPhrase && $0.note != "pagina non aperta" }
+        // The first visible response counts on every task that ran, Frasi spurie included (Story 11.1).
+        let firstResponses = ran.compactMap(\.firstResponse)
+        let webmailTokens = ran.compactMap(\.webmailFirstToken)
         let verdicts = Self.nfr12Verdicts(firsts: measured.compactMap(\.first), totals: measured.map(\.total),
-                                          instantTotals: instantRows.map(\.total), engineIsClaude: engine == .claude)
+                                          instantTotals: instantRows.map(\.total), firstResponses: firstResponses,
+                                          webmailFirstTokens: webmailTokens, engineIsClaude: engine == .claude)
         let restartsText = engine == .claude && AppSettings.shared.longSession ? "\(restarts.value)" : "—"
-        print("  soglie NFR-12 (mediane su \(measured.count) compiti): " + verdicts.joined(separator: " · "))
+        let firstResponseText = Self.median(firstResponses).map {
+            String(format: "mediana %.2f s su %d compiti, 90° %.2f s", $0, firstResponses.count, p90(firstResponses))
+        } ?? "non misurata"
+        print("  prima risposta visibile: \(firstResponseText)")
+        print("  soglie NFR-12 riviste (mediane su \(measured.count) compiti con azioni; prima risposta su \(firstResponses.count), webmail su \(webmailTokens.count)):")
+        for v in verdicts { print("    · \(v)") }
         if !instantRows.isEmpty, let clean = Self.median(instantRows.filter { $0.escalation.isEmpty }.map(\.total)) {
             print(String(format: "  (istantaneo senza scalata, solo informativo: %.2f s)", clean))
         }
@@ -2474,16 +2558,17 @@ extension DebugCLI {
         let out = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/MacTalkAct-bench-\(f.string(from: Date()))-\(engine.rawValue).tsv")
         let phaseHeader = BenchPhase.allCases.map { "\($0.rawValue)_s" }.joined(separator: "\t")
-        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tfalso_fatto\tread_text_s\tscreenshot\tturni\tconferme\tbloccate\tmodello\trisposta\n"
+        var tsv = "id\tlivello\tesito\tpassi\tprimo_strumento_s\ttotale_s\t\(phaseHeader)\trouter_s\tprima_risposta_s\tprimo_token_webmail_s\tsomma_ok\tlivello_usato\tscalata\tcosto_scalata_s\tfalso_fatto\tread_text_s\tscreenshot\tturni\tconferme\tbloccate\tmodello\trisposta\n"
         for r in rows {
             let esito = r.skipped != nil ? "saltato" : (r.ok ? "ok" : "no")
             let phases = BenchPhase.allCases.map { p in r.phases[p].map { String(format: "%.2f", $0) } ?? "" }.joined(separator: "\t")
             let answer = (r.skipped ?? r.note).replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
-            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.falseDone ? "sì" : "")\t\(r.readText.map { String(format: "%.2f", $0) } ?? "")\t\(r.screenshot ? "sì" : "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
+            tsv += "\(r.task.id)\t\(r.task.level)\t\(esito)\t\(r.steps)\t\(r.first.map { String(format: "%.1f", $0) } ?? "")\t\(String(format: "%.1f", r.total))\t\(phases)\t\(String(format: "%.2f", r.router))\t\(r.firstResponse.map { String(format: "%.2f", $0) } ?? "")\t\(r.webmailFirstToken.map { String(format: "%.2f", $0) } ?? "")\t\(r.sumOK ? "sì" : "no")\t\(r.level)\t\(r.escalation)\t\(r.escalationCost.map { String(format: "%.1f", $0) } ?? "")\t\(r.falseDone ? "sì" : "")\t\(r.readText.map { String(format: "%.2f", $0) } ?? "")\t\(r.screenshot ? "sì" : "")\t\(r.turns.map(String.init) ?? "")\t\(r.confirmations)\t\(r.blocked)\t\(r.model)\t\(answer)\n"
         }
         try? tsv.write(to: out, atomically: true, encoding: .utf8)
         // The verdict in a file of its own, next to the table: the TSV stays a plain table.
-        let summary = "soglie NFR-12 (mediane su \(measured.count) compiti, motore \(engine.rawValue)): " + verdicts.joined(separator: " · ")
+        let summary = "soglie NFR-12 riviste (mediane su \(measured.count) compiti con azioni, motore \(engine.rawValue)): " + verdicts.joined(separator: " · ")
+            + "\nprima risposta visibile: \(firstResponseText)"
             + "\nriavvii della Sessione lunga: \(restartsText)"
             + "\nfalsi «fatto»: \(ran.filter(\.falseDone).count) · prova prima del «fatto»: \(AppSettings.shared.evidenceBeforeDone ? "attiva" : "spenta")\n"
         try? summary.write(to: out.deletingPathExtension().appendingPathExtension("soglie.txt"), atomically: true, encoding: .utf8)

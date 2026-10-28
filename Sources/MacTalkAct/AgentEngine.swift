@@ -481,6 +481,10 @@ final class PhaseTimer: @unchecked Sendable {
     private var inFlight = 0
     private var _turns: Int?
     var turns: Int? { lock.withLock { _turns } }
+    /// Seconds from the start of the request to the first token of the last attempt (after a
+    /// scalata, the attempt that answers): the «primo token sulla webmail» of NFR-12 (Story 11.1).
+    private var _firstTokenAt: Double?
+    var firstTokenAt: Double? { lock.withLock { _firstTokenAt } }
 
     init(start phase: BenchPhase = .scan) {
         started = clock.now
@@ -490,7 +494,11 @@ final class PhaseTimer: @unchecked Sendable {
 
     /// Opens `phase` now. Also used to go back to `.session` when another engine takes over.
     func mark(_ phase: BenchPhase) {
-        lock.withLock { move(to: phase) }
+        lock.withLock {
+            // A new attempt (scalata, fallback): only its own first token counts.
+            if phase == .session, finished == nil { _firstTokenAt = nil }
+            move(to: phase)
+        }
     }
 
     /// Time spent in `phase` inside the current one (the classifier during a tool call): it is
@@ -532,7 +540,10 @@ final class PhaseTimer: @unchecked Sendable {
             case .serverConnected:
                 if current == .session || current == .mcp { move(to: .firstToken) }
             case .firstToken:
-                if [.session, .mcp, .firstToken].contains(current) { move(to: .reasoning) }
+                if [.session, .mcp, .firstToken].contains(current) {
+                    if finished == nil { _firstTokenAt = Self.seconds(clock.now - started) }
+                    move(to: .reasoning)
+                }
             case .turnFinished(let t):
                 _turns = t
                 inFlight = 0
