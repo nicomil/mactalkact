@@ -672,3 +672,24 @@ Il modello Apple sbaglia sulla domanda astratta e va molto meglio quando deve da
 **Sicurezza:** con il secondo strato spento la suite passa uguale (Claude 10/10, 8/8 blocchi): le regole fisse bastano da sole sui dieci scenari, come chiede NFR-14.
 
 **Dopo la review (9.5):** tetto vero sul tempo, campionamento greedy, ruolo e testo del dialogo nel prompt. `--risk-classifier-test`: 10/10 esterni, 1 falso allarme su 8 («Rispondi»), mediana 0,72 s, 90° percentile 0,79 s. La review ha trovato anche un buco delle regole fisse: cliccando il testo «➤» dentro un div «Invia», Safari premeva il div senza domanda. Corretto: `click` chiede per il contenitore.
+
+## 27. Prove con Nico presente (28 ottobre 2026, mattina)
+
+**App vere (Claude).** Calendario (evento creato e poi rimosso), Mail (bozza mai inviata), Finder: 5/5 dopo una correzione. Il primo giro di `finder-apri` era fallito per un falso allarme delle regole fisse: ⌘⇧D manda la mail in Mail, ma nel Finder apre la Scrivania. Ora ⌘⇧D è rischioso solo in Mail o con l'app sconosciuta. `calendario-evento`: 12 passi, 31 s.
+
+**Gmail personale** (modalità personale: nei log solo i tempi). `webmail-inviata` riuscito in 24,7 s: lettura dello schermo 0,05 s (il costo fisso regge su una webmail vera), ma primo token a 12,7 s, con 6,1 s di scalata dal livello istantaneo e 3,5 s di avvio del server MCP. `webmail-cerca` non gira sull'account personale (solo compiti di osservazione).
+
+**Spike Apple Events con i consensi dati** (il consenso va all'app del terminale, non a MacTalkAct):
+
+| App | Azione | Tempo |
+| --- | --- | --- |
+| Safari 27.0.1 | aprire un indirizzo in una scheda | 1,22 s |
+| Brave 155 | aprire un indirizzo in una scheda | 0,46 s |
+| Calendario 27.0 | creare (e cancellare) un evento | 1,18 s |
+| Finder 27.0 | rivelare un file | 0,05 s |
+| Mail 16.0 | cercare in una casella (45.915 messaggi) | 3,43 s: oltre il limite di 3 s |
+| Mail 16.0 | preparare una bozza | 0,6–0,9 s |
+
+Su macOS 27 i tempi non sono quelli di Tahoe (timeout di minuti): cinque azioni su sei entro 3 s. Solo la ricerca su una casella grande lo supera. Due trappole di Mail 16: `delete (every message whose …)` non fa niente e non dà errori, e Mail salva da sé una finestra di scrittura come bozza dell'account (anche invisibile). Lo spike e il Banco avevano lasciato 5 bozze nell'account Gmail di Nico, poi cancellate; ora la pulizia va messaggio per messaggio.
+
+**FR-50, `AGENTS.md` di Codex.** Con un canarino («inizia ogni risposta con CANARINO-50») in una `CODEX_HOME` separata, Codex lanciato da MacTalkAct ha obbedito in 2 compiti su 2, nonostante `--ignore-user-config` e `project_doc_max_bytes=0`. L'`AGENTS.md` di progetto nella cartella di lavoro invece è ignorato. Il file globale di Nico non era vuoto («Usa sempre la skill /caveman full»), quindi il Motore Codex lo riceveva da sempre. Correzione, scelta da Nico: Codex si usa solo se il file è vuoto o ha il testo approvato (SHA-256) nelle impostazioni, e ogni cambiamento lo blocca di nuovo. Il contenuto attuale è approvato.

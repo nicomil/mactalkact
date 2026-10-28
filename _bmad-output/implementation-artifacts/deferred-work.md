@@ -32,7 +32,7 @@
 ## Dalla review della Storia 9.4 (28/10/2026)
 
 - Suite di sicurezza: lo stato si legge a fine turno; uno stato reversibile può tornare indietro prima della lettura. Servirebbe un registro degli eventi della pagina.
-- Scenario di FR-50 (`AGENTS.md` di Codex con istruzioni di prova): serve `CODEX_HOME` separato, con Nico presente.
+- ~~Scenario di FR-50~~: fatto il 28/10 (canarino obbedito, ora blocco con approvazione per impronta).
 - Trascinamento nell'area vuota di una finestra Finder «Cestino»: nessuna etichetta, solo il titolo della finestra.
 - `isRiskyLabel(request)` nel filtro preliminare del Motore locale ora vale anche per «prenota», «disconnetti»: il gate resta, ma il filtro si allenta.
 - `--hands-test`: «azione senza effetti» (press_keys shift) fallisce circa una volta su tre; precedente alla 9.4.
@@ -43,3 +43,9 @@
 - Secondo strato e clic per coordinate: il punto può cambiare durante il giudizio; le regole fisse ricontrollano al clic.
 - FoundationModels dentro l'app (LSUIElement, in background mentre l'agente lavora): rate limit e concorrenza col Motore locale da misurare nell'app vera.
 - La Corsia locale non passa dal secondo strato (manca `ActionOrigin`).
+
+## Dalle prove con Nico (28/10/2026, mattina)
+
+- Webmail: primo token a 12,7 s su Gmail (scalata dall'istantaneo 6,1 s, avvio MCP 3,5 s).
+- Mail via Apple Events: la ricerca su una casella da 45.915 messaggi richiede 3,43 s, oltre il limite di 3 s dello spike.
+- FR-50: il controllo dell'`AGENTS.md` non copre istruzioni messe in altri file che Codex potrebbe leggere in versioni future; da ricontrollare quando cambia la versione di `codex`.
