@@ -111,6 +111,11 @@ enum Grammar {
         k(["pagina su"], "pageup", "Pagina su")
         k(["minimizza", "riduci", "riduci a icona"], "cmd+m", "Minimizza")
         k(["schermo intero", "tutto schermo"], "ctrl+cmd+f", "Schermo intero")
+        k(["cambia desktop", "desktop successivo", "prossimo desktop", "desktop a destra", "vai al desktop di destra",
+           "vai al desktop a destra", "desktop di destra", "scrivania successiva"], "ctrl+right", "Desktop a destra")
+        k(["desktop precedente", "desktop a sinistra", "vai al desktop di sinistra", "vai al desktop a sinistra",
+           "desktop di sinistra", "torna al desktop di prima", "scrivania precedente"], "ctrl+left", "Desktop a sinistra")
+        k(["mission control", "mostra tutte le finestre", "tutte le finestre"], "ctrl+up", "Mission Control")
         k(["app precedente", "cambia app", "torna all app precedente", "applicazione precedente"], "cmd+tab", "App precedente")
 
         for p in ["giu", "scorri", "scorri giu", "scorre", "scorre giu", "scendi", "scorri in basso", "piu giu", "vai giu", "abbassa", "scorri verso il basso"] {

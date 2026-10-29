@@ -426,6 +426,9 @@ enum DebugCLI {
                   InstalledApps.filtered(apps, query: "", configured: { $0.name == "Terminale" }).map(\.name) == ["Terminale", "Safari", "Note"]
                     && InstalledApps.filtered(apps, query: "term", configured: { _ in false }).map(\.name) == ["Terminale"])
         }
+        check("scorciatoie di sistema anche in «solo clic», il resto no",
+              AccessGate.isSystemShortcut("ctrl+right") && AccessGate.isSystemShortcut("ctrl+left ctrl+left")
+                && !AccessGate.isSystemShortcut("ctrl+c") && !AccessGate.isSystemShortcut("ctrl+right return") && !AccessGate.isSystemShortcut(""))
         check("cmux: solo clic", AccessLevel.level(bundleID: "com.cmuxterm.app", name: "cmux", list: AccessLevel.defaultList) == .clickOnly)
         check("Impostazioni di Sistema: conferma ogni azione", AccessLevel.level(bundleID: "com.apple.systempreferences", name: "", list: AccessLevel.defaultList) == .confirmAll)
         check("app sconosciuta: normale", AccessLevel.level(bundleID: "com.example", name: "Esempio", list: AccessLevel.defaultList) == .full)
@@ -585,6 +588,8 @@ enum DebugCLI {
         }
 
         print("Grammatica:")
+        check("cambia desktop: comando rapido", Grammar.parse("Cambia desktop") == .keys(combo: "ctrl+right", label: "Desktop a destra", confirm: false)
+              && Grammar.parse("Vai al desktop di sinistra.") == .keys(combo: "ctrl+left", label: "Desktop a sinistra", confirm: false))
         check("giù", Grammar.parse("Giù.") == .scroll(direction: "down", amount: 1))
         check("scorri giù per favore", Grammar.parse("Scorri giù, per favore.") == .scroll(direction: "down", amount: 1))
         check("vai su = scroll", Grammar.parse("vai su") == .scroll(direction: "up", amount: 1))

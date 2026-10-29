@@ -97,6 +97,16 @@ final class AccessGate {
 
     /// The tools a «solo clic» app allows.
     static let clickOnlyTools: Set<String> = ["click", "click_many", "scroll", "hover", "open_app"]
+    /// Shortcuts of macOS itself (desktops, Mission Control): the system takes them, they write nothing in
+    /// the app in front, so a «solo clic» app does not stop them. With the system shortcuts turned off a
+    /// terminal gets them as word moves, still no text and no Invio.
+    static let systemShortcuts: Set<String> = ["ctrl+left", "ctrl+right", "ctrl+up", "ctrl+down"]
+
+    /// Every key of the sequence is a system shortcut. Pure, tested by `--selftest`.
+    static func isSystemShortcut(_ keys: String) -> Bool {
+        let parts = keys.lowercased().split(separator: " ").map(String.init)
+        return !parts.isEmpty && parts.allSatisfy(systemShortcuts.contains)
+    }
     /// Tools that write text or change a value: never in a password field.
     static let writingTools: Set<String> = ["type_text", "replace_text", "edit_text", "set_value", "select_text", "press_keys"]
     static let toolWords: [String: String] = [
@@ -122,7 +132,8 @@ final class AccessGate {
             lastAccessNotice = "\(app)|\(level.scope)"
             onAccessNotice?("🔐 \(app): \(level.scope.rawValue)")
         }
-        if level.scope == .clickOnly, effectful, !Self.clickOnlyTools.contains(name) {
+        let systemKeys = name == "press_keys" && Self.isSystemShortcut((args["keys"] as? String) ?? "")
+        if level.scope == .clickOnly, effectful, !Self.clickOnlyTools.contains(name), !systemKeys {
             Log.info("Agente: \(name) bloccato, \(app) è «solo clic»")
             refusals += 1
             lastRefusal = .clickOnly(app: app, tool: name)
