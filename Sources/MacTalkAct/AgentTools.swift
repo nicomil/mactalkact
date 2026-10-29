@@ -594,6 +594,7 @@ final class AgentTools {
         let said = significantWords(reply).subtracting(replyTemplateWords)
         // Italian endings: «invia» and «inviata», «contatti» and «contatto» are the same word here.
         func same(_ a: String, _ b: String) -> Bool {
+            if a == b { return true }
             let common = zip(a, b).prefix { $0 == $1 }.count
             return common >= max(4, min(a.count, b.count) - 2)
         }
@@ -607,7 +608,8 @@ final class AgentTools {
                                     "nella", "nello", "della", "dello", "dalla", "quella", "quello", "questa", "questo", "voce",
                                     "pulsante", "bottone", "tasto", "link", "pagina", "click", "press", "open", "button", "please"]
         let words = Grammar.normalize(text).split { !$0.isLetter && !$0.isNumber }.map(String.init)
-        return Set(words.filter { $0.count >= 4 && !generic.contains($0) })
+        // Numbers count from two digits: «spunta Bruno alle 18:30» names «Bruno 18:30».
+        return Set(words.filter { ($0.count >= 4 || $0.count >= 2 && $0.allSatisfy(\.isNumber)) && !generic.contains($0) })
     }
 
     /// The fallback chain moved to another cloud engine: the queue of the last observation starts
@@ -1059,7 +1061,9 @@ final class AgentTools {
         }
         // A wrong target proves nothing: «apri i contatti» → «Chi siamo» changes the page too. The model
         // sees the outcome and corrects itself (Banco `sito-contatti`, ricerca §39).
-        guard Self.replyMatchesRequest(reply, request: currentRequest) else {
+        // Only clicks: writing, dragging and keys already need their own evidence (text in the field,
+        // the target changed), and their outcome rarely repeats the words of the request.
+        guard !["click", "click_many"].contains(name) || Self.replyMatchesRequest(reply, request: currentRequest) else {
             Log.debug("Agente: azione finale (\(name)) con un esito che non nomina la richiesta, risponde il modello")
             return
         }

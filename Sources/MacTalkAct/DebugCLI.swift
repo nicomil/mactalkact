@@ -4219,7 +4219,8 @@ extension DebugCLI {
                     && AgentTools.replyMatchesRequest("Fatto: ho cliccato «Salva»; ora la finestra è «Documento».", request: "cancella tutto il testo")
                     && AgentTools.replyMatchesRequest("Fatto: ho cliccato «OK»; ora la finestra è «Altro».", request: "clicca ok")
                     && AgentTools.replyMatchesRequest("Fatto: ho cliccato l'elemento indicato; ora la finestra è «Posta inviata».", request: "clicca Invia")
-                    && !AgentTools.replyMatchesRequest("Fatto: ho cliccato «Prezzi»; ora la finestra è «Prezzi».", request: "vai al preventivo"))
+                    && !AgentTools.replyMatchesRequest("Fatto: ho cliccato «Prezzi»; ora la finestra è «Prezzi».", request: "vai al preventivo")
+                    && AgentTools.replyMatchesRequest("Fatto: ho cliccato «Anna 18:30» e «Bruno 18:30»; ora è selezionato «Bruno 18:30».", request: "spunta le 18:30 per tutti quelli che hanno già le 21:30"))
             check("parole della richiesta: niente verbi generici né parole brevi",
                   AgentTools.significantWords("Clicca sul pulsante Archivia tutto") == ["archivia", "tutto"])
         }

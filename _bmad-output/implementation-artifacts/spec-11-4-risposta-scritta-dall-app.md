@@ -2,7 +2,7 @@
 title: 'Storia 11.4 — Risposta scritta dall''app'
 type: 'feature'
 created: '2026-10-28'
-status: 'in-review'
+status: 'done'
 baseline_commit: '6f0ef9c4e2965bdb8e165601cb5d06ce9dfa6246'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -79,6 +79,7 @@ context:
 - 28/10 sera, Mac libero: 24 risposte composte su 30 compiti con azioni, 0 falsi «fatto», turno finale 1,87 → 0,01 s, compito 8,5 → 4,4 s; suite Claude 15/15 e 12/12. Ricerca §34.
 - 28/10, 22:17: il falso «fatto» di `modulo-citta` è corretto (in un `act` ogni scrittura deve restare visibile), ma ne è comparso uno nuovo, `finder-rinomina`: `final` su `set_value` nel campo del nome senza Invio. Torna in review: serve una decisione con Nico (§35).
 - 28/10, 23:30, deciso con Nico: il testo scritto in un campo dentro una riga, una cella, un elenco o una tabella non vale come prova (`AgentTools.isInlineEditor`), e il prompt chiede di non mettere `final` su un testo che va ancora confermato. Selftest con `finder-rinomina`; sullo schermo `finder-apri`, `finder-rinomina` e `finder-cartella` 3/3. In quella corsa il modello ha messo `final` sull'Invio e non sulla scrittura, quindi il controllo sul campo vero del Finder non è ancora scattato. Resta in review fino al Banco completo della 11.6.
+- 29/10, 09:01: le risposte dell'app su `click` e `click_many` richiedono una parola della richiesta nell'esito (clic sul bersaglio sbagliato nella misura finale). Verifica sui 10 compiti coinvolti: 10/10, 0 falsi «fatto» (ricerca §39). Chiusa.
 
 ## Spec Change Log
 

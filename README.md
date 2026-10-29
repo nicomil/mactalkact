@@ -28,6 +28,8 @@ scripts/build-app.sh
 open build/MacTalkAct.app
 ```
 
+**Dalla release.** Ogni release su GitHub contiene `MacTalkAct-<versione>.zip` con l'app già compilata. L'app ha una firma ad-hoc e non è notarizzata: al primo avvio macOS la blocca. Dopo averla spostata in Applicazioni, aprila con clic destro › Apri, oppure togli la quarantena con `xattr -dr com.apple.quarantine /Applications/MacTalkAct.app`. Poi concedi Accessibilità, Microfono e Riconoscimento vocale quando l'app li chiede. Le novità di ogni versione sono in [CHANGELOG.md](CHANGELOG.md).
+
 Al primo avvio:
 
 1. **Microfono**: consenti.
@@ -378,3 +380,7 @@ Claude e Codex hanno ciascuno il proprio limite d'uso. Quando un motore lo raggi
 ## Idee per il futuro
 
 - Agente che parte mentre stai ancora parlando: scartata per ora. L'attesa vera è il ragionamento del modello, non l'avvio, che è già nascosto tenendo un processo pronto. Partire da una frase incompleta rischierebbe azioni sbagliate.
+
+## Licenza
+
+MIT, vedi [LICENSE](LICENSE).

@@ -1141,3 +1141,11 @@ Cosa dice:
 1. **Il ciclo ha quasi dimezzato il tempo dell'agente:** il compito passa da 8,5 s a 4,5 s, il primo strumento da 3,6 s a 2,3 s, l'istantaneo da 6,7 s a 3,6 s, e la webmail da 12,7 s di primo token a 1,8 s. Restano sopra le soglie il primo strumento e l'istantaneo, entrambi limitati dal primo token del modello (circa 1,1 s) più la prima azione. Il compito sta sulla soglia.
 2. **La risposta scritta dall'app è la leva più grande (−1,9 s sul turno finale), ma ha un costo di precisione:** chiude il turno anche quando il modello ha sbagliato bersaglio. La correzione con le parole della richiesta riduce il rischio senza toglierlo.
 3. **Il secondo strato è stabile ma non a zero timeout:** un timeout per corsa su circa 18 giudizi. NFR-16 rivista resta aperta.
+
+**Verifica dopo le correzioni (29 ottobre, 08:46–09:01, Mac libero).**
+- **Banco completo con la regola delle parole su ogni azione finale** (`…-0853-claude.tsv`): 37/38. Il Calendario passa con la rilettura di EventKit, e non c'è nessun falso «fatto» tra le risposte dell'app. Però le risposte dell'app scendono da 25 a 19 e il compito sale a 5,9 s di mediana. La regola escludeva anche scritture verificate (`replace_text` nei notebook), il trascinamento nel kanban, `press_keys` e `act`, i cui esiti non ripetono le parole della richiesta.
+- **Correzione:** la regola vale solo per `click` e `click_many`, che sono le azioni del bersaglio sbagliato. Le altre azioni hanno già le loro prove (il testo nel campo, il bersaglio cambiato). Anche i numeri di almeno due cifre contano come parole, così «18:30» combacia con «Bruno 18:30».
+- **Prova sui 10 compiti coinvolti** (`…-0901-claude.tsv`): 10/10, 9 risposte dell'app, 0 falsi «fatto», compito 4,2 s di mediana. `sito-contatti` clicca «Contatti» e `posta-apri` la mail giusta.
+- **Suite di sicurezza con Codex:** 15/15 scenari, 10/12 blocchi (non tenta l'invio in chat né ⌘ Invio), 0 azioni non confermate.
+
+Con queste correzioni il ciclo 3 si chiude. Restano aperti, da riprendere nel prossimo ciclo: il primo strumento (2,3 s contro 2,0 s) e il Livello istantaneo (3,6 s contro 2,5 s), legati al primo token del modello; NFR-16 rivista (circa un timeout per corsa); il clic sbagliato con parole in comune; Apple Events come strumento (AD-20).

@@ -7,7 +7,7 @@
 # Stati: backlog · ready-for-dev · in-progress · review · done
 
 generated: 10-26-2026 23:10
-last_updated: 10-29-2026 00:58
+last_updated: 10-29-2026 09:05
 project: mactalkact
 project_key: NOKEY
 tracking_system: file-system
@@ -90,19 +90,19 @@ development_status:
   9-5-classificatore-on-device-come-secondo-strato: done
   epic-9-retrospective: optional
 
-  epic-10: in-progress
-  10-1-accessgate-unico-stesso-comportamento: review
-  10-2-la-corsia-locale-passa-dal-cancello: review
-  10-3-giudizio-anticipato-del-secondo-strato: review
+  epic-10: done
+  10-1-accessgate-unico-stesso-comportamento: done
+  10-2-la-corsia-locale-passa-dal-cancello: done
+  10-3-giudizio-anticipato-del-secondo-strato: done
   epic-10-retrospective: optional
 
-  epic-11: in-progress
-  11-1-riga-di-base-del-ciclo-3-e-cli-riverificate: review
-  11-2-sessione-pronta-quando-inizio-a-parlare: review
-  11-3-scalata-sotto-il-secondo: review
-  11-4-risposta-scritta-dall-app: review
-  11-5-spike-ricerca-in-mail-sotto-il-secondo: review
-  11-6-misura-finale-del-ciclo-3: review
-  11-7-pannello-delle-app-nelle-impostazioni: review
+  epic-11: done
+  11-1-riga-di-base-del-ciclo-3-e-cli-riverificate: done
+  11-2-sessione-pronta-quando-inizio-a-parlare: done
+  11-3-scalata-sotto-il-secondo: done
+  11-4-risposta-scritta-dall-app: done
+  11-5-spike-ricerca-in-mail-sotto-il-secondo: done
+  11-6-misura-finale-del-ciclo-3: done
+  11-7-pannello-delle-app-nelle-impostazioni: done
   epic-11-retrospective: optional
 action_items: []
