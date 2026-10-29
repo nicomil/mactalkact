@@ -644,7 +644,7 @@ private struct MemorySection: View {
 
     var body: some View {
         Card(title: "Fatti ricordati",
-             footer: "Si aggiungono a voce: «ricorda che il profilo aula IB è il profilo Aulab di Edge». L'agente li usa per capirti.") {
+             footer: "Si aggiungono a voce: «ricorda che il profilo lavoro è il profilo Lavoro di Edge». L'agente li usa per capirti.") {
             if facts.isEmpty {
                 Text("Nessun fatto salvato.").foregroundStyle(.secondary)
             }

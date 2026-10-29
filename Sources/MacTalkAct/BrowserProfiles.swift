@@ -1,11 +1,11 @@
 import AppKit
 
 /// Profiles of Chromium browsers (Edge, Chrome, Brave), read from their "Local State" file,
-/// so "apri Edge profilo aula IB" opens the right profile.
+/// so "apri Edge profilo lavoro" opens the right profile.
 enum BrowserProfiles {
     struct Profile {
         let directory: String   // e.g. "Profile 1"
-        let name: String        // e.g. "Aulab"
+        let name: String        // e.g. "Lavoro"
         let email: String
     }
 
@@ -41,7 +41,7 @@ enum BrowserProfiles {
         }.sorted { $0.directory < $1.directory }
     }
 
-    /// Best profile for a spoken name ("aula IB", "lavoro", an email).
+    /// Best profile for a spoken name ("lavoro", "personale", an email).
     static func find(browser: String, spoken: String) -> Profile? {
         let profiles = list(browser: browser)
         let q = Grammar.normalize(spoken)

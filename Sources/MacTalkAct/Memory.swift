@@ -5,7 +5,7 @@ import AppKit
 ///
 /// Format:
 ///   ## Fatti
-///   - «profilo aula IB» = Microsoft Edge, profilo «Aulab»
+///   - «profilo lavoro» = Microsoft Edge, profilo «Lavoro»
 ///   ## Macro
 ///   - modalità lavoro: apri Slack; apri Mail; apri Visual Studio Code
 @MainActor

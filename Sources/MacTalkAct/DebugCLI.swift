@@ -853,7 +853,7 @@ enum DebugCLI {
         check("cloud: carta nascosta", Privacy.redact("«4111 1111 1111 1111»", forCloud: true) == "«[carta]»")
         check("memoria: rifiuta password", Privacy.containsSensitive("la password del wifi è Gatto2024"))
         check("memoria: rifiuta IBAN", Privacy.containsSensitive("IBAN di Marco IT60X0542811101000000123456"))
-        check("memoria: accetta profilo", !Privacy.containsSensitive("«profilo aula IB» = Microsoft Edge, profilo «Aulab»"))
+        check("memoria: accetta profilo", !Privacy.containsSensitive("«profilo lavoro» = Microsoft Edge, profilo «Lavoro»"))
         check("app riservata per id", Privacy.isReservedApp(name: "1Password", bundleID: "com.1password.1password", list: Privacy.defaultReservedApps))
         check("app riservata per nome", Privacy.isReservedApp(name: "Banca Mia", bundleID: "x.y", list: "# commento\nbanca mia"))
         check("Safari non riservata", !Privacy.isReservedApp(name: "Safari", bundleID: "com.apple.Safari", list: Privacy.defaultReservedApps))

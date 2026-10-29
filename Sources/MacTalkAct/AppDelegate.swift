@@ -500,8 +500,8 @@ struct HelpView: View {
             "«nascondi numeri» per toglierli; spariscono anche da soli dopo 30 secondi",
         ]),
         ("Memoria e macro", [
-            "«ricorda che il profilo aula IB è il profilo Aulab di Edge»",
-            "«apri Edge profilo aula IB», «dimentica il profilo aula IB»",
+            "«ricorda che il profilo lavoro è il profilo Lavoro di Edge»",
+            "«apri Edge profilo lavoro», «dimentica il profilo lavoro»",
             "«crea una macro modalità lavoro: apri Slack, apri Mail, apri Visual Studio Code»",
             "Poi basta dire «modalità lavoro». Il file si apre da menu › Memoria e macro…",
         ]),

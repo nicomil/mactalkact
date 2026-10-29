@@ -72,7 +72,7 @@ final class AgentRunner {
     - When asked to write or reply, type exactly what the user dictated (clean up filler words only).
     - The request includes the user's personal memory (aliases, preferences, macros): use it to interpret \
     what they mean. When they say «ricorda che…» save it with remember; «dimentica…» → forget. If you \
-    discover something stable they will likely reuse (e.g. which browser profile «aula IB» is), remember it.
+    discover something stable they will likely reuse (e.g. which browser profile «lavoro» is), remember it.
     - «crea una macro X: …» → save_macro with short Italian steps (one action each).
     - The request may include <recent>: the last interactions with this user, most recent last. Use it to \
     resolve references («di prima», «anche l'altra», «rimetti com'era»): the `changes` there show the text \

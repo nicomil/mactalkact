@@ -123,7 +123,7 @@ Il file `~/Library/Application Support/MacTalkAct/memoria.md` (menu ✋ › Memo
 
 ```markdown
 ## Fatti
-- «profilo aula IB» = Microsoft Edge, profilo «Aulab»
+- «profilo lavoro» = Microsoft Edge, profilo «Lavoro»
 - La mia mail di lavoro è su Outlook web in Edge
 
 ## Macro
@@ -138,7 +138,7 @@ A voce: «ricorda che…», «dimentica…». L'agente salva da solo anche ciò 
 
 ### Profili dei browser
 
-«Apri Edge profilo aula IB»: l'agente prova a leggere l'elenco dei profili di Edge, Chrome o Brave. Su questo Mac macOS impedisce di leggere i dati degli altri browser, quindi l'agente apre il browser, sceglie il profilo dal suo menu e lo memorizza per la volta dopo.
+«Apri Edge profilo lavoro»: l'agente prova a leggere l'elenco dei profili di Edge, Chrome o Brave. Su questo Mac macOS impedisce di leggere i dati degli altri browser, quindi l'agente apre il browser, sceglie il profilo dal suo menu e lo memorizza per la volta dopo.
 
 ## L'agente
 

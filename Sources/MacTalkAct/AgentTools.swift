@@ -229,7 +229,7 @@ final class AgentTools {
              "List the profiles of a Chromium browser (Edge, Chrome, Brave): directory, name, account email.",
              ["browser": ["type": "string"]], required: ["browser"]),
         tool("remember",
-             "Save a short fact in the user's personal memory (Italian), e.g. «profilo aula IB» = Edge, profilo «Aulab». Use when the user says «ricorda che…» or when you learn a stable preference or alias. Never save passwords, codes, card or bank details, health information or other people's personal data (phone numbers, addresses) unless the user explicitly asks to remember that exact thing.",
+             "Save a short fact in the user's personal memory (Italian), e.g. «profilo lavoro» = Edge, profilo «Lavoro». Use when the user says «ricorda che…» or when you learn a stable preference or alias. Never save passwords, codes, card or bank details, health information or other people's personal data (phone numbers, addresses) unless the user explicitly asks to remember that exact thing.",
              ["fact": ["type": "string"]], required: ["fact"]),
         tool("forget",
              "Remove facts from the personal memory that contain this text («dimentica…»).",
