@@ -7,6 +7,8 @@ enum ExecError: LocalizedError {
     case badKeys(String)
     case textChanged
     case unknownAction(String)
+    /// Without Accessibility macOS drops synthetic keys silently: say so instead of «✓».
+    case noAccessibility
 
     var errorDescription: String? {
         switch self {
@@ -15,6 +17,7 @@ enum ExecError: LocalizedError {
         case .badKeys(let k): return "Scorciatoia non valida: \(k)"
         case .textChanged: return "Il testo è cambiato nel frattempo, riprova"
         case .unknownAction(let a): return "Azione sconosciuta: \(a)"
+        case .noAccessibility: return "Manca il permesso Accessibilità: Impostazioni di Sistema › Privacy e sicurezza › Accessibilità › MacTalkAct"
         }
     }
 }
@@ -101,6 +104,7 @@ final class Executor {
 
     func press(_ combo: String) throws {
         guard let k = KeyCombo.parse(combo) else { throw ExecError.badKeys(combo) }
+        guard AXIsProcessTrusted() else { throw ExecError.noAccessibility }
         k.post()
     }
 

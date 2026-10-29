@@ -34,6 +34,8 @@ scripts/build-app.sh
 open build/MacTalkAct.app
 ```
 
+Per preparare una release (zip e DMG firmati ad-hoc in `build/dist`) usa `scripts/package-release.sh`: non tocca `build/MacTalkAct.app`, che resta firmata con il certificato locale e quindi mantiene i permessi già concessi.
+
 ### Installare dalla release
 
 Ogni release su GitHub contiene l'app già compilata, come DMG (`MacTalkAct-<versione>.dmg`) e come zip. Apri il DMG e trascina MacTalkAct nella cartella Applicazioni. L'app ha una firma ad-hoc e non è notarizzata, quindi al primo avvio macOS la blocca: aprila con clic destro › Apri, oppure togli la quarantena con `xattr -dr com.apple.quarantine /Applications/MacTalkAct.app`. Poi concedi Accessibilità, Microfono e Riconoscimento vocale quando l'app li chiede. Le novità di ogni versione sono in [CHANGELOG.md](CHANGELOG.md).
