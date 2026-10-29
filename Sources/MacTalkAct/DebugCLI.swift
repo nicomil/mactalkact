@@ -401,6 +401,107 @@ enum DebugCLI {
         check("solo con il consenso già dato si agisce", AppleEventsSpike.mayRun(noErr) && !AppleEventsSpike.mayRun(OSStatus(errAEEventWouldRequireUserConsent))
               && !AppleEventsSpike.mayRun(OSStatus(errAEEventNotPermitted)) && !AppleEventsSpike.mayRun(OSStatus(procNotFound)) && !AppleEventsSpike.mayRun(nil))
         check("etichette del consenso", AppleEventsSpike.consentLabel(noErr) == "concesso" && AppleEventsSpike.consentLabel(OSStatus(errAEEventWouldRequireUserConsent)).contains("-1744"))
+        print("Spike gesti (attenzione e sì/no con la testa):")
+        do {
+            // Synthetic head angles at 15 fps: keyframes (t, yaw, pitch) joined by straight lines,
+            // plus an optional tremor of ±`tremor` degrees on both axes.
+            func series(_ keys: [(Double, Double, Double)], tremor: Double = 0, fps: Double = 15) -> [HeadSample] {
+                guard let last = keys.last else { return [] }
+                var out: [HeadSample] = []
+                var t = 0.0
+                while t <= last.0 + 1e-9 {
+                    let i = keys.lastIndex { $0.0 <= t } ?? 0
+                    let a = keys[i], b = keys[min(i + 1, keys.count - 1)]
+                    let k = b.0 > a.0 ? (t - a.0) / (b.0 - a.0) : 0
+                    out.append(HeadSample(t: t, yaw: a.1 + (b.1 - a.1) * k + tremor * sin(2 * .pi * 3 * t),
+                                          pitch: a.2 + (b.2 - a.2) * k + tremor * cos(2 * .pi * 2.5 * t), roll: 0, size: 0.3))
+                    t += 1 / fps
+                }
+                return out
+            }
+            func count(_ events: [HeadGestureDetector.Event]) -> (yes: Int, no: Int) {
+                (events.filter { $0.gesture == .yes }.count, events.filter { $0.gesture == .no }.count)
+            }
+            let yes = count(HeadGestureDetector.detect(series([(0, 0, 0), (0.5, 0, 0), (0.75, 0, 12), (1.0, 0, -2), (1.25, 0, 12), (1.5, 0, 0), (3, 0, 0)], tremor: 0.5)))
+            check("gesti: un sì sintetico dà 1 sì e 0 no", yes == (1, 0))
+            let no = count(HeadGestureDetector.detect(series([(0, 0, 0), (0.5, 0, 0), (0.8, -15, 0), (1.1, 15, 0), (1.4, -15, 0), (1.7, 0, 0), (3.5, 0, 0)], tremor: 0.5)))
+            check("gesti: un no sintetico dà 1 no e 0 sì", no == (0, 1))
+            let tremor = series([(0, 0, 0), (8, 0, 0)], tremor: 2)
+            check("gesti: tremolio di ±2° non dà gesti", HeadGestureDetector.detect(tremor).isEmpty)
+            var steady = AttentionGate()
+            let center = HeadPose(yaw: 0, pitch: 0)
+            let states = tremor.map { steady.feed($0, reference: center) }
+            check("gesti: con il tremolio l'attenzione resta accesa", states.drop { !$0 }.allSatisfy { $0 } && states.last == true)
+            let turned = series([(0, 0, 0), (1, 0, 0), (1.5, 40, 0), (6, 40, 0)], tremor: 2)
+            var gate = AttentionGate()
+            check("gesti: girarsi e restare girati spegne l'attenzione e non dà un no",
+                  HeadGestureDetector.detect(turned).isEmpty && turned.map { gate.feed($0, reference: center) }.last == false)
+            check("gesti: girarsi e tornare lentamente non dà un no",
+                  HeadGestureDetector.detect(series([(0, 0, 0), (1, 0, 0), (3, 40, 0), (4, 40, 0), (6, 0, 0), (8, 0, 0)], tremor: 2)).isEmpty)
+            check("gesti: un'occhiata rapida di lato e ritorno non dà un no",
+                  HeadGestureDetector.detect(series([(0, 0, 0), (1, 0, 0), (1.4, 40, 0), (1.8, 40, 0), (2.2, 0, 0), (4, 0, 0)], tremor: 2)).isEmpty)
+            var hold = AttentionGate()
+            func at(_ t: Double, yaw: Double) -> Bool { hold.feed(HeadSample(t: t, yaw: yaw, pitch: 0, roll: 0, size: 0.3), reference: center) }
+            var timeline: [(Double, Bool)] = []
+            for i in 0...60 { let t = Double(i) / 30; timeline.append((t, at(t, yaw: t < 1 ? 3 : 30))) }
+            let onAt = timeline.first { $0.1 }?.0 ?? -1
+            let offAt = timeline.first { $0.0 > 1 && !$0.1 }?.0 ?? -1
+            check("gesti: il cancello si accende e si spegne solo dopo la tenuta di 300 ms",
+                  abs(onAt - 0.3) < 0.04 && timeline.contains { abs($0.0 - 1.2) < 0.02 && $0.1 } && abs(offAt - 1.3) < 0.04)
+            var blink = AttentionGate()
+            var blinkStates: [Bool] = []
+            for i in 0...60 {
+                let t = Double(i) / 30
+                blinkStates.append(blink.feed(HeadSample(t: t, yaw: (1.0...1.2).contains(t) ? 30 : 0, pitch: 0, roll: 0, size: 0.3), reference: center))
+            }
+            check("gesti: uno sguardo via di 200 ms non spegne il cancello", blinkStates.drop { !$0 }.allSatisfy { $0 })
+            var absentGate = AttentionGate()
+            let absentStates = (0...30).map { i -> Bool in
+                let t = Double(i) / 15
+                return absentGate.feed(t < 0.8 ? HeadSample(t: t, yaw: 0, pitch: 0, roll: 0, size: 0.3) : .absent(t), reference: center)
+            }
+            check("gesti: volto assente spegne l'attenzione", absentStates.contains(true) && absentStates.last == false)
+            check("gesti: calibrazione senza volto non dà riferimento", HeadCalibration.reference((0..<75).map { .absent(Double($0) / 15) }) == nil)
+            let calib = (0..<75).map { i in HeadSample(t: Double(i) / 15, yaw: i % 10 == 0 ? 50 : 4, pitch: -12, roll: 0, size: 0.3) }
+            check("gesti: calibrazione con la mediana, un valore strano non la sposta", HeadCalibration.reference(calib) == HeadPose(yaw: 4, pitch: -12))
+            check("gesti: mediana e 95° percentile", HeadCalibration.median([3, 1, 2, 10]) == 2.5 && HeadCalibration.percentile(Array(1...100).map(Double.init), 95) == 95)
+            let diagonal = series([(0, 0, 0), (0.5, 0, 0), (0.75, 12, 12), (1.0, -2, -2), (1.25, 12, 12), (1.5, 0, 0), (3, 0, 0)], tremor: 0.5)
+            check("gesti: zigzag in diagonale (yaw e pitch insieme) non dà gesti", HeadGestureDetector.detect(diagonal).isEmpty)
+            let longYes = series([(0, 0, 0), (0.5, 0, 0), (0.75, 0, 12), (1.0, 0, -2), (1.25, 0, 12), (1.5, 0, -2), (1.75, 0, 12), (2.0, 0, -2), (2.25, 0, 0), (4, 0, 0)], tremor: 0.5)
+            check("gesti: un sì lungo (6 tratti) dà 1 sì solo, grazie alla pausa", count(HeadGestureDetector.detect(longYes)) == (1, 0))
+            // No tremor: the return of the first glance stays its extreme until the second glance confirms it.
+            let apart = series([(0, 0, 0), (0.5, 0, 0), (0.8, -15, 0), (1.1, 0, 0), (3.0, 0, 0), (3.3, -15, 0), (3.6, 0, 0), (5, 0, 0)])
+            check("gesti: due oscillazioni rapide di yaw a più di 1,5 s non danno un no", HeadGestureDetector.detect(apart).isEmpty)
+            let lost = series([(0, 0, 0), (0.5, 0, 0), (0.75, 0, 12), (1.0, 0, -2), (1.25, 0, 12), (1.5, 0, 0), (3, 0, 0)], tremor: 0.5).map {
+                (0.95...1.05).contains($0.t) ? HeadSample.absent($0.t) : $0
+            }
+            check("gesti: volto perso a metà dello zigzag lo azzera (nessun gesto)", HeadGestureDetector.detect(lost).isEmpty)
+            // The report: a calibration of 3 s scattered ±1° in yaw, then the synthetic yes as a phase
+            // with 5 expected yes. CPU: 0.3 s in 3 s without voice, 3 s in 3 s with the voice.
+            let calibFrames = (0..<45).map { i in
+                GestureFrame(sample: HeadSample(t: Double(i) / 15, yaw: i % 2 == 0 ? 1 : -1, pitch: 0, roll: 0, size: 0.3), phase: 0, visionMs: 8, latencyMs: 20, attention: nil, gesture: nil)
+            }
+            let yesFrames = series([(0, 0, 0), (0.5, 0, 0), (0.75, 0, 12), (1.0, 0, -2), (1.25, 0, 12), (1.5, 0, 0), (3, 0, 0)], tremor: 0.5).map {
+                GestureFrame(sample: HeadSample(t: $0.t + 3, yaw: $0.yaw, pitch: $0.pitch, roll: 0, size: 0.3), phase: 1, visionMs: 8, latencyMs: 20, attention: true, gesture: nil)
+            }
+            let phases = [GesturePhase(name: "calibrazione", expectAttention: true, start: 0, end: 3, cpuSeconds: 0.3),
+                          GesturePhase(name: "sì", expectAttention: true, expectedYes: 5, start: 3, end: 6, cpuSeconds: 3, voiced: true)]
+            let r = GestureSpikeReport.lines(frames: calibFrames + yesFrames, phases: phases, reference: center, setup: .init())
+            let all = r.joined(separator: "\n")
+            check("gesti: report con griglia rivalutata e tempi", all.contains("A  8° · 2 oscillazioni · sì 1/5") && all.contains("mediana 8.0 ms") && all.contains("±15° · sì 100%"))
+            check("gesti: report, attenzione corretta sulla riga della fase sì", r.contains { $0.hasPrefix("  2. sì ·") && $0.contains("corretta 100%") })
+            check("gesti: report, dispersione della calibrazione", all.contains("dispersione (deviazione assoluta mediana): ±1.0° yaw, ±0.0° pitch"))
+            check("gesti: CPU media solo sulle fasi senza voce", all.contains("CPU media del processo 10% di un core"))
+            let known = [HeadSample(t: 0, yaw: 0, pitch: 2, roll: 0, size: 0.3), HeadSample(t: 0.1, yaw: 0.5, pitch: 2, roll: 0, size: 0.3),
+                         HeadSample(t: 0.2, yaw: 1, pitch: 2, roll: 0, size: 0.3), HeadSample(t: 0.3, yaw: 1, pitch: 2, roll: 0, size: 0.3), .absent(0.4)]
+            check("gesti: risoluzione degli angoli", GestureSpikeReport.resolutionLine(known)
+                    == "Risoluzione angoli: 3 valori distinti di yaw (passo minimo 0.5°), 1 valori distinti di pitch")
+            check("gesti: falsi = tipo sbagliato o in più", GestureSpikeReport.tally([.yes, .no, .yes], phase: GesturePhase(name: "sì", expectAttention: true, expectedYes: 1))
+                    == GestureSpikeReport.Tally(yes: 2, no: 1, falses: 2))
+            let tsv = GestureSpikeReport.tsv(frames: [GestureFrame(sample: .absent(0.5), phase: 0, visionMs: 7, latencyMs: 30, attention: nil, gesture: nil)], phases: phases)
+            check("gesti: TSV con 11 colonne e solo numeri", tsv.split(separator: "\n").allSatisfy { $0.split(separator: "\t", omittingEmptySubsequences: false).count == 11 }
+                    && tsv.contains("0.500\tcalibrazione\t0\t"))
+        }
         print("Livelli di accesso (Storia 9.3):")
         check("Terminal: solo clic", AccessLevel.level(bundleID: "com.apple.Terminal", name: "Terminale", list: AccessLevel.defaultList) == .clickOnly)
         // Story 11.7: the app panel edits the same text lists.

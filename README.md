@@ -361,6 +361,7 @@ tail -f ~/Library/Logs/MacTalkAct.log              # cosa sente e decide l'app, 
 .build/debug/MacTalkAct --session-test             # Sessione lunga con il claude vero: due risposte brevi (usa l'abbonamento)
 .build/debug/MacTalkAct --apple-events-spike       # Storia 8.4: azioni dirette via Apple Events, solo con il consenso già dato; --avvia apre Calendario e Mail
 .build/debug/MacTalkAct --local-vision-test        # Storia 8.3: il modello Apple sul Mac con lo screenshot di 5 pagine del Banco
+.build/debug/MacTalkAct --gesture-spike            # spike: attenzione e sì/no con la testa dalla webcam, guidato a voce (solo con te al Mac); il permesso Fotocamera va al terminale da cui lo lanci; --fps 15 (minimo 5), --secondi-fase 10; report e angoli in ~/Library/Logs
 .build/debug/MacTalkAct --mcp-serve                # solo il server degli strumenti, per provare a mano altri client MCP
 .build/debug/MacTalkAct --observe-stats com.microsoft.edgemac # quanto vede l'agente di un'app (senza contenuti)
 .build/debug/MacTalkAct --activate-test Calculator # porta un'app in primo piano e torna indietro

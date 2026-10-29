@@ -144,6 +144,17 @@ if arguments.contains("--mail-search-spike") {
     dispatchMain()
 }
 
+if arguments.contains("--gesture-spike") {
+    // Spike: attention and yes/no with the head from the webcam. Only with Nico at the Mac.
+    let fps = argument(after: "--fps").flatMap(Int.init).map { min(max($0, 5), 60) } ?? 15
+    let seconds = argument(after: "--secondi-fase").flatMap(Double.init).map { min(max($0, 3), 120) } ?? 10
+    MainActor.assumeIsolated { _ = NSApplication.shared }
+    Task { @MainActor in
+        exit(await GestureSpike.run(fps: fps, phaseSeconds: seconds))
+    }
+    dispatchMain()
+}
+
 if arguments.contains("--apple-events-spike") {
     MainActor.assumeIsolated { _ = NSApplication.shared }
     Task { @MainActor in

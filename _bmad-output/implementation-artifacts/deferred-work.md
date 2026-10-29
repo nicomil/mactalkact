@@ -91,3 +91,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-11-4-risposta-scritta-dall-app.md`
   summary: Rendere indipendenti dallo schermo le righe di `--fallback-test` della Storia 11.4 (registro delle etichette finto).
   evidence: oggi l'etichetta dell'id 4 dipende dalla finestra davanti; il test controlla solo la forma della frase.
+- source_spec: `_bmad-output/implementation-artifacts/spec-spike-gesti-camera.md`
+  summary: Nello spike gesti, se `AVCaptureSession.synchronizationClock` è nil i tempi dei fotogrammi restano nell'orologio della camera e non si confrontano con inizio e fine delle fasi.
+  evidence: maybe-false (sarebbe high): si chiarisce con la prima corsa; se il report mostra «fps reali 0.0» o attenzione «—», usare l'ora di arrivo (`hostNow()`) come ripiego.

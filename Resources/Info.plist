@@ -24,6 +24,8 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>MacTalkAct misura se app come Safari, Calendario e Mail rispondono ai comandi diretti (prova di sviluppo); non invia nulla senza la tua conferma.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>MacTalkAct usa la fotocamera solo nella prova di sviluppo dei gesti con la testa: misura gli angoli della testa sul Mac, non salva, non invia e non mostra immagini.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
