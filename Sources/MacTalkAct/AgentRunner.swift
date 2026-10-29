@@ -423,6 +423,7 @@ final class AgentRunner {
         guard !running else { throw AgentEngineError.failed("sto già lavorando a un'altra richiesta") }
         tools.reset()
         running = true
+        defer { Task { @MainActor [tools] in await tools.closeOverlayIfLeftOpen() } }
         // One monotonic clock for the whole request, split into contiguous phases (FR-41, AD-18).
         let timer = PhaseTimer()
         let handoff = HandoffClock()

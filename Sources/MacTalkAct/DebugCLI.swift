@@ -429,6 +429,16 @@ enum DebugCLI {
         check("scorciatoie di sistema anche in «solo clic», il resto no",
               AccessGate.isSystemShortcut("ctrl+right") && AccessGate.isSystemShortcut("ctrl+left ctrl+left")
                 && !AccessGate.isSystemShortcut("ctrl+c") && !AccessGate.isSystemShortcut("ctrl+right return") && !AccessGate.isSystemShortcut(""))
+        do {
+            let screen = [CGSize(width: 1440, height: 900)]
+            let full = SystemOverlay.WindowInfo(owner: "Dock", layer: 20, size: CGSize(width: 1440, height: 900))
+            let bar = SystemOverlay.WindowInfo(owner: "Dock", layer: 20, size: CGSize(width: 1440, height: 80))
+            let other = SystemOverlay.WindowInfo(owner: "Safari", layer: 0, size: CGSize(width: 1440, height: 900))
+            check("Mission Control: finestra del Dock a tutto schermo, non la barra né altre app",
+                  SystemOverlay.isOpen(windows: [bar, full], screens: screen) && !SystemOverlay.isOpen(windows: [bar, other], screens: screen))
+            check("chiudi mission control: Esc come comando rapido", Grammar.parse("Chiudi Mission Control") == .keys(combo: "escape", label: "Esc", confirm: false)
+                  && Grammar.parse("Torna normale") == .keys(combo: "escape", label: "Esc", confirm: false))
+        }
         check("cmux: solo clic", AccessLevel.level(bundleID: "com.cmuxterm.app", name: "cmux", list: AccessLevel.defaultList) == .clickOnly)
         check("Impostazioni di Sistema: conferma ogni azione", AccessLevel.level(bundleID: "com.apple.systempreferences", name: "", list: AccessLevel.defaultList) == .confirmAll)
         check("app sconosciuta: normale", AccessLevel.level(bundleID: "com.example", name: "Esempio", list: AccessLevel.defaultList) == .full)
@@ -3909,6 +3919,19 @@ extension DebugCLI {
             AccessGate.ActionFacts(isSecureElement: { _ in false }, riskActions: { app in
                 [RiskAction(tool: "click", label: label, role: "AXButton", app: app, window: "Banco", request: "")]
             })
+        }
+
+        // Solo clic: system shortcuts pass; Esc only while Mission Control covers the screen.
+        do {
+            let (gate, _) = makeGate("cmux", .clickOnly)
+            gate.environment.overlayOpen = { false }
+            let desk = await gate.check("press_keys", ["keys": "ctrl+right"], origin: .model, facts: noFacts)
+            let escClosed = await gate.check("press_keys", ["keys": "escape"], origin: .model, facts: noFacts)
+            gate.environment.overlayOpen = { true }
+            let escOpen = await gate.check("press_keys", ["keys": "escape"], origin: .model, facts: noFacts)
+            let enterOpen = await gate.check("press_keys", ["keys": "return"], origin: .model, facts: noFacts)
+            check("solo clic: ⌃→ passa; Esc solo con Mission Control aperto; Invio mai",
+                  desk == nil && escClosed != nil && escOpen == nil && enterOpen != nil)
         }
 
         // Solo clic: keys and typing refused with the same error as before, counted as a refusal.

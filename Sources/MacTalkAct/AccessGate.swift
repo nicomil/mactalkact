@@ -46,6 +46,8 @@ final class AccessGate {
         var windowTitle: () -> String = { ScreenContext.capture(includeLabels: false).windowTitle }
         /// The chat in front where Enter sends the message (its name), or nil.
         var composerApp: () -> String? = { AccessGate.composerApp() }
+        /// Mission Control or Launchpad covers the screen: Esc goes to the Dock, not to the app «in front».
+        var overlayOpen: () -> Bool = { SystemOverlay.isOpen() }
     }
     var environment = Environment()
 
@@ -132,7 +134,8 @@ final class AccessGate {
             lastAccessNotice = "\(app)|\(level.scope)"
             onAccessNotice?("🔐 \(app): \(level.scope.rawValue)")
         }
-        let systemKeys = name == "press_keys" && Self.isSystemShortcut((args["keys"] as? String) ?? "")
+        let keys = ((args["keys"] as? String) ?? "").lowercased()
+        let systemKeys = name == "press_keys" && (Self.isSystemShortcut(keys) || keys == "escape" && environment.overlayOpen())
         if level.scope == .clickOnly, effectful, !Self.clickOnlyTools.contains(name), !systemKeys {
             Log.info("Agente: \(name) bloccato, \(app) è «solo clic»")
             refusals += 1

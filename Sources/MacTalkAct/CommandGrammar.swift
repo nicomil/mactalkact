@@ -116,6 +116,7 @@ enum Grammar {
         k(["desktop precedente", "desktop a sinistra", "vai al desktop di sinistra", "vai al desktop a sinistra",
            "desktop di sinistra", "torna al desktop di prima", "scrivania precedente"], "ctrl+left", "Desktop a sinistra")
         k(["mission control", "mostra tutte le finestre", "tutte le finestre"], "ctrl+up", "Mission Control")
+        k(["chiudi mission control", "esci da mission control", "torna normale", "torna alla normalita"], "escape", "Esc")
         k(["app precedente", "cambia app", "torna all app precedente", "applicazione precedente"], "cmd+tab", "App precedente")
 
         for p in ["giu", "scorri", "scorri giu", "scorre", "scorre giu", "scendi", "scorri in basso", "piu giu", "vai giu", "abbassa", "scorri verso il basso"] {

@@ -96,8 +96,23 @@ final class AgentTools {
 
     /// Fresh state for a new task. `keepElements`: the same task retried on another engine before
     /// any action (AD-15): the screen did not change, the ids already sent stay valid.
+    /// This request pressed ⌃↑ (Mission Control): at its end the app closes what is still open.
+    var openedOverlay = false
+
+    /// Closes Mission Control if this request opened it and left it open: the user is not left on a
+    /// screen the agent cannot read (29/10, «crea un nuovo desktop»).
+    func closeOverlayIfLeftOpen() async {
+        guard openedOverlay else { return }
+        openedOverlay = false
+        guard SystemOverlay.isOpen() else { return }
+        Log.info("Agente: Mission Control lasciato aperto, lo chiudo")
+        try? executor.press("escape")
+        try? await Task.sleep(for: .milliseconds(300))
+    }
+
     func reset(keepElements: Bool = false) {
         if !keepElements {
+            openedOverlay = false
             registry.removeAll()
             known.removeAll()
             nextID = 1
@@ -827,6 +842,7 @@ final class AgentTools {
             guard let keys = a["keys"] as? String else { return .error("Missing keys") }
             if let refusal = await gate.confirmKeys(keys, origin: .model) { return .error(refusal) }
             onProgress?("Premo \(keys)")
+            if keys.lowercased().split(separator: " ").contains("ctrl+up") { openedOverlay = true }
             try await executor.pressSequence(keys)
             try await Task.sleep(for: .milliseconds(250))
             return .text("Pressed \(keys).")
