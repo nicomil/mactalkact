@@ -55,7 +55,7 @@ context: []
 - [x] `Sources/MacTalkAct/main.swift` -- comando `--gesture-spike` con `--fps` (predefinito 15) e `--secondi-fase`.
 - [x] `Sources/MacTalkAct/DebugCLI.swift` -- selftest delle funzioni pure (casi della matrice).
 - [x] `Resources/Info.plist`, `README.md` -- descrizione d'uso della camera («prova di sviluppo») e riga del comando.
-- [ ] ricerca -- §40 con tabelle e raccomandazione, dopo la corsa con Nico.
+- [x] ricerca -- §40 con tabelle e raccomandazione, dopo la corsa con Nico.
 
 **Acceptance Criteria:**
 - Given `--selftest`, when finisce, then il blocco «Spike gesti» è verde: un sì sintetico dà 1 sì e 0 no, un no dà 1 no e 0 sì, tremolio e girarsi-e-restare non danno gesti, il cancello si spegne solo dopo il tempo di tenuta.
@@ -89,6 +89,7 @@ context: []
 - Il §40 della ricerca resta da scrivere dopo la corsa con Nico.
 - Verifica della matrice: le righe «tremolio», «girarsi e restare girati» e «volto assente» (cancello e calibrazione) sono coperte dal selftest; «permesso negato», «nessuna camera», la ripetizione della calibrazione e la «corsa completa» dipendono dalla camera vera e si verificano solo nella corsa con Nico.
 - 29/10: codice chiuso dopo la review (24 controlli verdi). Restano con Nico al Mac: la corsa `--gesture-spike` e il §40 della ricerca.
+- 29/10, 17:05–17:25, con Nico al Mac: quattro corse. La prima ha dato «sì» 0/5 (il rilevatore a zigzag aspettava una seconda inversione che in un cenno naturale non arriva). Correzioni, provate sugli angoli registrati prima di ogni nuova corsa: il «sì» è un singolo cenno (`ExcursionTracker`: andata e ritorno entro 1,5 s, sosta in fondo ≤ 0,5 s); un tratto dello zigzag si chiude anche quando la testa si ferma per 0,3 s; il «no» deve passare da entrambi i lati del riposo; il report conta le risposte per numero detto (primo gesto giusto, ripetuti a parte). La quarta corsa, su dati nuovi: sì 3/5, no 5/5, 0 falsi. §40 della ricerca con la raccomandazione.
 
 ## Spec Change Log
 

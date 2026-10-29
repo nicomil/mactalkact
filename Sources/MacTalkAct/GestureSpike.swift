@@ -66,6 +66,7 @@ enum GestureSpike {
         }
 
         var phases: [GesturePhase] = []
+        var cues: [Double] = []
         /// Runs one phase: the instruction first, then `seconds` of recording (or `body`).
         func phase(_ p: GesturePhase, instruction: String, seconds: Double, body: (() async -> Void)? = nil) async {
             await say(instruction)
@@ -75,6 +76,8 @@ enum GestureSpike {
             recorder.setPhase(phases.count)
             if let body { await body() } else { try? await Task.sleep(for: .seconds(seconds)) }
             p.end = hostNow()
+            p.cues = cues
+            cues = []
             p.cpuSeconds = processCPUSeconds() - cpu0
             recorder.setPhase(-1)
             phases.append(p)
@@ -115,6 +118,7 @@ enum GestureSpike {
             await phase(GesturePhase(name: name, expectAttention: true, expectedYes: yes ? gestureCount : 0, expectedNo: yes ? 0 : gestureCount, voiced: true),
                         instruction: "Guardando lo schermo, fai \(word) con la testa a ogni numero che dico, \(gestureCount) volte.", seconds: 0) {
                 for i in 1...gestureCount {
+                    cues.append(hostNow())
                     await say("\(i)")
                     try? await Task.sleep(for: .seconds(secondsPerGesture))
                 }

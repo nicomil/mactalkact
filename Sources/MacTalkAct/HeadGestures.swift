@@ -97,6 +97,10 @@ struct SwingTracker {
     let amplitude: Double
     let maxLeg: Double
     let margin: Double
+    /// A leg also ends when the angle stops for this long at its extreme (run of 29/10: after a
+    /// shake the head comes back slowly and rests, and without this the slow return merged with
+    /// the next shake into one leg seconds long).
+    let settle = 0.3
 
     private var anchor: (t: Double, v: Double)?
     private var extreme: (t: Double, v: Double) = (0, 0)
@@ -135,7 +139,16 @@ struct SwingTracker {
             extreme = (t, v)
             return nil
         }
-        guard d * (extreme.v - v) >= margin else { return nil }
+        if d * (extreme.v - v) < margin {
+            guard t - extreme.t >= settle else { return nil }
+            // Still at the extreme: the leg is over, rest here until the next movement.
+            let travelled = d * (extreme.v - a.v)
+            let swing = travelled >= amplitude && extreme.t - legStart <= maxLeg + 1e-9 ? extreme.t : nil
+            anchor = extreme
+            direction = 0
+            legStart = t
+            return swing
+        }
         // Reversal: judge the leg that ended at the extreme, then start the opposite one.
         let travelled = d * (extreme.v - a.v)
         let fast = extreme.t - legStart <= maxLeg + 1e-9
@@ -148,9 +161,71 @@ struct SwingTracker {
     }
 }
 
-/// Yes and no with the head. Yes = `swings` pitch swings within `window` seconds with the yaw
-/// almost still; no = the same on yaw with the pitch almost still. «Almost still» means the other
-/// axis moved less than half as much as the gesture axis. After a gesture, `pause` seconds of rest.
+/// One nod on one axis: from rest the angle moves away by at least `amplitude` degrees and comes
+/// back near rest, all within `maxDuration` seconds. Rest is the median of the last `restWindow`
+/// seconds before the movement starts. A natural «sì» is a single nod (down and back), so it can
+/// not wait for a second reversal as the zigzag does: the run of 29/10 gave 0/5 that way.
+struct ExcursionTracker {
+    let amplitude: Double
+    let maxDuration: Double
+    let margin: Double
+    let restWindow = 0.5
+    /// Longest stay near the bottom of the movement (within 75% of the peak): a nod stays about
+    /// 0.3 s, a look at the keyboard much longer.
+    let maxDwell = 0.5
+
+    private var recent: [(t: Double, v: Double)] = []
+    private var start: (t: Double, rest: Double)?
+    private var peak = 0.0
+    private var path: [(t: Double, d: Double)] = []
+
+    init(amplitude: Double, maxDuration: Double) {
+        self.amplitude = amplitude
+        self.maxDuration = maxDuration
+        margin = max(3, amplitude * 0.4)
+    }
+
+    mutating func reset() { recent = []; start = nil; peak = 0; path = [] }
+
+    /// Returns the start time of the nod when it has just come back near rest.
+    mutating func feed(t: Double, v: Double) -> Double? {
+        defer {
+            recent.append((t, v))
+            recent.removeAll { t - $0.t > restWindow }
+        }
+        if let s = start {
+            let d = v - s.rest
+            if abs(d) > abs(peak) { peak = d }
+            path.append((t, d))
+            if t - s.t > maxDuration {
+                start = nil
+                return nil
+            }
+            if abs(d) <= margin {
+                // Back near rest: a nod if it went far enough, otherwise just noise that ends here
+                // (left open, it would swallow the real nod that follows).
+                start = nil
+                let deep = path.filter { abs($0.d) >= abs(peak) * 0.75 }
+                let dwell = (deep.last?.t ?? 0) - (deep.first?.t ?? 0)
+                return abs(peak) >= amplitude && dwell <= maxDwell ? s.t : nil
+            }
+            return nil
+        }
+        guard recent.count >= 4 else { return nil }
+        let rest = HeadCalibration.median(recent.map(\.v))
+        if abs(v - rest) >= margin {
+            start = (t, rest)
+            peak = v - rest
+            path = [(t, v - rest)]
+        }
+        return nil
+    }
+}
+
+/// Yes and no with the head. Yes = one pitch nod (`ExcursionTracker`) with the yaw almost still;
+/// no = `swings` yaw swings within `window` seconds with the pitch almost still. «Almost still»
+/// means the other axis moved less than half as much as the gesture axis. After a gesture,
+/// `pause` seconds of rest.
 struct HeadGestureDetector {
     struct Config: Equatable {
         var pitchAmplitude = 8.0
@@ -159,6 +234,8 @@ struct HeadGestureDetector {
         var window = 1.5
         var swings = 2
         var pause = 1.0
+        /// Longest nod, from leaving rest to coming back.
+        var nodMaxDuration = 1.5
     }
 
     enum Gesture: String, Equatable {
@@ -172,46 +249,54 @@ struct HeadGestureDetector {
     }
 
     let config: Config
-    private var pitch: SwingTracker
+    private var nod: ExcursionTracker
     private var yaw: SwingTracker
-    private var pitchSwings: [Double] = []
     private var yawSwings: [Double] = []
     private var history: [HeadSample] = []
     private var pausedUntil = -Double.infinity
 
     init(config: Config = Config()) {
         self.config = config
-        pitch = SwingTracker(amplitude: config.pitchAmplitude, maxLeg: config.maxLeg)
+        nod = ExcursionTracker(amplitude: config.pitchAmplitude, maxDuration: config.nodMaxDuration)
         yaw = SwingTracker(amplitude: config.yawAmplitude, maxLeg: config.maxLeg)
     }
 
     mutating func feed(_ s: HeadSample) -> Gesture? {
         guard let y = s.yaw, let p = s.pitch else {
-            // A missing face breaks the zigzag: start again.
-            pitch.reset(); yaw.reset(); pitchSwings = []; yawSwings = []; history = []
+            // A missing face breaks the nod and the zigzag: start again.
+            nod.reset(); yaw.reset(); yawSwings = []; history = []
             return nil
         }
         history.append(s)
-        history.removeAll { $0.t < s.t - (config.window + config.maxLeg + 0.5) }
-        if let at = pitch.feed(t: s.t, v: p), at >= pausedUntil { pitchSwings.append(at) }
+        history.removeAll { $0.t < s.t - max(config.window + config.maxLeg, config.nodMaxDuration) - 0.5 }
+        let nodStart = nod.feed(t: s.t, v: p)
         if let at = yaw.feed(t: s.t, v: y), at >= pausedUntil { yawSwings.append(at) }
         // The window runs back from now, not from the newest swing: a swing is confirmed only at the
         // next reversal, which may come seconds later (a glance and back, then another glance).
-        pitchSwings.removeAll { s.t - $0 > config.window }
         yawSwings.removeAll { s.t - $0 > config.window }
         guard s.t >= pausedUntil else { return nil }
         var found: Gesture?
-        if pitchSwings.count >= config.swings, quiet(main: \.pitch, other: \.yaw, since: pitchSwings[pitchSwings.count - config.swings] - config.maxLeg) {
+        if let nodStart, quiet(main: \.pitch, other: \.yaw, since: nodStart) {
             found = .yes
-        } else if yawSwings.count >= config.swings, quiet(main: \.yaw, other: \.pitch, since: yawSwings[yawSwings.count - config.swings] - config.maxLeg) {
+        } else if yawSwings.count >= config.swings, quiet(main: \.yaw, other: \.pitch, since: yawSwings[yawSwings.count - config.swings] - config.maxLeg),
+                  crossesRest(since: yawSwings[yawSwings.count - config.swings] - config.maxLeg) {
             found = .no
         }
         if found != nil {
             pausedUntil = s.t + config.pause
-            pitchSwings = []
             yawSwings = []
         }
         return found
+    }
+
+    /// A «no» goes to both sides of where the head rested before it, by at least half the
+    /// amplitude each: a glance to one side and back does not.
+    private func crossesRest(since: Double) -> Bool {
+        let before = history.filter { $0.t < since }.compactMap(\.yaw)
+        let during = history.filter { $0.t >= since }.compactMap(\.yaw)
+        guard let high = during.max(), let low = during.min() else { return false }
+        let rest = before.isEmpty ? (during.first ?? 0) : HeadCalibration.median(before)
+        return high - rest >= config.yawAmplitude / 2 && rest - low >= config.yawAmplitude / 2
     }
 
     private func quiet(main: KeyPath<HeadSample, Double?>, other: KeyPath<HeadSample, Double?>, since: Double) -> Bool {
@@ -255,6 +340,9 @@ struct GesturePhase {
     var cpuSeconds = 0.0
     /// True when the app speaks during the phase (the yes/no counts): its CPU includes the voice.
     var voiced = false
+    /// When each number started being spoken (yes/no phases). Each number is a question: what
+    /// counts is the first gesture after it, as in a real «scrivilo?».
+    var cues: [Double] = []
 }
 
 enum GestureSpikeReport {
@@ -279,7 +367,43 @@ enum GestureSpikeReport {
     static func tally(_ found: [HeadGestureDetector.Gesture], phase: GesturePhase) -> Tally {
         let yes = found.filter { $0 == .yes }.count
         let no = found.count - yes
+        if !phase.cues.isEmpty {
+            // With questions, repeating the right gesture («sì sì sì») is harmless: only the wrong kind is false.
+            return Tally(yes: yes, no: no, falses: (phase.expectedYes > 0 ? 0 : yes) + (phase.expectedNo > 0 ? 0 : no))
+        }
         return Tally(yes: yes, no: no, falses: max(0, yes - phase.expectedYes) + max(0, no - phase.expectedNo))
+    }
+
+    /// Answers to the spoken numbers: right when the first gesture after a number (and before the
+    /// next one) is the expected kind; repeats of the right kind are counted apart, not as false.
+    struct Answers: Equatable {
+        var right = 0
+        var cues = 0
+        var wrong = 0
+        var repeats = 0
+        /// From the start of the number to the first right gesture, seconds.
+        var delays: [Double] = []
+    }
+
+    static func answers(_ found: [(t: Double, gesture: HeadGestureDetector.Gesture)], phase: GesturePhase) -> Answers? {
+        guard let first = phase.cues.first else { return nil }
+        let expected: HeadGestureDetector.Gesture = phase.expectedYes > 0 ? .yes : .no
+        var a = Answers(cues: phase.cues.count)
+        let early = found.filter { $0.t < first }
+        a.wrong += early.filter { $0.gesture != expected }.count
+        a.repeats += early.filter { $0.gesture == expected }.count
+        for (i, cue) in phase.cues.enumerated() {
+            let end = i + 1 < phase.cues.count ? phase.cues[i + 1] : max(phase.end, cue)
+            let window = found.filter { $0.t >= cue && ($0.t < end || (i + 1 == phase.cues.count && $0.t <= end)) }
+            a.wrong += window.filter { $0.gesture != expected }.count
+            let right = window.filter { $0.gesture == expected }
+            a.repeats += max(0, right.count - 1)
+            if let g = window.first, g.gesture == expected {
+                a.right += 1
+                a.delays.append(g.t - cue)
+            }
+        }
+        return a
     }
 
     /// Share of the judged frames (after `grace`) whose attention matches the phase.
@@ -300,10 +424,10 @@ enum GestureSpikeReport {
     }
 
     /// The detector replayed over the recorded angles: the gestures found in each phase.
-    static func replayGestures(_ frames: [GestureFrame], config: HeadGestureDetector.Config) -> [Int: [HeadGestureDetector.Gesture]] {
+    static func replayGestures(_ frames: [GestureFrame], config: HeadGestureDetector.Config) -> [Int: [(t: Double, gesture: HeadGestureDetector.Gesture)]] {
         var d = HeadGestureDetector(config: config)
-        var out: [Int: [HeadGestureDetector.Gesture]] = [:]
-        for f in frames { if let g = d.feed(f.sample) { out[f.phase, default: []].append(g) } }
+        var out: [Int: [(t: Double, gesture: HeadGestureDetector.Gesture)]] = [:]
+        for f in frames { if let g = d.feed(f.sample) { out[f.phase, default: []].append((f.sample.t, g)) } }
         return out
     }
 
@@ -327,9 +451,9 @@ enum GestureSpikeReport {
                                                   HeadCalibration.median(still.compactMap(\.pitch).map { abs($0 - reference.pitch) }))
         lines.append("Solo angoli e tempi: nessuna immagine salvata, inviata o mostrata. Riferimento (mediana della calibrazione): "
                      + String(format: "yaw %.1f°, pitch %.1f°", reference.yaw, reference.pitch) + " · dispersione (deviazione assoluta mediana): \(spread)")
-        lines.append(String(format: "Cancello: ±%.0f° yaw, ±%.0f° pitch, tenuta %.0f ms · sì/no: ampiezza %.0f° pitch / %.0f° yaw, %d oscillazioni in %.1f s, ciascuna ≤ %.0f ms, pausa %.1f s",
-                            setup.gate.yawLimit, setup.gate.pitchLimit, setup.gate.hold * 1000, setup.gestures.pitchAmplitude, setup.gestures.yawAmplitude,
-                            setup.gestures.swings, setup.gestures.window, setup.gestures.maxLeg * 1000, setup.gestures.pause))
+        lines.append(String(format: "Cancello: ±%.0f° yaw, ±%.0f° pitch, tenuta %.0f ms · sì: un cenno di almeno %.0f° pitch, andata e ritorno entro %.1f s · no: %d oscillazioni di almeno %.0f° yaw in %.1f s, ciascuna ≤ %.0f ms · pausa %.1f s",
+                            setup.gate.yawLimit, setup.gate.pitchLimit, setup.gate.hold * 1000, setup.gestures.pitchAmplitude, setup.gestures.nodMaxDuration,
+                            setup.gestures.swings, setup.gestures.yawAmplitude, setup.gestures.window, setup.gestures.maxLeg * 1000, setup.gestures.pause))
         lines.append("")
         lines.append("Per fase (attenzione giudicata dopo \(String(format: "%.0f", grace)) s dall'inizio della fase):")
         var totalFalses = 0
@@ -338,6 +462,7 @@ enum GestureSpikeReport {
             let absent = fs.filter { !$0.sample.hasFace }.count
             let acc = attentionAccuracy(fs, phase: p) { $0.attention }
             let t = tally(fs.compactMap(\.gesture), phase: p)
+            let answered = answers(fs.compactMap { f in f.gesture.map { (f.sample.t, $0) } }, phase: p)
             totalFalses += t.falses
             let faces = fs.filter(\.sample.hasFace)
             // Rounded first, so a tiny negative value does not print as «-0.0».
@@ -350,6 +475,12 @@ enum GestureSpikeReport {
             line += i == 0 ? "— (calibrazione)" : "corretta \(pct(acc.correct, acc.judged)) (\(acc.correct)/\(acc.judged))"
             line += " · scarto mediano yaw/pitch \(dev)"
             line += " · sì \(t.yes)/\(p.expectedYes) · no \(t.no)/\(p.expectedNo) · falsi \(t.falses) · CPU \(cpu)\(p.voiced ? " (con la voce)" : "")"
+            if let a = answered {
+                line += " · risposte giuste \(a.right)/\(a.cues), sbagliate \(a.wrong), ripetute \(a.repeats)"
+                if !a.delays.isEmpty {
+                    line += String(format: ", dal numero al gesto mediana %.2f s, massimo %.2f s", HeadCalibration.median(a.delays), a.delays.max() ?? 0)
+                }
+            }
             lines.append(line)
         }
         lines.append("")
@@ -369,12 +500,16 @@ enum GestureSpikeReport {
                 c.pitchAmplitude = amplitude; c.yawAmplitude = amplitude; c.swings = swings
                 let found = replayGestures(frames, config: c)
                 var falses = 0
-                for (i, p) in phases.enumerated() { falses += tally(found[i] ?? [], phase: p).falses }
-                let yes = yesPhase.map { tally(found[$0] ?? [], phase: phases[$0]) }
-                let no = noPhase.map { tally(found[$0] ?? [], phase: phases[$0]) }
-                lines.append(String(format: "  A %2.0f° · %d oscillazioni · sì %@ · no %@ · falsi %d", amplitude, swings,
-                                    yes.map { "\($0.yes)/\(phases[yesPhase!].expectedYes)" } ?? "—",
-                                    no.map { "\($0.no)/\(phases[noPhase!].expectedNo)" } ?? "—", falses))
+                for (i, p) in phases.enumerated() { falses += tally((found[i] ?? []).map(\.gesture), phase: p).falses }
+                /// «giuste/numeri (ripetute n)» with questions, otherwise «trovati/attesi».
+                func score(_ index: Int?, _ kind: HeadGestureDetector.Gesture) -> String {
+                    guard let index else { return "—" }
+                    let p = phases[index], got = found[index] ?? []
+                    if let a = answers(got, phase: p) { return "\(a.right)/\(a.cues) (ripetute \(a.repeats))" }
+                    return "\(got.filter { $0.gesture == kind }.count)/\(kind == .yes ? p.expectedYes : p.expectedNo)"
+                }
+                lines.append(String(format: "  A %2.0f° · %d oscillazioni (no) · sì %@ · no %@ · falsi %d", amplitude, swings,
+                                    score(yesPhase, .yes), score(noPhase, .no), falses))
             }
         }
         lines.append("Griglia del cancello sugli stessi angoli (limite uguale per yaw e pitch, tenuta \(String(format: "%.0f", setup.gate.hold * 1000)) ms):")

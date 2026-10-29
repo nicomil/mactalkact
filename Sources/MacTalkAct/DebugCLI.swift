@@ -426,6 +426,17 @@ enum DebugCLI {
             check("gesti: un sì sintetico dà 1 sì e 0 no", yes == (1, 0))
             let no = count(HeadGestureDetector.detect(series([(0, 0, 0), (0.5, 0, 0), (0.8, -15, 0), (1.1, 15, 0), (1.4, -15, 0), (1.7, 0, 0), (3.5, 0, 0)], tremor: 0.5)))
             check("gesti: un no sintetico dà 1 no e 0 sì", no == (0, 1))
+            // Run of 29/10: a natural «sì» is one nod, down and back, then nothing until the next one.
+            let oneNod = count(HeadGestureDetector.detect(series([(0, 0, 0), (1, 0, 0), (1.3, 0, 20), (1.6, 0, 20), (1.9, 0, -3), (2.1, 0, 0), (4, 0, 0)], tremor: 0.5)))
+            check("gesti: un solo cenno, giù e su, dà 1 sì", oneNod == (1, 0))
+            // Run of 29/10 (third): one shake, slow return to the middle, rest, then the next shake.
+            let twoShakes = count(HeadGestureDetector.detect(series([(0, 0, 0), (1, 0, 0), (1.3, 35, 0), (1.8, -30, 0), (2.4, -2, 0), (5, -2, 0),
+                                                                     (5.3, 30, 0), (5.8, -30, 0), (6.4, 0, 0), (9, 0, 0)], tremor: 0.5)))
+            check("gesti: due no separati da un ritorno lento e una pausa danno 2 no", twoShakes == (0, 2))
+            check("gesti: guardare in basso e restare non dà un sì",
+                  HeadGestureDetector.detect(series([(0, 0, 0), (1, 0, 0), (1.4, 0, 20), (5, 0, 20)], tremor: 0.5)).isEmpty)
+            check("gesti: guardare la tastiera per un attimo e tornare (oltre 1 s) non dà un sì",
+                  HeadGestureDetector.detect(series([(0, 0, 0), (1, 0, 0), (1.3, 0, 20), (2.2, 0, 20), (2.5, 0, 0), (4, 0, 0)], tremor: 0.5)).isEmpty)
             let tremor = series([(0, 0, 0), (8, 0, 0)], tremor: 2)
             check("gesti: tremolio di ±2° non dà gesti", HeadGestureDetector.detect(tremor).isEmpty)
             var steady = AttentionGate()
@@ -472,10 +483,15 @@ enum DebugCLI {
             // No tremor: the return of the first glance stays its extreme until the second glance confirms it.
             let apart = series([(0, 0, 0), (0.5, 0, 0), (0.8, -15, 0), (1.1, 0, 0), (3.0, 0, 0), (3.3, -15, 0), (3.6, 0, 0), (5, 0, 0)])
             check("gesti: due oscillazioni rapide di yaw a più di 1,5 s non danno un no", HeadGestureDetector.detect(apart).isEmpty)
-            let lost = series([(0, 0, 0), (0.5, 0, 0), (0.75, 0, 12), (1.0, 0, -2), (1.25, 0, 12), (1.5, 0, 0), (3, 0, 0)], tremor: 0.5).map {
-                (0.95...1.05).contains($0.t) ? HeadSample.absent($0.t) : $0
+            // The face is lost at the bottom of a single nod: the half nod after it is not a «sì».
+            let lost = series([(0, 0, 0), (1, 0, 0), (1.3, 0, 20), (1.6, 0, 20), (1.9, 0, -3), (2.1, 0, 0), (4, 0, 0)], tremor: 0.5).map {
+                (1.35...1.65).contains($0.t) ? HeadSample.absent($0.t) : $0
             }
-            check("gesti: volto perso a metà dello zigzag lo azzera (nessun gesto)", HeadGestureDetector.detect(lost).isEmpty)
+            let lostNo = series([(0, 0, 0), (0.5, 0, 0), (0.8, -15, 0), (1.1, 15, 0), (1.4, -15, 0), (1.7, 0, 0), (3.5, 0, 0)], tremor: 0.5).map {
+                (1.05...1.15).contains($0.t) ? HeadSample.absent($0.t) : $0
+            }
+            check("gesti: volto perso a metà del cenno o dello zigzag lo azzera (nessun gesto)",
+                  HeadGestureDetector.detect(lost).isEmpty && HeadGestureDetector.detect(lostNo).isEmpty)
             // The report: a calibration of 3 s scattered ±1° in yaw, then the synthetic yes as a phase
             // with 5 expected yes. CPU: 0.3 s in 3 s without voice, 3 s in 3 s with the voice.
             let calibFrames = (0..<45).map { i in
@@ -488,7 +504,7 @@ enum DebugCLI {
                           GesturePhase(name: "sì", expectAttention: true, expectedYes: 5, start: 3, end: 6, cpuSeconds: 3, voiced: true)]
             let r = GestureSpikeReport.lines(frames: calibFrames + yesFrames, phases: phases, reference: center, setup: .init())
             let all = r.joined(separator: "\n")
-            check("gesti: report con griglia rivalutata e tempi", all.contains("A  8° · 2 oscillazioni · sì 1/5") && all.contains("mediana 8.0 ms") && all.contains("±15° · sì 100%"))
+            check("gesti: report con griglia rivalutata e tempi", all.contains("A  8° · 2 oscillazioni (no) · sì 1/5") && all.contains("mediana 8.0 ms") && all.contains("±15° · sì 100%"))
             check("gesti: report, attenzione corretta sulla riga della fase sì", r.contains { $0.hasPrefix("  2. sì ·") && $0.contains("corretta 100%") })
             check("gesti: report, dispersione della calibrazione", all.contains("dispersione (deviazione assoluta mediana): ±1.0° yaw, ±0.0° pitch"))
             check("gesti: CPU media solo sulle fasi senza voce", all.contains("CPU media del processo 10% di un core"))
@@ -496,6 +512,15 @@ enum DebugCLI {
                          HeadSample(t: 0.2, yaw: 1, pitch: 2, roll: 0, size: 0.3), HeadSample(t: 0.3, yaw: 1, pitch: 2, roll: 0, size: 0.3), .absent(0.4)]
             check("gesti: risoluzione degli angoli", GestureSpikeReport.resolutionLine(known)
                     == "Risoluzione angoli: 3 valori distinti di yaw (passo minimo 0.5°), 1 valori distinti di pitch")
+            // Run of 29/10: «sì sì sì» after each number is one right answer, not two false ones.
+            do {
+                var p = GesturePhase(name: "sì", expectAttention: true, expectedYes: 3)
+                p.end = 12; p.cues = [1, 5, 9]
+                let found: [(t: Double, gesture: HeadGestureDetector.Gesture)] = [(1.8, .yes), (3.0, .yes), (4.2, .yes), (5.6, .no), (6.0, .yes), (11.5, .yes)]
+                check("gesti: risposte ai numeri: primo gesto giusto, ripetuti a parte, sbagliati contati",
+                      GestureSpikeReport.answers(found, phase: p) == GestureSpikeReport.Answers(right: 2, cues: 3, wrong: 1, repeats: 2, delays: [0.8, 2.5])
+                        && GestureSpikeReport.tally(found.map(\.gesture), phase: p).falses == 1)
+            }
             check("gesti: falsi = tipo sbagliato o in più", GestureSpikeReport.tally([.yes, .no, .yes], phase: GesturePhase(name: "sì", expectAttention: true, expectedYes: 1))
                     == GestureSpikeReport.Tally(yes: 2, no: 1, falses: 2))
             let tsv = GestureSpikeReport.tsv(frames: [GestureFrame(sample: .absent(0.5), phase: 0, visionMs: 7, latencyMs: 30, attention: nil, gesture: nil)], phases: phases)

@@ -1149,3 +1149,51 @@ Cosa dice:
 - **Suite di sicurezza con Codex:** 15/15 scenari, 10/12 blocchi (non tenta l'invio in chat né ⌘ Invio), 0 azioni non confermate.
 
 Con queste correzioni il ciclo 3 si chiude. Restano aperti, da riprendere nel prossimo ciclo: il primo strumento (2,3 s contro 2,0 s) e il Livello istantaneo (3,6 s contro 2,5 s), legati al primo token del modello; NFR-16 rivista (circa un timeout per corsa); il clic sbagliato con parole in comune; Apple Events come strumento (AD-20).
+
+## 40. Spike: attenzione e sì/no con la testa dalla webcam (29 ottobre 2026, 17:05–17:25, con Nico al Mac)
+
+**Perché.** In ascolto continuo il rischio principale resta la Chiacchiera con chi è nella stanza, e quando l'app è in dubbio serve dire «scrivilo». Lo spike misura se due segnali della webcam sono abbastanza precisi, rapidi e leggeri da aiutare: dove guarda Nico (cancello dell'attenzione) e il sì/no fatto con la testa. Nessuna funzione è stata aggiunta all'app.
+
+**Come.** Comando `--gesture-spike` (branch `spike-gesti-camera`): FaceTime HD Camera a 640×480 e 15 fps, `VNDetectFaceRectanglesRequest` revisione 3 (yaw, pitch, roll del volto), protocollo guidato a voce in 7 fasi: calibrazione di 5 s, lettura, sguardo verso la stanza, ritorno, 5 sì e 5 no (uno a ogni numero detto dall'app), sguardo in basso. Si conservano solo angoli e tempi, mai immagini. Quattro corse: le prime tre hanno portato a correggere il rilevatore, la quarta è stata fatta dopo l'ultima modifica e vale come verifica su dati nuovi. Report e angoli: `~/Library/Logs/MacTalkAct-gesti-2026-10-29-170544.txt` (corsa 1), `…-171305…` (2), `…-171940…` (3) e `…-172428…` (4).
+
+**Costo.** Vision 12–15 ms per fotogramma di mediana (95° percentile 14–18 ms), dalla camera alla decisione 47–53 ms, 17–19% di un core per l'intero processo (Neural Engine e GPU esclusi dalla misura), 14,8–14,9 fps reali. Gli angoli hanno passo di 0,1° (oltre 300 valori distinti per corsa). La dispersione della calibrazione è sotto 1,1°.
+
+**Cancello dell'attenzione** (percentuale di fotogrammi giudicati correttamente, dopo 1 s dall'inizio della fase, tenuta 300 ms):
+
+| Limite (yaw e pitch) | Fase | Corsa 1 | Corsa 2 | Corsa 3 | Corsa 4 |
+| --- | --- | --- | --- | --- | --- |
+| ±15° (quello della corsa) | lettura | 96% | 66% | 29% | 74% |
+| | stanza | 100% | 100% | 100% | 100% |
+| | basso | 85% | 100% | 100% | 7% |
+| ±25° (rigiocato sugli stessi angoli) | lettura | 100% | 100% | 100% | 100% |
+| | stanza | 100% | 100% | 75% | 100% |
+| | basso | 0% | 0% | 0% | 0% |
+
+Il pitch del riferimento cambia molto fra una corsa e l'altra (da 1,0° a 9,4°), e leggere la parte bassa dello schermo e guardare la scrivania differiscono di pochi gradi. Con il solo yaw il risultato peggiora: nelle corse 2 e 3 Nico si è girato verso la stanza più con il pitch che con lo yaw, e «stanza» scende al 54–57%.
+
+**Sì e no** (risposte ai numeri: giusta quando il primo gesto dopo il numero è quello atteso):
+
+| Corsa | Rilevatore | Sì | No | Gesti falsi in tutta la corsa |
+| --- | --- | --- | --- | --- |
+| 1 | sì a zigzag (2 inversioni) | 0/5 | 5/5 | 0 |
+| 2 | sì come singolo cenno ≤ 1,0 s | 15 cenni su 5 numeri («sì sì sì») | 8 su 5 numeri | 0 di tipo sbagliato |
+| 3 | idem, con il conteggio per numero | 2/5 | 3/5 | 0 |
+| 4 (verifica) | cenno ≤ 1,5 s con sosta ≤ 0,5 s; no che attraversa il riposo, tratto chiuso anche da fermo | 3/5 | 5/5 | 0 |
+
+Rigiocate con il rilevatore finale, le corse 1–3 danno tutti i numeri giusti e nessun falso, ma le regole sono state tarate proprio su di loro: il numero da usare è quello della corsa 4. Dal numero al gesto riconosciuto passano di mediana 1,2–1,7 s, tempo di reazione e durata del gesto compresi.
+
+Cosa hanno insegnato le correzioni:
+- un «sì» naturale è un solo cenno, giù e su; il rilevatore a zigzag aspettava una seconda inversione che non arriva mai;
+- lo stile cambia fra una corsa e l'altra: un cenno secco, tre cenni di fila, un cenno lento che resta giù mezzo secondo;
+- dopo un «no» la testa torna lenta al centro e resta ferma: senza chiudere il tratto da fermo, quel ritorno si fondeva con il «no» successivo;
+- il «sì» lento e «guardo la tastiera e torno» si sovrappongono: la regola sulla sosta (≤ 0,5 s) toglie il secondo, ma nella corsa 4 ha perso due cenni lenti (sosta di 0,47–0,53 s).
+
+**Cosa dice.**
+1. **Il costo non è un problema:** a 15 fps la camera con Vision pesa meno di un quinto di core e decide in circa 50 ms.
+2. **«Girato verso la stanza» è un segnale solido, «guarda in basso» no.** Con il limite a ±25° su yaw e pitch la lettura non è mai stata scambiata per uno sguardo altrove (quindi un comando non verrebbe mai ignorato per errore), e lo sguardo verso la stanza è riconosciuto nel 75–100% dei fotogrammi. Guardare la scrivania non si distingue dal leggere.
+3. **Il «no» è affidabile (5/5 in verifica), il «sì» a metà (3/5).** In tutte e quattro le corse non c'è stato nessun gesto del tipo sbagliato né gesti nelle fasi senza gesti: quando l'app riconosce qualcosa, è giusto. Per una conferma come «scrivilo?» questo è il lato che conta (un «sì» falso scriverebbe), ma un «sì» perso su due obbliga a ripetere.
+
+**Raccomandazione (la decisione resta a Nico).**
+- **Cancello dell'attenzione: vale una storia.** Come segnale in più per il Router in ascolto continuo, facoltativo e spento di serie, con la camera accesa solo mentre l'ascolto è attivo e il limite a ±25° su yaw e pitch. Se Nico è girato verso la stanza, la frase senza Parola di attivazione è Chiacchiera; altrimenti decide il Classificatore come oggi. Un errore lascia il comportamento di oggi, non ignora un comando.
+- **Sì/no: non ancora come funzione.** Il «no» potrebbe già annullare una conferma in attesa; il «sì» richiede prima più dati (altre corse, un'altra persona, luce diversa) oppure una calibrazione personale di qualche cenno all'inizio. Va trattato solo come aggiunta alla voce, mai come unica via.
+- **Limiti di questa misura:** una sola persona, una sola stanza e luce, quattro corse brevi, la camera del MacBook. Le fasi sono separate da pause in cui l'app parla e non registra, quindi i movimenti di passaggio (girarsi, tornare) restano fuori dai conti.
