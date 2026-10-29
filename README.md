@@ -4,7 +4,7 @@ Controlla il Mac con la voce quando hai le mani occupate. Funziona come un'app d
 
 ## Scarica
 
-**[Scarica MacTalkAct 0.3.0 (DMG, 2,7 MB)](https://github.com/nicomil/mactalkact/releases/download/v0.3.0/MacTalkAct-0.3.0.dmg)** · macOS 27 su Apple Silicon · [tutte le versioni](https://github.com/nicomil/mactalkact/releases) · [novità](CHANGELOG.md)
+**[Scarica MacTalkAct 0.3.1 (DMG, 2,8 MB)](https://github.com/nicomil/mactalkact/releases/download/v0.3.1/MacTalkAct-0.3.1.dmg)** · macOS 27 su Apple Silicon · [tutte le versioni](https://github.com/nicomil/mactalkact/releases) · [novità](CHANGELOG.md)
 
 Apri il DMG e trascina MacTalkAct in Applicazioni. L'app non è notarizzata: la prima volta aprila con clic destro › Apri (vedi [Installare dalla release](#installare-dalla-release)). Come funziona dentro: [pagina «Come funziona»](https://nicomil.github.io/mactalkact/come-funziona.html).
 

@@ -1,5 +1,15 @@
 # Novità
 
+## 0.3.1 (29 ottobre 2026)
+
+Correzioni emerse dall'uso del primo giorno.
+
+- **Cambiare desktop a voce.** Nuovi comandi rapidi: «cambia desktop», «desktop a destra», «desktop a sinistra», «vai al desktop di sinistra», «mission control». Funzionano con qualsiasi app davanti, anche un terminale.
+- **Scorciatoie di sistema anche nelle app «solo clic».** L'agente può usare ⌃← ⌃→ ⌃↑ ⌃↓ (desktop e Mission Control) anche quando davanti c'è un terminale: le gestisce macOS e non scrivono niente nell'app. Invio e gli altri tasti restano bloccati.
+- **Mission Control non resta aperto.** «chiudi mission control» o «torna normale» lo chiudono. Se l'agente lo apre e non finisce il compito, l'app lo richiude da sola. Con Mission Control aperto l'agente può premere Esc.
+- **Permesso Accessibilità mancante.** Prima l'app diceva «✓» anche quando macOS scartava i tasti per mancanza del permesso. Ora la pillola dice che manca e dove concederlo.
+- **Release.** `scripts/package-release.sh` prepara zip e DMG senza rifirmare l'app di chi sviluppa, che così mantiene i permessi.
+
 ## 0.3.0 «Ciclo 3» (29 ottobre 2026)
 
 Il terzo ciclo ha chiuso i limiti della versione precedente su sicurezza e velocità dell'agente. I numeri completi sono nella ricerca (`_bmad-output/planning-artifacts/research/technical-agente-precisione-velocita-e-strumenti-2026-10-27/research.md`, §28–§39) e nella pagina `docs/come-funziona.html`.
