@@ -2,6 +2,12 @@
 
 Controlla il Mac con la voce quando hai le mani occupate. Funziona come un'app di dettatura alla Wispr Flow, ma oltre a scrivere **agisce**: scorre, clicca, apre app, preme scorciatoie e modifica il testo. Quello che dici viene scritto oppure eseguito, e l'app capisce da sola quale delle due cose vuoi.
 
+## Scarica
+
+**[Scarica MacTalkAct 0.3.0 (DMG, 2,7 MB)](https://github.com/nicomil/mactalkact/releases/download/v0.3.0/MacTalkAct-0.3.0.dmg)** · macOS 27 su Apple Silicon · [tutte le versioni](https://github.com/nicomil/mactalkact/releases) · [novità](CHANGELOG.md)
+
+Apri il DMG e trascina MacTalkAct in Applicazioni. L'app non è notarizzata: la prima volta aprila con clic destro › Apri (vedi [Installare dalla release](#installare-dalla-release)). Come funziona dentro: [pagina «Come funziona»](https://nicomil.github.io/mactalkact/come-funziona.html).
+
 ## Come funziona
 
 Ogni frase arriva a un **Router**, che prende una sola decisione: ignorarla, scriverla, eseguirla con un comando rapido, eseguirla in locale o affidarla all'agente. La decisione e il motivo finiscono nel log (`Instradamento: … · motivo · ms`).
@@ -28,7 +34,9 @@ scripts/build-app.sh
 open build/MacTalkAct.app
 ```
 
-**Dalla release.** Ogni release su GitHub contiene `MacTalkAct-<versione>.zip` con l'app già compilata. L'app ha una firma ad-hoc e non è notarizzata: al primo avvio macOS la blocca. Dopo averla spostata in Applicazioni, aprila con clic destro › Apri, oppure togli la quarantena con `xattr -dr com.apple.quarantine /Applications/MacTalkAct.app`. Poi concedi Accessibilità, Microfono e Riconoscimento vocale quando l'app li chiede. Le novità di ogni versione sono in [CHANGELOG.md](CHANGELOG.md).
+### Installare dalla release
+
+Ogni release su GitHub contiene l'app già compilata, come DMG (`MacTalkAct-<versione>.dmg`) e come zip. Apri il DMG e trascina MacTalkAct nella cartella Applicazioni. L'app ha una firma ad-hoc e non è notarizzata, quindi al primo avvio macOS la blocca: aprila con clic destro › Apri, oppure togli la quarantena con `xattr -dr com.apple.quarantine /Applications/MacTalkAct.app`. Poi concedi Accessibilità, Microfono e Riconoscimento vocale quando l'app li chiede. Le novità di ogni versione sono in [CHANGELOG.md](CHANGELOG.md).
 
 Al primo avvio:
 

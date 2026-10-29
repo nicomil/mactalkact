@@ -78,6 +78,11 @@ code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-
 }
 .masthead-inner { padding-block: clamp(2rem, 5vw, 3.5rem); display: grid; gap: 1rem; }
 .masthead .lead { font-size: var(--s1); color: var(--ink-2); max-width: 70ch; }
+.download { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.2rem; margin: 1.1rem 0 1.2rem; }
+.download .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.65rem 1.1rem; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 650; text-decoration: none; }
+.download .btn:hover { filter: brightness(1.06); }
+.download .note { font-size: var(--s-1); color: var(--muted); }
+.download .note a { color: var(--accent); }
 .docmeta { display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem; font-size: var(--s-1); color: var(--muted); }
 .docmeta span b { color: var(--ink-2); font-weight: 600; }
 
@@ -223,6 +228,13 @@ footer .page { display: block; padding-block: 1.5rem 2.5rem; }
     <span class="eyebrow">Documentazione tecnica · MacTalkAct</span>
     <h1>Come funziona MacTalkAct</h1>
     <p class="lead">MacTalkAct controlla il Mac con la voce: scrive quello che detti oppure agisce al posto tuo, cliccando, scorrendo, aprendo app e modificando testo. Questo documento descrive l'architettura, il percorso di una richiesta, i casi d'uso tipici e i controlli di sicurezza che intervengono prima di ogni azione.</p>
+    <div class="download">
+      <a class="btn" href="https://github.com/nicomil/mactalkact/releases/download/v0.3.0/MacTalkAct-0.3.0.dmg">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Scarica MacTalkAct 0.3.0 (DMG, 2,7 MB)
+      </a>
+      <span class="note">macOS 27 su Apple Silicon · non notarizzata: la prima volta clic destro › Apri · <a href="https://github.com/nicomil/mactalkact/releases">tutte le versioni</a> · <a href="https://github.com/nicomil/mactalkact">codice sorgente</a></span>
+    </div>
     <div class="docmeta">
       <span>Versione <b>0.3.0 «Ciclo 3»</b></span>
       <span>Aggiornato <b>29 ottobre 2026</b></span>
