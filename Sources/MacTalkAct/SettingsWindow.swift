@@ -25,6 +25,9 @@ struct SettingsContext {
     var calibrateHead: () async -> String = { "—" }
     /// Turns the camera on or off again from the current settings (after the permission dialog).
     var applyHead: () -> Void = {}
+    /// «Calibrazione completa» (guided by voice, about 2 minutes) and its cancel.
+    var runGuidedCalibration: (@escaping (String) -> Void) async -> String = { _ in "—" }
+    var cancelGuidedCalibration: () -> Void = {}
 }
 
 /// Builds the settings window. Shared by the app and by `--settings-shot`.
@@ -271,6 +274,8 @@ private struct HeadAttentionCard: View {
     @ObservedObject var settings: AppSettings
     let context: SettingsContext
     @State private var calibrating = false
+    @State private var guided = false
+    @State private var progress = ""
     @State private var message = ""
     @State private var status = ""
 
@@ -283,7 +288,7 @@ private struct HeadAttentionCard: View {
                         + "Un «no» con la testa annulla la domanda in attesa («scrivilo», «Confermi?»).",
                       isOn: $settings.headAttention)
             HStack {
-                Button(calibrating ? "Guarda lo schermo…" : "Calibra") {
+                Button(calibrating ? "Guarda lo schermo…" : "Calibra lo sguardo (5 s)") {
                     calibrating = true
                     message = ""
                     Task {
@@ -292,15 +297,38 @@ private struct HeadAttentionCard: View {
                         status = context.headStatus()
                     }
                 }
-                .disabled(calibrating)
-                Text(message.isEmpty ? calibrationLine : message)
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .disabled(calibrating || guided)
+                if guided {
+                    Button("Interrompi") { context.cancelGuidedCalibration() }
+                } else {
+                    Button("Calibrazione completa (circa 2 minuti)") {
+                        guided = true
+                        message = ""
+                        progress = "Preparo la fotocamera…"
+                        Task {
+                            message = await context.runGuidedCalibration { line in progress = line }
+                            guided = false
+                            progress = ""
+                            status = context.headStatus()
+                        }
+                    }
+                    .disabled(calibrating)
+                }
+            }
+            Text(guided ? progress : (message.isEmpty ? calibrationLine : message))
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if settings.headProfile?.yesVerified == true {
+                ToggleRow(title: "Conferma con un sì della testa",
+                          help: "Un sì con la testa scrive la frase proposta, come dire «scrivilo». Solo per la proposta «scrivilo»: le altre conferme restano a voce.",
+                          isOn: $settings.headYesConfirms)
             }
             if settings.headAttention {
                 Text("Stato: \(status)").font(.caption).foregroundStyle(.secondary)
             }
         }
         .onAppear { status = context.headStatus() }
+        // Closing the settings stops a guided calibration: nothing is saved.
+        .onDisappear { if guided { context.cancelGuidedCalibration() } }
         // The camera state changes on its own (no frames after 3 s, listening on or off).
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in status = context.headStatus() }
         .onChange(of: settings.headAttention) { _, on in
@@ -316,9 +344,12 @@ private struct HeadAttentionCard: View {
     }
 
     private var calibrationLine: String {
-        guard settings.headReference != nil else { return "Mai calibrata: guarda lo schermo per 5 secondi." }
-        guard let at = settings.headCalibratedAt else { return "Calibrata." }
-        return "Calibrata il \(at.formatted(.dateTime.day().month(.wide).hour().minute()))."
+        guard settings.headReference != nil else { return "Mai calibrata: guarda lo schermo per 5 secondi, o fai la calibrazione completa." }
+        let when = settings.headCalibratedAt.map { " il \($0.formatted(.dateTime.day().month(.wide).hour().minute()))" } ?? ""
+        if let p = settings.headProfile {
+            return "Calibrata\(when). Gesti tarati il \(p.date.formatted(.dateTime.day().month(.wide))): \(p.summary)."
+        }
+        return "Calibrata\(when). Gesti con le soglie predefinite."
     }
 }
 

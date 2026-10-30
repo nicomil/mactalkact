@@ -426,6 +426,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         c.calibrateHead = { [weak self] in await self?.coordinator.calibrateHead() ?? "—" }
         c.applyHead = { [weak self] in self?.coordinator.applyHeadSettings() }
+        c.runGuidedCalibration = { [weak self] progress in await self?.coordinator.runGuidedCalibration(progress: progress) ?? "—" }
+        c.cancelGuidedCalibration = { [weak self] in self?.coordinator.cancelGuidedCalibration() }
         return c
     }
 

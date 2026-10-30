@@ -57,7 +57,7 @@ enum HeadCalibration {
 /// hysteresis), so a blink of the detector or a quick glance does not flip it. No face counts
 /// as looking away.
 struct AttentionGate {
-    struct Config: Equatable {
+    struct Config: Equatable, Codable {
         var yawLimit = 15.0
         var pitchLimit = 15.0
         var hold = 0.3
@@ -159,24 +159,62 @@ struct ReferenceTracker {
 struct HeadLiveState {
     var keepSeconds = 30.0
     private(set) var tracker: ReferenceTracker?
+    private var gateConfig = AttentionGate.Config.app
+    private var gestures = HeadGestureDetector.Config()
     private var gate = AttentionGate(config: .app, startOn: true)
     private var detector = HeadGestureDetector()
     private(set) var noArmed = false
+    private(set) var yesArmed = false
     private(set) var marks: [PhraseAttention.Mark] = []
 
     mutating func setReference(_ r: HeadPose) {
-        if tracker?.calibrated != r { tracker = ReferenceTracker(calibrated: r) }
+        if tracker?.calibrated != r {
+            tracker = ReferenceTracker(calibrated: r)
+            tracker?.limits = gateConfig
+        }
     }
 
-    /// A question opens: the detector starts again, so movements before it do not count.
-    mutating func armNo() {
-        detector = HeadGestureDetector()
+    /// The personal thresholds of the guided calibration (or the defaults).
+    mutating func setProfile(gestures g: HeadGestureDetector.Config, gate c: AttentionGate.Config) {
+        guard g != gestures || c != gateConfig else { return }
+        gestures = g
+        gateConfig = c
+        gate = AttentionGate(config: c, startOn: gate.isOn)
+        detector = HeadGestureDetector(config: g)
+        if let calibrated = tracker?.calibrated {
+            tracker = ReferenceTracker(calibrated: calibrated)
+            tracker?.limits = c
+        }
+    }
+
+    /// A question opens: the detector starts again, so movements before it do not count. The «no»
+    /// answers every question; the «sì» only when `allowYes` (the «scrivilo» proposal, option on).
+    mutating func arm(allowYes: Bool) {
+        detector = HeadGestureDetector(config: gestures)
         noArmed = true
+        yesArmed = allowYes
     }
 
-    /// True when this sample completes an awaited «no». Without a face the gate keeps its state:
-    /// a missing face is judged by `PhraseAttention`, not by the gate.
-    mutating func feed(_ s: HeadSample) -> Bool {
+    mutating func disarm() {
+        noArmed = false
+        yesArmed = false
+    }
+
+    /// The camera starts again: no marks, the gate «looking at the screen», the detector new.
+    mutating func clearMarks() {
+        marks = []
+        gate = AttentionGate(config: gateConfig, startOn: true)
+        detector = HeadGestureDetector(config: gestures)
+        // The drift of the reference does not survive the camera going off.
+        if let calibrated = tracker?.calibrated {
+            tracker = ReferenceTracker(calibrated: calibrated)
+            tracker?.limits = gateConfig
+        }
+    }
+
+    /// The awaited gesture this sample completes, if any (then disarmed). Without a face the gate
+    /// keeps its state: a missing face is judged by `PhraseAttention`, not by the gate.
+    mutating func feed(_ s: HeadSample) -> HeadGestureDetector.Gesture? {
         if s.hasFace, var tr = tracker {
             tr.feed(s)
             tracker = tr
@@ -184,9 +222,163 @@ struct HeadLiveState {
         }
         marks.append(PhraseAttention.Mark(t: s.t, hasFace: s.hasFace, gateOn: gate.isOn))
         if let first = marks.first, s.t - first.t > keepSeconds + 5 { marks.removeAll { s.t - $0.t > keepSeconds } }
-        guard detector.feed(s) == .no, noArmed else { return false }
-        noArmed = false
-        return true
+        guard let g = detector.feed(s), noArmed, g == .no || yesArmed else { return nil }
+        // A nod while turned to the room is for the room: it never writes. The «no» only cancels.
+        if g == .yes && !gate.isOn { return nil }
+        disarm()
+        return g
+    }
+}
+
+/// The result of the guided calibration, saved in the settings: personal thresholds, the limit
+/// of the gate, and whether the «sì» passed the check.
+struct HeadProfile: Codable, Equatable {
+    var gestures: HeadGestureDetector.Config
+    var limit: Double
+    var yesVerified: Bool
+    var date: Date
+    /// What the check found, as said to Nico: «sì 3/3, no 3/3, nessun falso».
+    var summary: String
+
+    var gate: AttentionGate.Config { AttentionGate.Config(yawLimit: limit, pitchLimit: limit, hold: AttentionGate.Config.app.hold) }
+}
+
+/// Chooses the personal thresholds from a guided run: the phases without gestures (screen, room),
+/// the training answers (5 sì, 5 no) and the check (3 sì, 3 no). Only thresholds with zero false
+/// gestures over the whole run are kept; among them, the most right answers in training, then the
+/// strictest. The check is then scored with the chosen thresholds. Pure.
+enum HeadProfileFit {
+    enum Failure: Equatable {
+        case noFace
+        /// Every threshold gives at least one false gesture in the training phases.
+        case noThresholds
+        /// The chosen thresholds give a false gesture in the check: not saved (zero falses overall).
+        case falseInCheck
+        /// Too few «no» recognized: a profile would make the head «no» worse than today.
+        case tooFewNo
+        /// Turned to the room not clearly beyond the limit: the gate would never close.
+        case roomUnclear
+        /// Looking at the screen moved more than 22°: any limit up to 25° would take the screen for the room.
+        case screenUnsteady
+    }
+
+    struct Result: Equatable {
+        var reference: HeadPose?
+        var profile: HeadProfile?
+        var failure: Failure?
+        var trainingYes = GestureSpikeReport.Answers()
+        var trainingNo = GestureSpikeReport.Answers()
+        var checkYes = GestureSpikeReport.Answers()
+        var checkNo = GestureSpikeReport.Answers()
+    }
+
+    /// Phases are told apart by name: training gestures are «sì»/«no», the check «verifica sì»/«verifica no».
+    static let checkPrefix = "verifica "
+
+    static func candidates() -> [HeadGestureDetector.Config] {
+        var out: [HeadGestureDetector.Config] = []
+        for pitch in [5.0, 6, 8, 10, 12] {
+            for yaw in [6.0, 8, 10, 12] {
+                for duration in [1.2, 1.5, 2.0] {
+                    for dwell in [0.5, 0.7, 0.9] {
+                        var c = HeadGestureDetector.Config()
+                        c.pitchAmplitude = pitch; c.yawAmplitude = yaw; c.nodMaxDuration = duration; c.nodMaxDwell = dwell
+                        out.append(c)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /// Falses and answers of one configuration over the run.
+    struct Score: Equatable {
+        var falses = 0
+        var answers: [String: GestureSpikeReport.Answers] = [:]
+    }
+
+    static func score(_ samples: [HeadSample], phases: [GesturePhase], config: HeadGestureDetector.Config) -> Score {
+        let events = HeadGestureDetector.detect(samples, config: config)
+        var s = Score()
+        for p in phases {
+            let found = events.filter { $0.t >= p.start && $0.t <= p.end }.map { (t: $0.t, gesture: $0.gesture) }
+            if let a = GestureSpikeReport.answers(found, phase: p) {
+                s.falses += a.wrong
+                s.answers[p.name] = a
+            } else {
+                s.falses += found.count // no gesture expected here
+            }
+        }
+        return s
+    }
+
+    /// The limit of the gate: 0.6 × the median deviation while turned to the room, between 15° and
+    /// 25°, and above the 95th percentile of the deviation while looking at the screen (+3°). A
+    /// failure when no such limit exists, or when the room is not clearly beyond it (5° margin).
+    static func limit(_ samples: [HeadSample], screen: GesturePhase, room: GesturePhase, reference: HeadPose) -> (limit: Double, failure: Failure?) {
+        func deviations(_ p: GesturePhase, grace: Double) -> [Double] {
+            samples.filter { $0.hasFace && $0.t >= p.start + grace && $0.t <= p.end }
+                .map { max(abs($0.yaw! - reference.yaw), abs($0.pitch! - reference.pitch)) }
+        }
+        let roomDev = deviations(room, grace: 1)
+        let screenDev = deviations(screen, grace: 0)
+        let floor = screenDev.isEmpty ? 0 : HeadCalibration.percentile(screenDev, 95) + 3
+        guard floor <= 25 else { return (25, .screenUnsteady) }
+        guard !roomDev.isEmpty else { return (25, .roomUnclear) }
+        let roomMedian = HeadCalibration.median(roomDev)
+        let limit = min(max(0.6 * roomMedian, floor, 15), 25)
+        return (limit, roomMedian >= limit + 5 ? nil : .roomUnclear)
+    }
+
+    /// `phases`: «schermo» first (the reference), then «stanza», the others in any order.
+    static func fit(_ samples: [HeadSample], phases: [GesturePhase], date: Date = Date()) -> Result {
+        var r = Result()
+        guard let screen = phases.first(where: { $0.name == "schermo" }),
+              let reference = HeadCalibration.reference(samples.filter { $0.t >= screen.start && $0.t <= screen.end }) else {
+            r.failure = .noFace
+            return r
+        }
+        r.reference = reference
+        let room = phases.first { $0.name == "stanza" } ?? screen
+        let gate = limit(samples, screen: screen, room: room, reference: reference)
+        if let failure = gate.failure {
+            r.failure = failure
+            return r
+        }
+        // The thresholds are chosen on the training phases only: the check stays new data.
+        let training = phases.filter { !$0.name.hasPrefix(checkPrefix) }
+        let check = phases.filter { $0.name.hasPrefix(checkPrefix) }
+        var best: (config: HeadGestureDetector.Config, key: [Double], score: Score)?
+        for c in candidates() {
+            let s = score(samples, phases: training, config: c)
+            guard s.falses == 0 else { continue }
+            let right = training.compactMap { s.answers[$0.name]?.right }.reduce(0, +)
+            // Most right answers, then the strictest: bigger amplitudes, shorter nods and dwell.
+            let key = [Double(right), c.pitchAmplitude + c.yawAmplitude, -c.nodMaxDuration, -c.nodMaxDwell]
+            if best.map({ $0.key.lexicographicallyPrecedes(key) }) ?? true { best = (c, key, s) }
+        }
+        guard let best else {
+            r.failure = .noThresholds
+            return r
+        }
+        let a = best.score.answers
+        r.trainingYes = a["sì"] ?? .init()
+        r.trainingNo = a["no"] ?? .init()
+        let checked = score(samples, phases: check, config: best.config)
+        r.checkYes = checked.answers[checkPrefix + "sì"] ?? .init()
+        r.checkNo = checked.answers[checkPrefix + "no"] ?? .init()
+        guard checked.falses == 0 else {
+            r.failure = .falseInCheck
+            return r
+        }
+        guard r.trainingNo.right * 2 > r.trainingNo.cues, r.checkNo.right * 2 > r.checkNo.cues else {
+            r.failure = .tooFewNo
+            return r
+        }
+        let yesOK = r.checkYes.cues > 0 && r.checkYes.right == r.checkYes.cues
+        r.profile = HeadProfile(gestures: best.config, limit: gate.limit, yesVerified: yesOK, date: date,
+                                summary: "sì \(r.checkYes.right)/\(r.checkYes.cues), no \(r.checkNo.right)/\(r.checkNo.cues), nessun falso")
+        return r
     }
 }
 
@@ -273,16 +465,17 @@ struct ExcursionTracker {
     let restWindow = 0.5
     /// Longest stay near the bottom of the movement (within 75% of the peak): a nod stays about
     /// 0.3 s, a look at the keyboard much longer.
-    let maxDwell = 0.5
+    let maxDwell: Double
 
     private var recent: [(t: Double, v: Double)] = []
     private var start: (t: Double, rest: Double)?
     private var peak = 0.0
     private var path: [(t: Double, d: Double)] = []
 
-    init(amplitude: Double, maxDuration: Double) {
+    init(amplitude: Double, maxDuration: Double, maxDwell: Double = 0.5) {
         self.amplitude = amplitude
         self.maxDuration = maxDuration
+        self.maxDwell = maxDwell
         margin = max(3, amplitude * 0.4)
     }
 
@@ -328,7 +521,7 @@ struct ExcursionTracker {
 /// means the other axis moved less than half as much as the gesture axis. After a gesture,
 /// `pause` seconds of rest.
 struct HeadGestureDetector {
-    struct Config: Equatable {
+    struct Config: Equatable, Codable {
         var pitchAmplitude = 8.0
         var yawAmplitude = 10.0
         var maxLeg = 0.6
@@ -337,6 +530,8 @@ struct HeadGestureDetector {
         var pause = 1.0
         /// Longest nod, from leaving rest to coming back.
         var nodMaxDuration = 1.5
+        /// Longest stay near the bottom of a nod (run of 29/10: slow nods stayed 0.47–0.53 s).
+        var nodMaxDwell = 0.5
     }
 
     enum Gesture: String, Equatable {
@@ -358,7 +553,7 @@ struct HeadGestureDetector {
 
     init(config: Config = Config()) {
         self.config = config
-        nod = ExcursionTracker(amplitude: config.pitchAmplitude, maxDuration: config.nodMaxDuration)
+        nod = ExcursionTracker(amplitude: config.pitchAmplitude, maxDuration: config.nodMaxDuration, maxDwell: config.nodMaxDwell)
         yaw = SwingTracker(amplitude: config.yawAmplitude, maxLeg: config.maxLeg)
     }
 

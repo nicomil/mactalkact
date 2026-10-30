@@ -94,3 +94,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-spike-gesti-camera.md`
   summary: Nello spike gesti, se `AVCaptureSession.synchronizationClock` è nil i tempi dei fotogrammi restano nell'orologio della camera e non si confrontano con inizio e fine delle fasi.
   evidence: maybe-false (sarebbe high): si chiarisce con la prima corsa; se il report mostra «fps reali 0.0» o attenzione «—», usare l'ora di arrivo (`hostNow()`) come ripiego.
+
+- source_spec: none
+  summary: Gesti nuovi con la testa scelti da Nico il 30/10/2026: «doppio no veloce» ferma l'agente come «stop», «girato a lungo verso la stanza» chiude la sessione a mani libere; ognuno con la sua fase di prova nella calibrazione guidata.
+  evidence: separati dalla storia della calibrazione guidata (spec-gesti-calibrazione-guidata.md) perché si possono rilasciare da soli e hanno bisogno delle soglie personali e della fase di prova che quella storia costruisce.

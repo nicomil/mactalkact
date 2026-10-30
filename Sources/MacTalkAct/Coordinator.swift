@@ -26,6 +26,8 @@ final class Coordinator {
     let speaker = Speaker()
     /// «Attenzione dalla fotocamera»: where Nico looks, and the «no» with the head.
     let head = HeadWatcher()
+    /// «Calibrazione completa»: the guided run that chooses personal thresholds.
+    lazy var headGuide = HeadCalibrationGuide(speaker: speaker)
     /// Host-clock time when the current Frase started (voice detection), for the camera.
     private var phraseStartHost: Double?
     /// «Turned to the room» of each Frase closed by voice detection and not yet handed over, in
@@ -107,7 +109,9 @@ final class Coordinator {
             }
         }
         engine.onLevel = { [weak self] level in self?.hud.model.level = level }
-        head.onNo = { [weak self] in self?.handleHeadNo() }
+        head.onGesture = { [weak self] g in
+            if g == .no { self?.handleHeadNo() } else { self?.handleHeadYes() }
+        }
         head.onStatusChange = { [weak self] status in self?.headStatusChanged(status) }
         applyListeningSettings()
     }
@@ -125,7 +129,7 @@ final class Coordinator {
     /// The camera is on only with the setting on and continuous listening on (research §40).
     func applyHeadSettings() {
         if settings.headAttention && mode != .off {
-            head.start(reference: settings.headReference)
+            head.start(reference: settings.headReference, profile: settings.headProfile)
         } else if head.status != .off {
             head.stop()
         }
@@ -184,6 +188,63 @@ final class Coordinator {
         if RouteHeuristics.isShortChatter(spoken) && !Grammar.isYes(spoken) { return "chiacchiera" }
         return nil
     }
+
+    /// «Conferma con un sì della testa»: on, and the «sì» passed the check of the calibration.
+    private var headYesEnabled: Bool { Self.headYesEnabled(option: settings.headYesConfirms, profile: settings.headProfile) }
+
+    nonisolated static func headYesEnabled(option: Bool, profile: HeadProfile?) -> Bool { option && profile?.yesVerified == true }
+
+    /// Whether a «sì» with the head may answer this question: only the «scrivilo» proposal, with the
+    /// option on and verified. Every question is answered by the «no». Pure, tested by `--selftest`.
+    nonisolated static func headArmsYes(_ question: HeadNoTarget, enabled: Bool) -> Bool { question == .proposal && enabled }
+
+    /// During the guided calibration only «stop» (with or without the wake phrase) counts.
+    nonisolated static func stopsGuide(_ text: String, wakePhrases: [String]) -> Bool {
+        let spoken = WakeWord.extract(text, phrases: wakePhrases).flatMap { $0.isEmpty ? nil : $0 } ?? text
+        return Grammar.isStop(spoken)
+    }
+
+    /// A «sì» with the head: like saying «scrivilo» to the proposal waiting, and nothing else.
+    private func handleHeadYes() {
+        guard let text = Self.headYesProposal(enabled: headYesEnabled, proposal: conversation.pendingProposal, busy: busy) else { return }
+        Log.info("Gesto: sì con la testa · scrivo la proposta")
+        let previous = routeChain
+        routeChain = Task {
+            await previous?.value
+            // The proposal may have been answered by voice meanwhile.
+            guard self.conversation.pendingProposal == text else { return }
+            await self.perform(.typeProposed(text), screen: { ScreenContext.capture(includeLabels: false) })
+        }
+    }
+
+    /// The proposal a «sì» with the head writes, or nil. Pure, tested by `--selftest`.
+    nonisolated static func headYesProposal(enabled: Bool, proposal: String?, busy: Bool) -> String? {
+        guard enabled, !busy else { return nil }
+        return proposal
+    }
+
+    /// «Calibrazione completa» from the settings: runs the guide, saves the profile and the
+    /// reference when it worked. The answer is shown under the button.
+    func runGuidedCalibration(progress: @escaping (String) -> Void) async -> String {
+        guard await HeadWatcher.requestAccess() else {
+            return "Serve il permesso Fotocamera: Impostazioni di Sistema › Privacy e sicurezza › Fotocamera › MacTalkAct."
+        }
+        let outcome = await headGuide.run(watcher: head, progress: progress)
+        let (profile, reference, message) = HeadCalibrationGuide.conclusion(outcome)
+        if let profile, let reference {
+            settings.saveHeadProfile(profile, reference: reference)
+            Log.info(String(format: "Attenzione dalla fotocamera: calibrazione completa · %@ · limite %.0f°", profile.summary, profile.limit))
+        } else {
+            Log.info("Attenzione dalla fotocamera: calibrazione completa non salvata")
+        }
+        // A second run refused while the first records: leave the camera to the first one.
+        if outcome == .busy { return message }
+        applyHeadSettings()
+        if case .cancelled = outcome {} else { await speaker.say(message) }
+        return message
+    }
+
+    func cancelGuidedCalibration() { headGuide.cancel() }
 
     enum HeadNoTarget: String, Equatable {
         case agentConfirmation = "conferma dell'agente"
@@ -470,7 +531,7 @@ final class Coordinator {
             agentQuestion?.resume(returning: nil)
             agentQuestion = c
             agentQuestionIsConfirmation = confirmation
-            if confirmation { head.armNo() }
+            if confirmation { head.arm(allowYes: Self.headArmsYes(.agentConfirmation, enabled: headYesEnabled)) }
             questionSerial += 1
             let serial = questionSerial
             Task { @MainActor [weak self] in
@@ -623,6 +684,11 @@ final class Coordinator {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         // Push-to-talk is always addressed to the app: the camera is not asked.
         let away = !addressed && phraseFacedAway()
+        // During the guided calibration only «stop» counts: the rest is Nico following the voice.
+        if headGuide.isRunning {
+            if Self.stopsGuide(text, wakePhrases: settings.wakePhraseList) { headGuide.cancel() }
+            return
+        }
         if speaker.isSpeaking && !addressed { return } // our own voice
         if dictating {
             if text.isEmpty { restartDictationIdle(); return }
@@ -805,7 +871,8 @@ final class Coordinator {
             await dictateOnce(text, context: screen())
         case .askToType(let text, let reason):
             conversation.proposedText = (text, Date().addingTimeInterval(settings.proposalSeconds))
-            head.armNo()
+            // The only question a «sì» with the head may answer: writing is undone with «cancella».
+            head.arm(allowYes: Self.headArmsYes(.proposal, enabled: headYesEnabled))
             Sound.confirm()
             let detail = reason.contains("non è configurato") ? "Claude non è configurato · di' «scrivilo» per inserirlo"
                                                                : "Di' «scrivilo» per inserirlo"
@@ -1241,7 +1308,7 @@ final class Coordinator {
 
     private func askConfirmation(_ plan: Plan, context: ScreenContext) {
         pending = PendingPlan(plan: plan, context: context, expires: Date().addingTimeInterval(settings.confirmationSeconds))
-        head.armNo()
+        head.arm(allowYes: Self.headArmsYes(.plan, enabled: headYesEnabled))
         Sound.confirm()
         let how = mode == .off ? "Tieni premuto \(settings.pttKey.short) e di' «sì»" : "Di' «sì»"
         hud.show(.confirm, plan.hud, detail: "\(how) per confermare, altro per annullare", autoHide: settings.confirmationSeconds)

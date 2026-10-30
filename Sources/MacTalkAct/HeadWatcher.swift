@@ -91,6 +91,8 @@ final class HeadWatcher {
         case noCamera
         /// The camera opened but gave no frames (busy, unplugged).
         case noFrames
+        /// A calibration is already recording.
+        case busy
 
         var isFailure: Bool { self == .denied || self == .noCamera || self == .noFrames }
 
@@ -102,6 +104,7 @@ final class HeadWatcher {
             case .denied: return "permesso Fotocamera mancante"
             case .noCamera: return "nessuna fotocamera trovata"
             case .noFrames: return "la fotocamera non dà immagini (occupata o staccata)"
+            case .busy: return "calibrazione già in corso"
             }
         }
     }
@@ -111,8 +114,8 @@ final class HeadWatcher {
 
     private(set) var status: Status = .off { didSet { if status != oldValue { onStatusChange?(status) } } }
     var onStatusChange: ((Status) -> Void)?
-    /// A «no» with the head while one was awaited (`armNo`). On the main actor.
-    var onNo: (() -> Void)?
+    /// An awaited gesture (`arm`): the «no», or the «sì» when allowed. On the main actor.
+    var onGesture: ((HeadGestureDetector.Gesture) -> Void)?
 
     private let sink = HeadFrameSink()
     private let queue = DispatchQueue(label: "mactalkact.head-watcher")
@@ -120,8 +123,8 @@ final class HeadWatcher {
     private var watchdog: Task<Void, Never>?
 
     init() {
-        sink.onNo = { [weak self] in
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.onNo?() } }
+        sink.onGesture = { [weak self] g in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.onGesture?(g) } }
         }
     }
 
@@ -136,8 +139,9 @@ final class HeadWatcher {
     }
 
     /// Turns the camera on with the calibrated reference. Without a reference the camera stays off.
-    func start(reference: HeadPose?) {
+    func start(reference: HeadPose?, profile: HeadProfile? = nil) {
         guard let reference else { stop(); status = .needsCalibration; return }
+        sink.setProfile(profile)
         sink.setReference(reference)
         if running != nil {
             // Frames came after the 3 s check: the camera works after all.
@@ -158,6 +162,8 @@ final class HeadWatcher {
     }
 
     func stop() {
+        // A calibration is recording: the camera goes off when it ends, not under it.
+        if recording { temporaryCamera = true; return }
         watchdog?.cancel()
         watchdog = nil
         if let r = running {
@@ -181,7 +187,9 @@ final class HeadWatcher {
 
     /// A question is now waiting for an answer: the next «no» with the head answers it. A «no» after
     /// the question is gone finds nothing to cancel (`Coordinator.headNoTarget`).
-    func armNo() { sink.armNo() }
+    /// Never while a calibration records: its gestures must not answer a real question.
+    func arm(allowYes: Bool) { if !recording { sink.arm(allowYes: allowYes) } }
+    func disarm() { sink.disarm() }
 
     enum CalibrationResult: Equatable {
         case pose(HeadPose)
@@ -191,24 +199,45 @@ final class HeadWatcher {
         case busy
     }
 
-    private var calibrating = false
 
-    /// 5 s looking at the screen: the median pose, not enough faces, or the camera failure. The
-    /// camera is turned on just for this when it is off. One calibration at a time.
-    func calibrate() async -> CalibrationResult {
-        guard Self.authorized else { return .failed(.denied) }
-        guard !calibrating else { return .busy }
-        calibrating = true
-        defer { calibrating = false }
-        let temporary = running == nil
-        if temporary, let failure = openCamera(reportFailure: false) { return .failed(failure) }
+    private var recording = false
+    private var temporaryCamera = false
+
+    /// Starts recording every sample (angles only, in memory) for a calibration. The camera is
+    /// turned on just for this when it is off. The failure, or nil. One recording at a time.
+    func beginRecording() -> Status? {
+        guard Self.authorized else { return .denied }
+        guard !recording else { return .busy }
+        temporaryCamera = running == nil
+        if temporaryCamera, let failure = openCamera(reportFailure: false) { return failure }
+        recording = true
+        sink.disarm() // gestures made for the calibration never answer a question
         sink.beginCalibration()
-        try? await Task.sleep(for: .seconds(Self.calibrationSeconds))
+        return nil
+    }
+
+    /// The samples recorded so far (the guide checks the face after the first phase).
+    func recordedSamples() -> [HeadSample] { sink.calibrationSoFar() }
+
+    /// Stops recording and returns the samples, or the failure «no frames». The camera goes back
+    /// to how it was.
+    func endRecording() -> (samples: [HeadSample], failure: Status?) {
+        guard recording else { return ([], nil) }
+        recording = false
         let samples = sink.endCalibration()
         // Read before stop(), which resets the status.
         let noFrames = !sink.hasFrames || status == .noFrames
-        if temporary { stop() }
-        if noFrames { return .failed(.noFrames) }
+        if temporaryCamera { stop() }
+        temporaryCamera = false
+        return (samples, noFrames ? .noFrames : nil)
+    }
+
+    /// 5 s looking at the screen: the median pose, not enough faces, or the camera failure.
+    func calibrate() async -> CalibrationResult {
+        if let failure = beginRecording() { return failure == .busy ? .busy : .failed(failure) }
+        try? await Task.sleep(for: .seconds(Self.calibrationSeconds))
+        let (samples, failure) = endRecording()
+        if let failure { return .failed(failure) }
         return HeadCalibration.reference(samples).map { .pose($0) } ?? .noFace
     }
 
@@ -260,7 +289,7 @@ final class HeadFrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     private var calibration: [HeadSample]?
     private(set) var frameCount = 0
     private let request = HeadCamera.faceRequest()
-    var onNo: (() -> Void)?
+    var onGesture: ((HeadGestureDetector.Gesture) -> Void)?
 
     var hasFrames: Bool { lock.withLock { frameCount > 0 } }
 
@@ -277,20 +306,26 @@ final class HeadFrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         lock.withLock { live.setReference(r) }
     }
 
+    func setProfile(_ p: HeadProfile?) {
+        lock.withLock { live.setProfile(gestures: p?.gestures ?? HeadGestureDetector.Config(), gate: p?.gate ?? .app) }
+    }
+
     func clear() {
         lock.withLock {
             // The calibration stays; the marks, the gate and the «no» start again.
-            let tracker = live.tracker
-            live = HeadLiveState()
-            if let tracker { live.setReference(tracker.calibrated) }
+            // The profile stays too: only the marks and the armed gestures go.
+            live.disarm()
+            live.clearMarks()
         }
     }
 
     func marks() -> [PhraseAttention.Mark] { lock.withLock { live.marks } }
 
-    func armNo() { lock.withLock { live.armNo() } }
+    func arm(allowYes: Bool) { lock.withLock { live.arm(allowYes: allowYes) } }
+    func disarm() { lock.withLock { live.disarm() } }
 
     func beginCalibration() { lock.withLock { calibration = [] } }
+    func calibrationSoFar() -> [HeadSample] { lock.withLock { calibration ?? [] } }
     func endCalibration() -> [HeadSample] { lock.withLock { defer { calibration = nil }; return calibration ?? [] } }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
@@ -299,12 +334,12 @@ final class HeadFrameSink: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         // Small tolerance: frames do not arrive exactly on time.
         guard t - last >= minInterval * 0.8, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let sample = HeadCamera.sample(pixels, t: t, request: request)
-        let fire = lock.withLock { () -> Bool in
+        let fire = lock.withLock { () -> HeadGestureDetector.Gesture? in
             lastProcessed = t
             frameCount += 1
             calibration?.append(sample)
             return live.feed(sample)
         }
-        if fire { onNo?() }
+        if let fire { onGesture?(fire) }
     }
 }

@@ -535,15 +535,17 @@ enum DebugCLI {
                 stride(from: from, through: to, by: 1.0 / 15).map { t in yaw(t).map { face(t, yaw: $0, pitch: pitch) } ?? .absent(t) }
             }
             let center = HeadPose(yaw: 0, pitch: 0)
-            func live(_ samples: [HeadSample], reference: HeadPose? = HeadPose(yaw: 0, pitch: 0), armAt: Double? = nil) -> (state: HeadLiveState, fired: Int) {
+            func live(_ samples: [HeadSample], reference: HeadPose? = HeadPose(yaw: 0, pitch: 0), armAt: Double? = nil, allowYes: Bool = false,
+                      profile: HeadGestureDetector.Config? = nil) -> (state: HeadLiveState, fired: Int, gestures: [HeadGestureDetector.Gesture]) {
                 var st = HeadLiveState()
+                if let profile { st.setProfile(gestures: profile, gate: .app) }
                 if let reference { st.setReference(reference) }
-                var fired = 0
+                var gestures: [HeadGestureDetector.Gesture] = []
                 for s in samples {
-                    if let a = armAt, abs(s.t - a) < 0.5 / 15 { st.armNo() }
-                    if st.feed(s) { fired += 1 }
+                    if let a = armAt, abs(s.t - a) < 0.5 / 15 { st.arm(allowYes: allowYes) }
+                    if let g = st.feed(s) { gestures.append(g) }
                 }
-                return (st, fired)
+                return (st, gestures.count, gestures)
             }
             // A Frase from 2 to 5 s: turned to the room (40°) from 1.5 s, back at 4.6 s.
             let turned = live(frames(0, 6) { $0 >= 1.5 && $0 < 4.6 ? 40 : 2 }).state
@@ -652,6 +654,171 @@ enum DebugCLI {
                     && Coordinator.ignoredAgentAnswer("sì", saidWake: false, addressed: true, facingAway: true) == nil)
             check("domanda dell'agente: «ciao amore» resta chiacchiera anche guardando lo schermo",
                   Coordinator.ignoredAgentAnswer("ciao amore", saidWake: false, addressed: false, facingAway: false) == "chiacchiera")
+        }
+        print("Calibrazione guidata dei gesti (soglie personali e sì facoltativo):")
+        do {
+            /// 15 fps from keyframes (t, yaw, pitch) joined by straight lines, with a small tremor.
+            func track(_ keys: [(Double, Double, Double)]) -> [HeadSample] {
+                guard let last = keys.last else { return [] }
+                var out: [HeadSample] = []
+                var t = 0.0
+                while t <= last.0 + 1e-9 {
+                    let i = keys.lastIndex { $0.0 <= t } ?? 0
+                    let a = keys[i], b = keys[min(i + 1, keys.count - 1)]
+                    let k = b.0 > a.0 ? (t - a.0) / (b.0 - a.0) : 0
+                    out.append(HeadSample(t: t, yaw: a.1 + (b.1 - a.1) * k + 0.3 * sin(17 * t), pitch: a.2 + (b.2 - a.2) * k + 0.3 * cos(13 * t), roll: 0, size: 0.3))
+                    t += 1 / 15
+                }
+                return out
+            }
+            let rest = (2.0, -5.0)
+            /// A slow nod at `at`: down `depth`° in 0.3 s, `dwell` s at the bottom, up in 0.3 s.
+            func nod(_ at: Double, depth: Double = 14, dwell: Double = 0.5) -> [(Double, Double, Double)] {
+                [(at, rest.0, rest.1), (at + 0.3, rest.0, rest.1 - depth), (at + 0.3 + dwell, rest.0, rest.1 - depth), (at + 0.6 + dwell, rest.0, rest.1)]
+            }
+            func shake(_ at: Double, around yaw: Double = 2, width: Double = 15) -> [(Double, Double, Double)] {
+                [(at, yaw, rest.1), (at + 0.3, yaw - width, rest.1), (at + 0.6, yaw + width, rest.1), (at + 0.9, yaw - width, rest.1), (at + 1.2, yaw, rest.1)]
+            }
+            /// The guided run: screen 0–5, room 6–12, back 13–16, 5 sì from 17, 5 no from 33, check 3 sì from 49 and 3 no from 59.
+            func run(roomYaw: Double = 40, checkNods: [Double] = [14, 14, 14], roomShake: Bool = false, faces: Bool = true,
+                     shakeWidth: Double = 15, checkYesShake: Bool = false, screenWobble: Bool = false)
+                -> (samples: [HeadSample], phases: [GesturePhase]) {
+                var keys: [(Double, Double, Double)] = screenWobble
+                    ? [(0, rest.0, rest.1), (2, rest.0 + 28, rest.1), (4, rest.0 - 28, rest.1), (5.5, rest.0, rest.1), (6, roomYaw, rest.1)]
+                    : [(0, rest.0, rest.1), (5.5, rest.0, rest.1), (6, roomYaw, rest.1)]
+                if roomShake { keys += shake(9, around: roomYaw) }
+                keys += [(12, roomYaw, rest.1), (12.5, rest.0, rest.1)]
+                let yesCues = [17.0, 20, 23, 26, 29], noCues = [33.0, 36, 39, 42, 45], checkYes = [49.0, 52, 55], checkNo = [59.0, 62, 65]
+                for c in yesCues { keys += nod(c + 0.6) }
+                for c in noCues { keys += shake(c + 0.6, width: shakeWidth) }
+                for (c, depth) in zip(checkYes, checkNods) { keys += nod(c + 0.6, depth: depth) }
+                if checkYesShake { keys += shake(51.0) }
+                for c in checkNo { keys += shake(c + 0.6, width: shakeWidth) }
+                keys.append((68, rest.0, rest.1))
+                var samples = track(keys.sorted { $0.0 < $1.0 })
+                if !faces { samples = samples.map { $0.t <= 5.2 ? .absent($0.t) : $0 } }
+                func phase(_ name: String, _ start: Double, _ end: Double, yes: [Double] = [], no: [Double] = []) -> GesturePhase {
+                    var p = GesturePhase(name: name, expectAttention: name != "stanza", expectedYes: yes.count, expectedNo: no.count)
+                    p.start = start; p.end = end; p.cues = yes + no
+                    return p
+                }
+                return (samples, [phase("schermo", 0, 5), phase("stanza", 6, 12), phase("ritorno", 13, 16), phase("sì", 17, 32, yes: yesCues),
+                                  phase("no", 33, 48, no: noCues), phase("verifica sì", 49, 58, yes: checkYes), phase("verifica no", 59, 68, no: checkNo)])
+            }
+            let good = run()
+            let fit = HeadProfileFit.fit(good.samples, phases: good.phases, date: Date(timeIntervalSince1970: 0))
+            check("calibrazione: corsa buona → profilo, sì 5/5 e no 5/5 in taratura",
+                  fit.failure == nil && fit.profile != nil && fit.trainingYes.right == 5 && fit.trainingNo.right == 5)
+            check("calibrazione: verifica «sì 3/3, no 3/3, nessun falso» e sì verificato",
+                  fit.profile?.summary == "sì 3/3, no 3/3, nessun falso" && fit.profile?.yesVerified == true)
+            let defaults = HeadProfileFit.score(good.samples, phases: good.phases, config: HeadGestureDetector.Config())
+            check("calibrazione: i cenni lenti (sosta 0,5 s) con le soglie di oggi non passano, con quelle personali sì",
+                  (defaults.answers["sì"]?.right ?? 0) < 5 && (fit.profile?.gestures.nodMaxDwell ?? 0) > 0.5)
+            check("calibrazione: limite del cancello 0,6 × la stanza (38° → circa 23°)", (22...24).contains(fit.profile?.limit ?? 0))
+            let shy = run(roomYaw: 24)
+            check("calibrazione: chi si gira poco ha il limite più stretto, mai sotto 15°",
+                  HeadProfileFit.fit(shy.samples, phases: shy.phases).profile?.limit == 15)
+            let barely = run(roomYaw: 12)
+            check("calibrazione: girato appena verso la stanza → non salva (il cancello non si chiuderebbe)",
+                  HeadProfileFit.fit(barely.samples, phases: barely.phases).failure == .roomUnclear)
+            let wobbly = run(screenWobble: true)
+            check("calibrazione: mosso molto guardando lo schermo → non salva (scambierebbe lo schermo per la stanza)",
+                  HeadProfileFit.fit(wobbly.samples, phases: wobbly.phases).failure == .screenUnsteady)
+            let falseCheck = run(checkYesShake: true)
+            let falseCheckFit = HeadProfileFit.fit(falseCheck.samples, phases: falseCheck.phases)
+            check("calibrazione: le soglie si scelgono senza la verifica, e un falso in verifica non salva",
+                  falseCheckFit.failure == .falseInCheck && falseCheckFit.trainingYes.right == 5)
+            let timid = run(shakeWidth: 4)
+            check("calibrazione: no troppo piccoli per essere riconosciuti → non salva (il no peggiorerebbe)",
+                  HeadProfileFit.fit(timid.samples, phases: timid.phases).failure == .tooFewNo)
+            let unsure = run(checkNods: [14, 14, 3])
+            let unsureFit = HeadProfileFit.fit(unsure.samples, phases: unsure.phases)
+            check("calibrazione: sì 2/3 in verifica → profilo salvato, sì non verificato",
+                  unsureFit.profile != nil && unsureFit.profile?.yesVerified == false && unsureFit.checkYes.right == 2)
+            let noisy = run(roomShake: true)
+            check("calibrazione: un no fatto girato verso la stanza è un falso per ogni soglia → nessun profilo",
+                  HeadProfileFit.fit(noisy.samples, phases: noisy.phases).failure == .noThresholds)
+            let blind = run(faces: false)
+            check("calibrazione: nessun volto nella prima fase → si ferma", HeadProfileFit.fit(blind.samples, phases: blind.phases).failure == .noFace)
+            check("calibrazione: interrotta o senza soglie non salva niente",
+                  HeadCalibrationGuide.conclusion(.cancelled).profile == nil
+                    && HeadCalibrationGuide.conclusion(.done(HeadProfileFit.fit(noisy.samples, phases: noisy.phases))).message.contains("resto come prima")
+                    && HeadCalibrationGuide.conclusion(.done(fit)).profile == fit.profile)
+            if let p = fit.profile, let data = try? JSONEncoder().encode(p) {
+                check("calibrazione: il profilo si salva e si rilegge", (try? JSONDecoder().decode(HeadProfile.self, from: data)) == p)
+            } else {
+                check("calibrazione: il profilo si salva e si rilegge", false)
+            }
+            // The «sì» with the head in use: only armed for the proposal, only with the option.
+            func live(_ samples: [HeadSample], armAt: Double, allowYes: Bool, profile: HeadGestureDetector.Config? = nil)
+                -> (fired: Int, gestures: [HeadGestureDetector.Gesture]) {
+                var st = HeadLiveState()
+                if let profile { st.setProfile(gestures: profile, gate: .app) }
+                st.setReference(HeadPose(yaw: 0, pitch: 0))
+                var gestures: [HeadGestureDetector.Gesture] = []
+                for s in samples {
+                    if abs(s.t - armAt) < 0.5 / 15 { st.arm(allowYes: allowYes) }
+                    if let g = st.feed(s) { gestures.append(g) }
+                }
+                return (gestures.count, gestures)
+            }
+            let liveNod = track([(0, 0, 0)] + nod(1.5).map { ($0.0, 0, $0.2 - rest.1) } + [(4, 0, 0)])
+            let liveShake = track([(0, 0, 0)] + shake(1.5, around: 0).map { ($0.0, $0.1, 0) } + [(4, 0, 0)])
+            let personal = fit.profile?.gestures
+            check("sì con la testa: senza opzione un cenno non conferma", live(liveNod, armAt: 1, allowYes: false, profile: personal).fired == 0)
+            check("sì con la testa: con l'opzione e le soglie personali il cenno lento conferma",
+                  live(liveNod, armAt: 1, allowYes: true, profile: personal).gestures == [.yes])
+            check("sì con la testa: con le soglie di oggi lo stesso cenno lento non passa", live(liveNod, armAt: 1, allowYes: true, profile: nil).fired == 0)
+            check("sì con la testa: il no continua ad annullare", live(liveShake, armAt: 1, allowYes: true, profile: personal).gestures == [.no])
+            let roomNod = track([(0, 40, 0)] + nod(1.5).map { ($0.0, 40, $0.2 - rest.1) } + [(4, 40, 0)])
+            check("sì con la testa: un cenno fatto girato verso la stanza non scrive", live(roomNod, armAt: 1, allowYes: true, profile: personal).fired == 0)
+            // The personal limit reaches the live gate: 20° is the room with a 15° limit, the screen with 25°.
+            func liveAt20(_ gate: AttentionGate.Config) -> PhraseAttention {
+                var st = HeadLiveState()
+                st.setProfile(gestures: HeadGestureDetector.Config(), gate: gate)
+                st.setReference(HeadPose(yaw: 0, pitch: 0))
+                for s in track([(0, 0, 0), (1, 0, 0), (1.2, 20, 0), (5, 20, 0)]) { _ = st.feed(s) }
+                return PhraseAttention.judge(st.marks, from: 2, to: 5)
+            }
+            let narrow = HeadProfile(gestures: .init(), limit: 15, yesVerified: false, date: Date(), summary: "")
+            check("calibrazione: il limite personale arriva al cancello dal vivo", liveAt20(narrow.gate) == .away && liveAt20(.app) == .screen)
+            var drifted = HeadLiveState()
+            drifted.setReference(HeadPose(yaw: 0, pitch: 0))
+            for s in track([(0, 8, 0), (120, 8, 0)]) { _ = drifted.feed(s) }
+            let movedBy = drifted.tracker?.reference.yaw ?? 0
+            drifted.clearMarks()
+            check("riavvio della camera: il riferimento torna quello calibrato", movedBy > 2 && drifted.tracker?.reference == HeadPose(yaw: 0, pitch: 0))
+            check("sì con la testa: si arma solo per «scrivilo», con l'opzione attiva e verificata",
+                  Coordinator.headArmsYes(.proposal, enabled: true) && !Coordinator.headArmsYes(.plan, enabled: true)
+                    && !Coordinator.headArmsYes(.agentConfirmation, enabled: true) && !Coordinator.headArmsYes(.proposal, enabled: false)
+                    && Coordinator.headYesEnabled(option: true, profile: fit.profile) && !Coordinator.headYesEnabled(option: false, profile: fit.profile)
+                    && !Coordinator.headYesEnabled(option: true, profile: unsureFit.profile) && !Coordinator.headYesEnabled(option: true, profile: nil))
+            check("calibrazione guidata: conta solo «stop», anche con la parola di attivazione",
+                  Coordinator.stopsGuide("stop", wakePhrases: ["computer"]) && Coordinator.stopsGuide("computer, stop", wakePhrases: ["computer"])
+                    && !Coordinator.stopsGuide("fai sì", wakePhrases: ["computer"]))
+            check("calibrazione guidata: messaggi dei casi di errore",
+                  HeadCalibrationGuide.conclusion(.busy).message == "Calibrazione già in corso."
+                    && HeadCalibrationGuide.conclusion(.failed("x")).profile == nil
+                    && HeadCalibrationGuide.conclusion(.done(falseCheckFit)).message.contains("verifica"))
+            check("sì con la testa: scrive solo la proposta in attesa, con l'opzione e senza lavoro in corso",
+                  Coordinator.headYesProposal(enabled: true, proposal: "ciao", busy: false) == "ciao"
+                    && Coordinator.headYesProposal(enabled: false, proposal: "ciao", busy: false) == nil
+                    && Coordinator.headYesProposal(enabled: true, proposal: nil, busy: false) == nil
+                    && Coordinator.headYesProposal(enabled: true, proposal: "ciao", busy: true) == nil)
+            // Saving: a «sì» not verified turns the option off, even after a better calibration.
+            let st = AppSettings.shared
+            let saved = (st.headProfile, st.headReference, st.headCalibratedAt, st.headYesConfirms)
+            if var p = fit.profile {
+                st.headYesConfirms = true
+                st.saveHeadProfile(p, reference: HeadPose(yaw: 1, pitch: 2))
+                let keptOn = st.headYesConfirms
+                p.yesVerified = false
+                st.saveHeadProfile(p, reference: HeadPose(yaw: 1, pitch: 2))
+                check("calibrazione: una ricalibrazione con il sì non verificato spegne l'opzione",
+                      keptOn && !st.headYesConfirms && st.headReference == HeadPose(yaw: 1, pitch: 2))
+            }
+            st.headProfile = saved.0; st.headReference = saved.1; st.headCalibratedAt = saved.2; st.headYesConfirms = saved.3
+            check("calibrazione: la conferma con il sì è spenta di serie", !AppSettings.Defaults.headYesConfirms)
         }
         print("Livelli di accesso (Storia 9.3):")
         check("Terminal: solo clic", AccessLevel.level(bundleID: "com.apple.Terminal", name: "Terminale", list: AccessLevel.defaultList) == .clickOnly)

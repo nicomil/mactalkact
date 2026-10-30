@@ -105,6 +105,8 @@ final class AppSettings: ObservableObject {
         static let sessionIdleSeconds = 60.0
         /// «Attenzione dalla fotocamera»: off until Nico turns it on.
         static let headAttention = false
+        /// «Conferma con un sì della testa»: off, and shown only after a check passed.
+        static let headYesConfirms = false
         // Conversation
         static let conversationSeconds = 20.0
         static let armedSeconds = 8.0
@@ -212,6 +214,21 @@ final class AppSettings: ObservableObject {
     }
     /// When the reference was calibrated, shown in the settings.
     @Published var headCalibratedAt: Date? { didSet { defaults.set(headCalibratedAt, forKey: "headCalibratedAt") } }
+    /// Personal thresholds from «Calibrazione completa». Nil: the defaults of the spike.
+    @Published var headProfile: HeadProfile? {
+        didSet { defaults.set(headProfile.flatMap { try? JSONEncoder().encode($0) }, forKey: "headProfile") }
+    }
+    /// The «sì» with the head writes the «scrivilo» proposal. Works only with `headProfile.yesVerified`.
+    @Published var headYesConfirms: Bool { didSet { defaults.set(headYesConfirms, forKey: "headYesConfirms") } }
+
+    /// Saves a guided calibration: profile, reference and date. A «sì» that did not pass the check
+    /// turns the option off, even if it was on with an older profile.
+    func saveHeadProfile(_ profile: HeadProfile, reference: HeadPose) {
+        headProfile = profile
+        headReference = reference
+        headCalibratedAt = profile.date
+        if !profile.yesVerified { headYesConfirms = false }
+    }
 
     // MARK: Conversation
     /// Seconds the conversation stays open after a response (FR-7).
@@ -363,6 +380,8 @@ final class AppSettings: ObservableObject {
         headAttention = bool("headAttention", Defaults.headAttention)
         headReference = (d.array(forKey: "headReference") as? [Double]).flatMap { $0.count == 2 ? HeadPose(yaw: $0[0], pitch: $0[1]) : nil }
         headCalibratedAt = d.object(forKey: "headCalibratedAt") as? Date
+        headProfile = d.data(forKey: "headProfile").flatMap { try? JSONDecoder().decode(HeadProfile.self, from: $0) }
+        headYesConfirms = bool("headYesConfirms", Defaults.headYesConfirms)
 
         conversationSeconds = double("conversationSeconds", Defaults.conversationSeconds)
         armedSeconds = double("armedSeconds", Defaults.armedSeconds)
@@ -454,6 +473,7 @@ final class AppSettings: ObservableObject {
             dictationEndSilence = Defaults.dictationEndSilence; dictationIdleSeconds = Defaults.dictationIdleSeconds
             sessionIdleSeconds = Defaults.sessionIdleSeconds
             headAttention = Defaults.headAttention // the calibration stays: it describes the desk, not a preference
+            headYesConfirms = Defaults.headYesConfirms
         case .conversation:
             conversationSeconds = Defaults.conversationSeconds; armedSeconds = Defaults.armedSeconds
             proposalSeconds = Defaults.proposalSeconds; agentQuestionSeconds = Defaults.agentQuestionSeconds
