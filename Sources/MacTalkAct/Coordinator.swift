@@ -33,6 +33,9 @@ final class Coordinator {
     /// «Turned to the room» of each Frase closed by voice detection and not yet handed over, in
     /// order: the recognizer may still be finishing one when the next starts.
     private var phraseAway: [Bool] = []
+    /// The live text of the current Frase contained the wake phrase: how many words came before it.
+    /// The final text sometimes loses it («compa» → «Compra»): the HUD had already answered.
+    private var liveWakeBefore: Int?
     /// A question the agent asked the user, waiting for the spoken answer.
     private var agentQuestion: CheckedContinuation<String?, Never>?
     /// The waiting question is a confirmation: a «no» with the head answers it.
@@ -670,6 +673,7 @@ final class Coordinator {
         }
         guard mode != .off, !busy, !live.isEmpty else { return }
         let wake = WakeWord.extract(live, phrases: settings.wakePhraseList)
+        if let p = WakeWord.position(live, phrases: settings.wakePhraseList) { liveWakeBefore = p.before }
         if Self.preparesSession(wake: wake, speaking: speaker.isSpeaking) { prepareAgent() }
         let addressed = mode == .session || conversation.isArmed || pending != nil || wake != nil
         if addressed {
@@ -681,7 +685,14 @@ final class Coordinator {
     private func handleUtterance(_ raw: String, addressed: Bool) {
         // The screen may change after this sentence: read the window again for the next ones.
         vocabulary.refresh(after: 2)
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let heardWakeBefore = liveWakeBefore
+        liveWakeBefore = nil
+        if let before = heardWakeBefore, !addressed, !dictating,
+           WakeWord.extract(text, phrases: settings.wakePhraseList) == nil {
+            text = WakeWord.restore(text, before: before, wake: settings.firstWakePhrase)
+            Log.info("Parola di attivazione sentita durante la frase ma persa nel testo finale: rimessa")
+        }
         // Push-to-talk is always addressed to the app: the camera is not asked.
         let away = !addressed && phraseFacedAway()
         // During the guided calibration only «stop» counts: the rest is Nico following the voice.

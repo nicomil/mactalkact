@@ -1066,6 +1066,19 @@ enum DebugCLI {
               WakeWord.extract("Allora vediamo, computer apri Safari", phrases: wakes) == "apri Safari")
         check("solo computer", WakeWord.extract("Computer.", phrases: wakes) == "")
         check("niente computer", WakeWord.extract("ciao amore", phrases: wakes) == nil)
+        // The live text heard «compa», the final text lost it: it is put back where it was.
+        let pos = WakeWord.position("allora vediamo, compa apri", phrases: ["compa", "ehi compa"])
+        check("posizione: 2 parole prima, lunga 1", pos?.before == 2 && pos?.length == 1)
+        check("ok computer: la frase più lunga che finisce dopo",
+              WakeWord.position("ok computer apri", phrases: wakes).map { $0.before + $0.length } == 2)
+        check("finale senza la parola: rimessa", WakeWord.restore("Apri Safari", before: 0, wake: "compa") == "compa Apri Safari")
+        check("finale storpiato «Compra»: sostituito", WakeWord.restore("Compra, apri Safari", before: 0, wake: "compa") == "compa apri Safari")
+        check("parole prima della parola: tolte", WakeWord.restore("allora vediamo Compà scorri giù", before: 2, wake: "compa") == "compa scorri giù")
+        check("finale vuoto: solo la parola", WakeWord.restore("", before: 0, wake: "compa") == "compa")
+        check("parola diversa non scartata", WakeWord.restore("Controlla la posta", before: 0, wake: "compa") == "compa Controlla la posta")
+        check("storpiature: compra/campa sì, con/compagnia no",
+              WakeWord.misheard("compra", as: "compa") && WakeWord.misheard("campa", as: "compa")
+              && !WakeWord.misheard("con", as: "compa") && !WakeWord.misheard("compagnia", as: "compa"))
         check("scorre giù", Grammar.parse("Scorre giù") == .scroll(direction: "down", amount: 1))
         check("Ehi Mac, apri Mail", WakeWord.strip("Ehi Mac, apri Mail.", phrases: phrases) == "apri Mail")
         check("Hey Mac", WakeWord.strip("Hey Mac", phrases: phrases) == "")

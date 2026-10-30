@@ -271,6 +271,14 @@ if let path = argument(after: "--listen-file") {
     Task { @MainActor in
         let engine = SpeechEngine()
         let t0 = Date()
+        // The same base vocabulary as the app (without the screen), so the wake phrases are expected.
+        engine.vocabulary = SpeechVocabulary.build(labels: [], wakePhrases: AppSettings.shared.wakePhraseList, memory: Memory.shared)
+        var lastLive = ""
+        engine.onLive = { text in
+            guard text != lastLive else { return }
+            lastLive = text
+            print(String(format: "%6.2fs  parziale: «%@»", Date().timeIntervalSince(t0), text))
+        }
         engine.onUtterance = { text in print(String(format: "%6.2fs  frase: «%@»", Date().timeIntervalSince(t0), text)) }
         do { try await engine.feedFile(URL(fileURLWithPath: path)) } catch { print("Errore: \(error.localizedDescription)") }
         try? await Task.sleep(for: .seconds(3))

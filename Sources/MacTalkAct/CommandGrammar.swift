@@ -338,19 +338,54 @@ enum WakeWord {
     /// Finds the wake phrase anywhere (last occurrence) and returns what follows it.
     /// Speech captured before it (TV, a chat with the baby) is dropped.
     static func extract(_ text: String, phrases: [String]) -> String? {
+        guard let p = position(text, phrases: phrases) else { return nil }
         let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
-        let normWords = words.map { Grammar.normalize($0) }
-        var bestEnd: Int?
+        return words.dropFirst(p.before + p.length).joined(separator: " ").trimmingCharacters(in: Grammar.edgePunctuation)
+    }
+
+    /// Where the last wake phrase is: how many words come before it, and how many words it has.
+    static func position(_ text: String, phrases: [String]) -> (before: Int, length: Int)? {
+        let normWords = text.split(whereSeparator: \.isWhitespace).map { Grammar.normalize(String($0)) }
+        var best: (before: Int, length: Int)?
         for phrase in phrases {
             let pw = phrase.split(separator: " ").map(String.init)
             guard !pw.isEmpty, normWords.count >= pw.count else { continue }
             for start in 0...(normWords.count - pw.count) where Array(normWords[start..<start + pw.count]) == pw {
-                let end = start + pw.count
-                if bestEnd == nil || end > bestEnd! { bestEnd = end }
+                if best == nil || start + pw.count > best!.before + best!.length { best = (start, pw.count) }
             }
         }
-        guard let end = bestEnd else { return nil }
-        return words.dropFirst(end).joined(separator: " ").trimmingCharacters(in: Grammar.edgePunctuation)
+        return best
+    }
+
+    /// The recognizer heard the wake word while the sentence was spoken (live text), then the final
+    /// text lost it: «compa» becomes «Compra» or disappears. Puts it back where it was: drops the
+    /// `before` words that preceded it (speech not meant for the app) and a misheard copy of it.
+    static func restore(_ final: String, before: Int, wake: String) -> String {
+        var rest = Array(final.split(whereSeparator: \.isWhitespace).map(String.init).dropFirst(before))
+        let w = Grammar.normalize(wake)
+        if let first = rest.first, !w.contains(" "), Self.misheard(Grammar.normalize(first), as: w) {
+            rest.removeFirst()
+        }
+        let tail = rest.joined(separator: " ").trimmingCharacters(in: Grammar.edgePunctuation)
+        return tail.isEmpty ? wake : "\(wake) \(tail)"
+    }
+
+    /// A word that is the wake word heard a little wrong: one letter in three may differ.
+    static func misheard(_ word: String, as wake: String) -> Bool {
+        let a = Array(word), b = Array(wake)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        // Edit distance, one row at a time.
+        var row = Array(0...b.count)
+        for i in 1...a.count {
+            var diagonal = row[0]
+            row[0] = i
+            for j in 1...b.count {
+                let above = row[j]
+                row[j] = min(above + 1, row[j - 1] + 1, diagonal + (a[i - 1] == b[j - 1] ? 0 : 1))
+                diagonal = above
+            }
+        }
+        return row[b.count] <= max(1, b.count / 3)
     }
 
     static func contains(_ text: String, phrases: [String]) -> Bool {
