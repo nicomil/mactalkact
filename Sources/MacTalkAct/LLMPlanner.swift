@@ -241,6 +241,8 @@ enum Safety {
         "submit", "post", "trash", "publish", "esci", "logout",
         // Story 9.4 (coverage): payments, bookings and signing out.
         "checkout", "prenota", "prenotare", "disconnetti", "disconnettiti", "signout", "disiscriviti", "trasferisci", "purchase",
+        // Erasing a disk (Utility Disco «Inizializza», «Erase»): everything on it is gone.
+        "inizializza", "inizializzare", "reinizializza", "erase",
     ]
 
     /// Two-word labels whose words alone are harmless («Conferma», «ordine», «Log»).
@@ -252,6 +254,7 @@ enum Safety {
         "conferma acquisto", "conferma l acquisto", "completa acquisto", "completa l acquisto", "procedi all acquisto",
         "conferma prenotazione", "conferma la prenotazione", "book now",
         "accetta invito", "accetta l invito", "log out", "sign out",
+        "formatta il disco", "formatta disco", "formatta l unita", "format disk",
     ]
 
     private static let riskyCombos = ["cmd+q", "cmd+delete", "cmd+backspace", "cmd+shift+d", "cmd+return", "cmd+enter",

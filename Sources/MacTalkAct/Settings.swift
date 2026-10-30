@@ -451,7 +451,17 @@ final class AppSettings: ObservableObject {
 
         privateModeMinutes = double("privateModeMinutes", Defaults.privateModeMinutes)
         reservedApps = string("reservedApps", Defaults.reservedApps)
-        accessLevels = string("accessLevels", Defaults.accessLevels)
+        // New default lines (Utility Disco) reach a list saved before them, once.
+        var levels = string("accessLevels", Defaults.accessLevels)
+        let levelsVersion = int("accessLevelsVersion", 0)
+        if levelsVersion < AccessLevel.defaultsVersion {
+            if d.string(forKey: "accessLevels") != nil {
+                levels = AccessLevel.addingNewDefaults(to: levels, after: levelsVersion)
+                d.set(levels, forKey: "accessLevels")
+            }
+            d.set(AccessLevel.defaultsVersion, forKey: "accessLevelsVersion")
+        }
+        accessLevels = levels
         reservedSites = string("reservedSites", Defaults.reservedSites)
         hideSensitiveFromCloud = bool("hideSensitiveFromCloud", Defaults.hideSensitiveFromCloud)
         logRetentionDays = int("logRetentionDays", Defaults.logRetentionDays)

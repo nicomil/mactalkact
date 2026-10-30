@@ -195,8 +195,33 @@ struct AccessLevel: Equatable {
     com.apple.systempreferences = conferma ogni azione
     com.apple.ScriptEditor2 = conferma ogni azione
     com.apple.Automator = conferma ogni azione
+    com.apple.DiskUtility = conferma ogni azione
     com.apple.finder = normale
     """
+
+    /// Lines added to the default list after it was first saved: a saved list gets each one once,
+    /// unless it already names that app (then the user's choice stays).
+    static let addedDefaults: [(version: Int, line: String)] = [
+        (1, "com.apple.DiskUtility = conferma ogni azione"),
+    ]
+
+    /// `list` with the default lines newer than `version` (pure, tested by `--selftest`).
+    static func addingNewDefaults(to list: String, after version: Int) -> String {
+        var out = list
+        for added in addedDefaults where added.version > version {
+            let key = added.line.split(separator: "=")[0].trimmingCharacters(in: .whitespaces).lowercased()
+            let named = list.split(whereSeparator: \.isNewline).contains { line in
+                line.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces).lowercased() == key
+            }
+            if !named {
+                while out.hasSuffix("\n") { out.removeLast() }
+                out += (out.isEmpty ? "" : "\n") + added.line
+            }
+        }
+        return out
+    }
+
+    static var defaultsVersion: Int { addedDefaults.map(\.version).max() ?? 0 }
 
     /// The level of an app from the list (pure, tested by `--selftest`); unknown apps are `.full`.
     /// The last line for the app wins (a line added at the bottom overrides the default). A level

@@ -861,6 +861,18 @@ enum DebugCLI {
         check("cmux: solo clic", AccessLevel.level(bundleID: "com.cmuxterm.app", name: "cmux", list: AccessLevel.defaultList) == .clickOnly)
         check("Impostazioni di Sistema: conferma ogni azione", AccessLevel.level(bundleID: "com.apple.systempreferences", name: "", list: AccessLevel.defaultList) == .confirmAll)
         check("app sconosciuta: normale", AccessLevel.level(bundleID: "com.example", name: "Esempio", list: AccessLevel.defaultList) == .full)
+        check("Utility Disco: conferma ogni azione", AccessLevel.level(bundleID: "com.apple.DiskUtility", name: "Utility Disco", list: AccessLevel.defaultList) == .confirmAll)
+        let savedLevels = "com.apple.Terminal = solo clic\n"
+        let upgraded = AccessLevel.addingNewDefaults(to: savedLevels, after: 0)
+        check("lista salvata prima: Utility Disco aggiunta una volta, il resto uguale",
+              upgraded == "com.apple.Terminal = solo clic\ncom.apple.DiskUtility = conferma ogni azione"
+              && AccessLevel.addingNewDefaults(to: upgraded, after: 0) == upgraded
+              && AccessLevel.addingNewDefaults(to: savedLevels, after: AccessLevel.defaultsVersion) == savedLevels)
+        check("Utility Disco già scelta dall'utente: resta la sua scelta",
+              AccessLevel.addingNewDefaults(to: "com.apple.diskutility = normale", after: 0) == "com.apple.diskutility = normale")
+        check("cancellare un disco chiede sempre: Inizializza, Erase, Formatta il disco, Cancella tutto",
+              ["Inizializza", "Inizializza…", "Erase", "Formatta il disco", "Cancella tutto", "Sposta nel Cestino"].allSatisfy(Safety.isRiskyLabel)
+              && !Safety.isRiskyLabel("Formatta documento") && !Safety.isRiskyLabel("Gomma"))
         check("per nome e maiuscole", AccessLevel.level(bundleID: "x", name: "iTerm", list: "iterm = SOLO CLIC") == .clickOnly)
         let observed = "APP: Terminal (com.apple.Terminal)\nWINDOW: nico — zsh size 800x600\n[1]* button «Chiudi» @1,1 10x10\n[2] textarea «Shell» value=«ls -la segreto»\n[3] statictext «password: 1234»"
         let reduced = AgentTools.controlsOnly(observed)
