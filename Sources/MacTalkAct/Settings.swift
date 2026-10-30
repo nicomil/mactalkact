@@ -103,6 +103,8 @@ final class AppSettings: ObservableObject {
         static let dictationEndSilence = 1.6
         static let dictationIdleSeconds = 4.0
         static let sessionIdleSeconds = 60.0
+        /// «Attenzione dalla fotocamera»: off until Nico turns it on.
+        static let headAttention = false
         // Conversation
         static let conversationSeconds = 20.0
         static let armedSeconds = 8.0
@@ -201,6 +203,15 @@ final class AppSettings: ObservableObject {
     @Published var dictationEndSilence: Double { didSet { defaults.set(dictationEndSilence, forKey: "dictationEndSilence") } }
     @Published var dictationIdleSeconds: Double { didSet { defaults.set(dictationIdleSeconds, forKey: "dictationIdleSeconds") } }
     @Published var sessionIdleSeconds: Double { didSet { defaults.set(sessionIdleSeconds, forKey: "sessionIdleSeconds") } }
+    /// While continuous listening is on, the camera ignores the Frasi said turned to the room and
+    /// sees a «no» with the head (research §40).
+    @Published var headAttention: Bool { didSet { defaults.set(headAttention, forKey: "headAttention") } }
+    /// The calibrated «looking at the screen» pose (yaw, pitch in degrees). Only two angles.
+    @Published var headReference: HeadPose? {
+        didSet { defaults.set(headReference.map { [$0.yaw, $0.pitch] }, forKey: "headReference") }
+    }
+    /// When the reference was calibrated, shown in the settings.
+    @Published var headCalibratedAt: Date? { didSet { defaults.set(headCalibratedAt, forKey: "headCalibratedAt") } }
 
     // MARK: Conversation
     /// Seconds the conversation stays open after a response (FR-7).
@@ -349,6 +360,9 @@ final class AppSettings: ObservableObject {
         dictationEndSilence = double("dictationEndSilence", Defaults.dictationEndSilence)
         dictationIdleSeconds = double("dictationIdleSeconds", Defaults.dictationIdleSeconds)
         sessionIdleSeconds = double("sessionIdleSeconds", Defaults.sessionIdleSeconds)
+        headAttention = bool("headAttention", Defaults.headAttention)
+        headReference = (d.array(forKey: "headReference") as? [Double]).flatMap { $0.count == 2 ? HeadPose(yaw: $0[0], pitch: $0[1]) : nil }
+        headCalibratedAt = d.object(forKey: "headCalibratedAt") as? Date
 
         conversationSeconds = double("conversationSeconds", Defaults.conversationSeconds)
         armedSeconds = double("armedSeconds", Defaults.armedSeconds)
@@ -439,6 +453,7 @@ final class AppSettings: ObservableObject {
             vadNoiseFactor = Defaults.vadNoiseFactor; vadMaxSegment = Defaults.vadMaxSegment
             dictationEndSilence = Defaults.dictationEndSilence; dictationIdleSeconds = Defaults.dictationIdleSeconds
             sessionIdleSeconds = Defaults.sessionIdleSeconds
+            headAttention = Defaults.headAttention // the calibration stays: it describes the desk, not a preference
         case .conversation:
             conversationSeconds = Defaults.conversationSeconds; armedSeconds = Defaults.armedSeconds
             proposalSeconds = Defaults.proposalSeconds; agentQuestionSeconds = Defaults.agentQuestionSeconds

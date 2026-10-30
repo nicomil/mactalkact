@@ -25,6 +25,9 @@ struct RouterState {
     var instantLevel = false
     /// Whether the request names something known (`RouteHeuristics.hasKnownTarget` with the app's data).
     var knownTarget: (String) -> Bool = { _ in false }
+    /// «Attenzione dalla fotocamera»: Nico was turned to the room for most of the Frase. False when
+    /// the camera is off, failed or did not see the face.
+    var facingAway = false
 }
 
 /// Is the agent usable right now? Owned by AgentRunner (AD-7).
@@ -142,6 +145,14 @@ final class IntentRouter {
     func decide(_ raw: String, editable: () -> Bool, state: RouterState) async -> RouteDecision {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return .ignore(reason: "frase vuota") }
+        let wakeRest = WakeWord.extract(text, phrases: state.wakePhrases)
+
+        // Turned to the room (camera): without the wake phrase, the key or a just-said wake phrase
+        // («computer»… then the request), the Frase is for someone else. Before everything else: a
+        // number or a «sì» said to the room neither clicks nor confirms.
+        if state.facingAway && wakeRest == nil && !state.pushToTalk && !state.armed {
+            return .ignore(reason: "girato verso la stanza")
+        }
 
         // 1. Numbers on screen: "12", "clicca il 7", no wake phrase needed.
         if state.numbersVisible {
@@ -150,7 +161,6 @@ final class IntentRouter {
         }
 
         // 2. The wake phrase. Alone, it only arms: it is never typed (FR-2).
-        let wakeRest = WakeWord.extract(text, phrases: state.wakePhrases)
         if let rest = wakeRest {
             if rest.isEmpty || RouteHeuristics.isOnlyFillers(rest) { return .arm }
             text = rest

@@ -418,6 +418,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         c.engineErrors = { [weak self] in self?.coordinator.agent.lastErrors ?? [:] }
         c.engineCLIStatus = { [weak self] in self?.coordinator.agent.cliStatuses ?? [:] }
         c.testLocalEngine = { [weak self] in await self?.coordinator.testLocalEngine() ?? "—" }
+        c.headStatus = { [weak self] in
+            guard let self else { return "—" }
+            let status = self.coordinator.head.status
+            if status == .off && self.coordinator.mode == .off { return "si accende quando attivi l'ascolto continuo" }
+            return status.label
+        }
+        c.calibrateHead = { [weak self] in await self?.coordinator.calibrateHead() ?? "—" }
+        c.applyHead = { [weak self] in self?.coordinator.applyHeadSettings() }
         return c
     }
 

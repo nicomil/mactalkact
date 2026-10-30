@@ -527,6 +527,132 @@ enum DebugCLI {
             check("gesti: TSV con 11 colonne e solo numeri", tsv.split(separator: "\n").allSatisfy { $0.split(separator: "\t", omittingEmptySubsequences: false).count == 11 }
                     && tsv.contains("0.500\tcalibrazione\t0\t"))
         }
+        print("Attenzione dalla fotocamera (cancello e «no» con la testa):")
+        do {
+            func face(_ t: Double, yaw: Double, pitch: Double = 0) -> HeadSample { HeadSample(t: t, yaw: yaw, pitch: pitch, roll: 0, size: 0.3) }
+            // 15 fps from `from` to `to`, the yaw given by `yaw(t)`.
+            func frames(_ from: Double, _ to: Double, yaw: (Double) -> Double?, pitch: Double = 0) -> [HeadSample] {
+                stride(from: from, through: to, by: 1.0 / 15).map { t in yaw(t).map { face(t, yaw: $0, pitch: pitch) } ?? .absent(t) }
+            }
+            let center = HeadPose(yaw: 0, pitch: 0)
+            func live(_ samples: [HeadSample], reference: HeadPose? = HeadPose(yaw: 0, pitch: 0), armAt: Double? = nil) -> (state: HeadLiveState, fired: Int) {
+                var st = HeadLiveState()
+                if let reference { st.setReference(reference) }
+                var fired = 0
+                for s in samples {
+                    if let a = armAt, abs(s.t - a) < 0.5 / 15 { st.armNo() }
+                    if st.feed(s) { fired += 1 }
+                }
+                return (st, fired)
+            }
+            // A Frase from 2 to 5 s: turned to the room (40°) from 1.5 s, back at 4.6 s.
+            let turned = live(frames(0, 6) { $0 >= 1.5 && $0 < 4.6 ? 40 : 2 }).state
+            check("attenzione: girato per quasi tutta la frase → altrove", PhraseAttention.judge(turned.marks, from: 1.7, to: 5) == .away)
+            let reading = live(frames(0, 6) { 8 * sin($0) }).state
+            check("attenzione: lettura entro ±25° → schermo", PhraseAttention.judge(reading.marks, from: 1.7, to: 5) == .screen)
+            let pitchDown = live(frames(0, 6, yaw: { _ in 0 }, pitch: 35)).state
+            check("attenzione: anche il pitch oltre 25° conta come altrove", PhraseAttention.judge(pitchDown.marks, from: 1.7, to: 5) == .away)
+            let noFace = live(frames(0, 6) { $0 >= 1.5 ? nil : 0 }).state
+            check("attenzione: volto assente nella frase → ignoto, non altrove", PhraseAttention.judge(noFace.marks, from: 1.7, to: 5) == .unknown)
+            let fewFaces = live(frames(0, 6) { t in t >= 1.5 && Int(t * 15) % 3 != 0 ? nil : 40 }).state
+            check("attenzione: volti in meno di metà dei fotogrammi → ignoto", PhraseAttention.judge(fewFaces.marks, from: 1.7, to: 5) == .unknown)
+            check("attenzione: meno di 3 fotogrammi (camera ferma) → ignoto", PhraseAttention.judge(turned.marks, from: 10, to: 12) == .unknown)
+            let uncalibrated = live(frames(0, 6) { $0 >= 1.5 ? 40 : 0 }, reference: nil).state
+            check("attenzione: senza calibrazione il cancello resta sullo schermo", PhraseAttention.judge(uncalibrated.marks, from: 1.7, to: 5) != .away)
+            var startGate = AttentionGate(config: .app, startOn: true)
+            check("attenzione: all'avvio il cancello parte acceso", startGate.feed(face(0, yaw: 40), reference: center))
+            check("attenzione: si tengono solo gli ultimi 30 s", (live(frames(0, 40) { _ in 0 }).state.marks.first?.t ?? 0) > 4)
+            // The reference follows slowly the samples inside the limits, never the room, at most 10°.
+            var tracker = ReferenceTracker(calibrated: center)
+            for s in frames(0, 60, yaw: { _ in 6 }) { tracker.feed(s) }
+            let followed = tracker.reference.yaw
+            for s in frames(60, 300, yaw: { _ in 40 }) { tracker.feed(s) }
+            check("attenzione: il riferimento segue piano la postura (6° in 60 s → tra 2° e 4°)", followed > 2 && followed < 4)
+            check("attenzione: il riferimento non segue lo sguardo verso la stanza", tracker.reference.yaw == followed)
+            var drift = ReferenceTracker(calibrated: center)
+            for s in frames(0, 1200, yaw: { _ in 22 }) { drift.feed(s) }
+            check("attenzione: il riferimento non si sposta più di 10° dalla calibrazione", abs(drift.reference.yaw - 10) < 1e-9)
+            // «No» with the head: only while a question waits, once, never for a nod.
+            let shake: (Double) -> Double? = { t in
+                switch t {
+                case ..<2: return 0
+                case ..<2.3: return -15 * (t - 2) / 0.3
+                case ..<2.6: return -15 + 30 * (t - 2.3) / 0.3
+                case ..<2.9: return 15 - 30 * (t - 2.6) / 0.3
+                case ..<3.2: return -15 + 15 * (t - 2.9) / 0.3
+                default: return 0
+                }
+            }
+            check("no con la testa: con una domanda in attesa annulla, una volta", live(frames(0, 5, yaw: shake), armAt: 1).fired == 1)
+            check("no con la testa: senza domanda in attesa non fa nulla", live(frames(0, 5, yaw: shake)).fired == 0)
+            check("no con la testa: un no prima della domanda non conta", live(frames(0, 5, yaw: shake), armAt: 3.5).fired == 0)
+            let nod = [face(0, yaw: 0)] + frames(0.1, 4, yaw: { _ in 0 }).map { s in
+                HeadSample(t: s.t, yaw: 0, pitch: (1.3...1.6).contains(s.t) ? 20 : (1.0..<1.3).contains(s.t) ? 20 * (s.t - 1) / 0.3 : (1.6..<1.9).contains(s.t) ? 20 - 20 * (s.t - 1.6) / 0.3 : 0, roll: 0, size: 0.3)
+            }
+            check("no con la testa: un cenno di sì non conferma né annulla", live(nod, armAt: 0.5).fired == 0)
+            check("no con la testa: annulla prima la conferma dell'agente, poi il piano, poi «scrivilo»",
+                  Coordinator.headNoTarget(agentConfirmation: true, plan: true, proposal: true, busy: true) == .agentConfirmation
+                    && Coordinator.headNoTarget(agentConfirmation: false, plan: true, proposal: true, busy: false) == .plan
+                    && Coordinator.headNoTarget(agentConfirmation: false, plan: false, proposal: true, busy: false) == .proposal
+                    && Coordinator.headNoTarget(agentConfirmation: false, plan: false, proposal: false, busy: false) == nil
+                    && Coordinator.headNoTarget(agentConfirmation: false, plan: true, proposal: true, busy: true) == nil)
+            let watcher = HeadWatcher()
+            check("attenzione: camera spenta → ignoto", watcher.attention(from: 0, to: HeadCamera.hostNow()) == .unknown)
+            watcher.start(reference: nil)
+            check("attenzione: senza calibrazione la camera non si accende", watcher.status == .needsCalibration
+                    && watcher.attention(from: 0, to: HeadCamera.hostNow()) == .unknown)
+            watcher.stop()
+            check("attenzione: permesso negato, nessuna camera e nessuna immagine sono guasti (avviso, poi come senza)",
+                  [HeadWatcher.Status.denied, .noCamera, .noFrames].allSatisfy(\.isFailure)
+                    && ![HeadWatcher.Status.off, .active, .needsCalibration].contains(where: \.isFailure))
+            // The router: turned to the room, without the wake phrase or the key, is not for us.
+            final class CommandClassifier: IntentClassifier {
+                var name: String { "finto comando" }
+                func classify(_ text: String, editable: Bool, after: String?) async -> Classification { Classification(kind: .command, source: "finto") }
+                func prewarm() {}
+            }
+            let router = IntentRouter(classifier: CommandClassifier(), proposer: nil, validator: LocalActionValidator { _ in nil })
+            router.macroLookup = { _ in nil }
+            func decide(_ text: String, away: Bool, _ edit: (inout RouterState) -> Void = { _ in }) async -> RouteDecision {
+                var st = RouterState()
+                st.listening = .session
+                st.facingAway = away
+                edit(&st)
+                return await router.decide(text, editable: { false }, state: st)
+            }
+            func ignoredAsRoom(_ d: RouteDecision) -> Bool { if case .ignore(let r) = d { return r == "girato verso la stanza" } else { return false } }
+            check("router: girato, in sessione, senza parola di attivazione → chiacchiera", ignoredAsRoom(await decide("rispondi a Marco che arrivo alle nove", away: true)))
+            check("router: girato nella finestra di conversazione → chiacchiera",
+                  ignoredAsRoom(await decide("rispondi a Marco che arrivo alle nove", away: true) { $0.listening = .wakeWord; $0.windowOpen = true }))
+            check("router: guarda lo schermo → decisione di oggi", !ignoredAsRoom(await decide("rispondi a Marco che arrivo alle nove", away: false)))
+            check("router: girato ma con la parola di attivazione → decisione di oggi",
+                  !ignoredAsRoom(await decide("computer rispondi a Marco che arrivo alle nove", away: true)))
+            check("router: girato ma con il tasto premuto → decisione di oggi",
+                  !ignoredAsRoom(await decide("rispondi a Marco che arrivo alle nove", away: true) { $0.pushToTalk = true }))
+            let yesAway = await decide("sì", away: true) { $0.pendingConfirmation = true }
+            let yesScreen = await decide("sì", away: false) { $0.pendingConfirmation = true }
+            var confirms = false
+            if case .confirmation(let y) = yesScreen { confirms = y }
+            check("router: un «sì» detto alla stanza non conferma", ignoredAsRoom(yesAway) && confirms)
+            check("router: un «scrivilo» detto alla stanza non scrive", ignoredAsRoom(await decide("scrivilo", away: true) { $0.proposedText = "ciao" }))
+            check("router: dopo «computer» da solo, la richiesta passa anche girato",
+                  !ignoredAsRoom(await decide("rispondi a Marco che arrivo alle nove", away: true) { $0.armed = true }))
+            func isNumber(_ d: RouteDecision) -> Bool { if case .number(7, _) = d { return true } else { return false } }
+            check("router: un numero detto alla stanza non clicca",
+                  ignoredAsRoom(await decide("il 7", away: true) { $0.numbersVisible = true }))
+            let numberScreen = await decide("il 7", away: false) { $0.numbersVisible = true }
+            let numberWake = await decide("computer il 7", away: true) { $0.numbersVisible = true }
+            check("router: un numero guardando lo schermo, o con «computer» da girato, clicca", isNumber(numberScreen) && isNumber(numberWake))
+            // The agent's questions do not pass through the router: the same rule in the Coordinator.
+            check("domanda dell'agente: «sì» detto alla stanza non è la risposta",
+                  Coordinator.ignoredAgentAnswer("sì", saidWake: false, addressed: false, facingAway: true) == "girato verso la stanza")
+            check("domanda dell'agente: «sì» guardando lo schermo, con «computer» o col tasto è la risposta",
+                  Coordinator.ignoredAgentAnswer("sì", saidWake: false, addressed: false, facingAway: false) == nil
+                    && Coordinator.ignoredAgentAnswer("sì", saidWake: true, addressed: false, facingAway: true) == nil
+                    && Coordinator.ignoredAgentAnswer("sì", saidWake: false, addressed: true, facingAway: true) == nil)
+            check("domanda dell'agente: «ciao amore» resta chiacchiera anche guardando lo schermo",
+                  Coordinator.ignoredAgentAnswer("ciao amore", saidWake: false, addressed: false, facingAway: false) == "chiacchiera")
+        }
         print("Livelli di accesso (Storia 9.3):")
         check("Terminal: solo clic", AccessLevel.level(bundleID: "com.apple.Terminal", name: "Terminale", list: AccessLevel.defaultList) == .clickOnly)
         // Story 11.7: the app panel edits the same text lists.
@@ -949,7 +1075,8 @@ enum DebugCLI {
               && Df.localLaneMaxWords == 6 && Df.deepEffort == "medium" && Df.fastEffort == "low" && Df.agentMaxSteps == 60
               && Df.agentMaxTurns == 40 && Df.agentTimeout == 240 && Df.speechVolume == 0.45
               && Df.speechRate == 1.05 && Df.soundsVolume == 0.2 && Df.hudSuccessSeconds == 1.3 && Df.hudAnswerSeconds == 5
-              && Df.hudErrorSeconds == 4 && Df.numbersTimeout == 30 && Df.numbersLimit == 180)
+              && Df.hudErrorSeconds == 4 && Df.numbersTimeout == 30 && Df.numbersLimit == 180
+              && !Df.headAttention)
         let st = AppSettings.shared
         let saved = (st.armedSeconds, st.vadEndSilence)
         st.armedSeconds = 17

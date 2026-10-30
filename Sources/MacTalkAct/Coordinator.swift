@@ -24,8 +24,17 @@ final class Coordinator {
     let localGate = AccessGate()
     let numbers = NumberOverlay()
     let speaker = Speaker()
+    /// «Attenzione dalla fotocamera»: where Nico looks, and the «no» with the head.
+    let head = HeadWatcher()
+    /// Host-clock time when the current Frase started (voice detection), for the camera.
+    private var phraseStartHost: Double?
+    /// «Turned to the room» of each Frase closed by voice detection and not yet handed over, in
+    /// order: the recognizer may still be finishing one when the next starts.
+    private var phraseAway: [Bool] = []
     /// A question the agent asked the user, waiting for the spoken answer.
     private var agentQuestion: CheckedContinuation<String?, Never>?
+    /// The waiting question is a confirmation: a «no» with the head answers it.
+    private var agentQuestionIsConfirmation = false
     private var questionSerial = 0
 
     private(set) var ready = false
@@ -68,7 +77,9 @@ final class Coordinator {
         self.settings = settings
         engine.onLive = { [weak self] text in self?.handleLive(text) }
         engine.onUtterance = { [weak self] text in self?.handleUtterance(text, addressed: false) }
+        engine.onSpeechEnd = { [weak self] in self?.phraseEnded() }
         engine.onSpeechStart = { [weak self] in
+            self?.phraseStartHost = HeadCamera.hostNow()
             self?.dictationIdle?.cancel()
             self?.wakeModels()
         }
@@ -96,6 +107,8 @@ final class Coordinator {
             }
         }
         engine.onLevel = { [weak self] level in self?.hud.model.level = level }
+        head.onNo = { [weak self] in self?.handleHeadNo() }
+        head.onStatusChange = { [weak self] status in self?.headStatusChanged(status) }
         applyListeningSettings()
     }
 
@@ -104,6 +117,118 @@ final class Coordinator {
         engine.configureVAD(minStartRMS: Float(settings.vadMinStartRMS), noiseFactor: Float(settings.vadNoiseFactor),
                             endSilence: dictating ? settings.dictationEndSilence : settings.vadEndSilence,
                             maxSegment: settings.vadMaxSegment)
+        applyHeadSettings()
+    }
+
+    // MARK: Attention from the camera
+
+    /// The camera is on only with the setting on and continuous listening on (research §40).
+    func applyHeadSettings() {
+        if settings.headAttention && mode != .off {
+            head.start(reference: settings.headReference)
+        } else if head.status != .off {
+            head.stop()
+        }
+    }
+
+    /// The last camera failure shown: the same one is not shown again until the camera works.
+    private var headWarned: HeadWatcher.Status?
+
+    private func headStatusChanged(_ status: HeadWatcher.Status) {
+        if status == .active { headWarned = nil }
+        guard status.isFailure, status != headWarned else { return }
+        headWarned = status
+        Log.info("Attenzione dalla fotocamera: \(status.label)")
+        // Once per failure: the app goes on deciding as without the camera.
+        hud.show(.info, "Attenzione dalla fotocamera non attiva", detail: status.label.prefix(1).uppercased() + status.label.dropFirst() + " · decido senza", autoHide: 3)
+    }
+
+    /// Voice detection closed a Frase: judge it now, on the time it was spoken. The end silence is
+    /// taken off, since someone talking to the room often turns back right after.
+    private func phraseEnded() {
+        let now = HeadCamera.hostNow()
+        let start = phraseStartHost ?? now - 2
+        phraseStartHost = nil
+        let end = max(start + 0.3, now - settings.vadEndSilence)
+        phraseAway.append(head.attention(from: start - 0.3, to: end) == .away)
+        if phraseAway.count > 8 { phraseAway.removeFirst() } // never more than a few in flight
+    }
+
+    /// The judgment of the Frase being handed over (the oldest one waiting).
+    private func phraseFacedAway() -> Bool {
+        phraseAway.isEmpty ? false : phraseAway.removeFirst()
+    }
+
+    /// A «no» with the head answers the question waiting, if any: cancelling never acts.
+    private func handleHeadNo() {
+        let planWaiting = pending.map { Date() < $0.expires } ?? false
+        guard let target = Self.headNoTarget(agentConfirmation: agentQuestion != nil && agentQuestionIsConfirmation,
+                                             plan: planWaiting, proposal: conversation.pendingProposal != nil, busy: busy) else { return }
+        switch target {
+        case .agentConfirmation: answerAgent(nil)
+        case .plan: pending = nil
+        case .proposal: conversation.proposedText = nil
+        }
+        Log.info("Gesto: no con la testa · annullata la \(target.rawValue)")
+        Sound.cancel()
+        hud.show(.info, "Annullato", detail: "No con la testa", autoHide: 1.5)
+    }
+
+    /// Why a sentence heard while the agent waits for an answer is not that answer, or nil when it
+    /// is. Turned to the room (camera) without the wake phrase: not for us, even a «sì». «ok»,
+    /// «bravo», «ciao amore» said to someone in the room are not an answer either. Push-to-talk is
+    /// always an answer. Pure, tested by `--selftest`.
+    nonisolated static func ignoredAgentAnswer(_ spoken: String, saidWake: Bool, addressed: Bool, facingAway: Bool) -> String? {
+        guard !saidWake && !addressed else { return nil }
+        if facingAway { return "girato verso la stanza" }
+        if RouteHeuristics.isShortChatter(spoken) && !Grammar.isYes(spoken) { return "chiacchiera" }
+        return nil
+    }
+
+    enum HeadNoTarget: String, Equatable {
+        case agentConfirmation = "conferma dell'agente"
+        case plan = "conferma del piano"
+        case proposal = "proposta «scrivilo»"
+    }
+
+    /// Which waiting question a «no» with the head cancels: the agent's confirmation first (it holds
+    /// the agent), then the plan, then the «scrivilo» proposal. Agent questions that are not
+    /// confirmations are never answered by the head. Pure, tested by `--selftest`.
+    nonisolated static func headNoTarget(agentConfirmation: Bool, plan: Bool, proposal: Bool, busy: Bool) -> HeadNoTarget? {
+        if agentConfirmation { return .agentConfirmation }
+        guard !busy else { return nil }
+        if plan { return .plan }
+        if proposal { return .proposal }
+        return nil
+    }
+
+    /// «Calibra» in the settings: 5 s looking at the screen. The answer is shown under the button.
+    func calibrateHead() async -> String {
+        guard await HeadWatcher.requestAccess() else {
+            return "Serve il permesso Fotocamera: Impostazioni di Sistema › Privacy e sicurezza › Fotocamera › MacTalkAct."
+        }
+        await speaker.say("Guarda lo schermo e resta fermo per cinque secondi.")
+        let result = await head.calibrate()
+        applyHeadSettings()
+        let pose: HeadPose
+        switch result {
+        case .pose(let p):
+            pose = p
+        case .noFace:
+            await speaker.say("Non ho visto bene il tuo volto. Riprova.")
+            return "Calibrazione non riuscita: volto non visto abbastanza. Mettiti davanti alla fotocamera e riprova."
+        case .failed(let status):
+            await speaker.say("La fotocamera non funziona.")
+            return "Calibrazione non riuscita: \(status.label)."
+        case .busy:
+            return "Calibrazione già in corso."
+        }
+        settings.headReference = pose
+        settings.headCalibratedAt = Date()
+        Log.info(String(format: "Attenzione dalla fotocamera: calibrata (yaw %.1f°, pitch %.1f°)", pose.yaw, pose.pitch))
+        applyHeadSettings()
+        await speaker.say("Fatto.")
+        return "Calibrata ora."
     }
 
     func prepare() async {
@@ -181,8 +306,9 @@ final class Coordinator {
         if settings.useLocalLane { r.proposer?.prewarm() }
     }
 
-    private func routerState(pushToTalk: Bool) -> RouterState {
+    private func routerState(pushToTalk: Bool, facingAway: Bool) -> RouterState {
         var s = RouterState()
+        s.facingAway = facingAway
         switch mode {
         case .off: s.listening = .pushToTalk
         case .wakeWord: s.listening = .wakeWord
@@ -343,6 +469,8 @@ final class Coordinator {
             if agentQuestion != nil { Log.info("Domanda dell'agente sostituita da una nuova: resta senza risposta") }
             agentQuestion?.resume(returning: nil)
             agentQuestion = c
+            agentQuestionIsConfirmation = confirmation
+            if confirmation { head.armNo() }
             questionSerial += 1
             let serial = questionSerial
             Task { @MainActor [weak self] in
@@ -357,6 +485,7 @@ final class Coordinator {
     private func answerAgent(_ text: String?) {
         guard let q = agentQuestion else { return }
         agentQuestion = nil
+        agentQuestionIsConfirmation = false
         q.resume(returning: text)
     }
 
@@ -368,6 +497,7 @@ final class Coordinator {
         mode = newMode
         onModeChange?()
         sessionIdleTask?.cancel()
+        applyHeadSettings()
         Log.info("Modalità: \(newMode)")
 
         switch newMode {
@@ -405,6 +535,7 @@ final class Coordinator {
                 hud.show(.error, "Non riesco ad ascoltare", detail: error.localizedDescription, autoHide: 5)
                 mode = .off
                 onModeChange?()
+                applyHeadSettings()
             }
         }
     }
@@ -490,6 +621,8 @@ final class Coordinator {
         // The screen may change after this sentence: read the window again for the next ones.
         vocabulary.refresh(after: 2)
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Push-to-talk is always addressed to the app: the camera is not asked.
+        let away = !addressed && phraseFacedAway()
         if speaker.isSpeaking && !addressed { return } // our own voice
         if dictating {
             if text.isEmpty { restartDictationIdle(); return }
@@ -511,10 +644,9 @@ final class Coordinator {
                 answerAgent(nil)
                 hud.show(.info, "Mi fermo", autoHide: 1.2)
             } else if agentQuestion != nil {
-                // «ok», «bravo», «ciao amore» said to someone in the room are not an answer.
                 let saidWake = WakeWord.extract(text, phrases: settings.wakePhraseList) != nil
-                if !saidWake && !addressed && RouteHeuristics.isShortChatter(spoken) && !Grammar.isYes(spoken) {
-                    Log.info("Instradamento: ignora · chiacchiera durante una domanda dell'agente · \(spoken.count) caratteri")
+                if let why = Self.ignoredAgentAnswer(spoken, saidWake: saidWake, addressed: addressed, facingAway: away) {
+                    Log.info("Instradamento: ignora · \(why) durante una domanda dell'agente · \(spoken.count) caratteri")
                     return
                 }
                 Log.info("🎙 Risposta alla domanda: \(Log.said(spoken))")
@@ -526,14 +658,15 @@ final class Coordinator {
         let previous = routeChain
         // The Frase is handed over now: the first-response measure includes the wait in the chain (Story 11.1).
         let heard = Date()
-        routeChain = Task { await previous?.value; await self.handle(text, addressed: addressed, heard: heard) }
+        routeChain = Task { await previous?.value; await self.handle(text, addressed: addressed, heard: heard, facingAway: away) }
     }
 
     // MARK: Routing
 
     /// Asks the router for a decision, logs it, and carries it out.
     /// `heard`: when the recognizer handed the Frase over, start of the «prima risposta visibile».
-    private func handle(_ raw: String, addressed: Bool, heard: Date) async {
+    /// `facingAway`: Nico was turned to the room while saying it (camera).
+    private func handle(_ raw: String, addressed: Bool, heard: Date, facingAway: Bool) async {
         guard !busy else { disarmFirstResponse(); return }
         let started = Date()
         var cached: ScreenContext?
@@ -543,7 +676,7 @@ final class Coordinator {
             cached = c
             return c
         }
-        let decision = await router.decide(raw, editable: { screen().isEditable }, state: routerState(pushToTalk: addressed))
+        let decision = await router.decide(raw, editable: { screen().isEditable }, state: routerState(pushToTalk: addressed, facingAway: facingAway))
         let ms = Int(Date().timeIntervalSince(started) * 1000)
         // Dictated text is meant for someone else: only its length, unless the detailed log is on.
         let dictated = Self.isDictation(decision) && !Log.isDetailed
@@ -672,6 +805,7 @@ final class Coordinator {
             await dictateOnce(text, context: screen())
         case .askToType(let text, let reason):
             conversation.proposedText = (text, Date().addingTimeInterval(settings.proposalSeconds))
+            head.armNo()
             Sound.confirm()
             let detail = reason.contains("non è configurato") ? "Claude non è configurato · di' «scrivilo» per inserirlo"
                                                                : "Di' «scrivilo» per inserirlo"
@@ -1107,6 +1241,7 @@ final class Coordinator {
 
     private func askConfirmation(_ plan: Plan, context: ScreenContext) {
         pending = PendingPlan(plan: plan, context: context, expires: Date().addingTimeInterval(settings.confirmationSeconds))
+        head.armNo()
         Sound.confirm()
         let how = mode == .off ? "Tieni premuto \(settings.pttKey.short) e di' «sì»" : "Di' «sì»"
         hud.show(.confirm, plan.hud, detail: "\(how) per confermare, altro per annullare", autoHide: settings.confirmationSeconds)

@@ -14,7 +14,7 @@ enum GestureSpike {
     static let secondsPerGesture = 3.0
 
     static func run(fps: Int, phaseSeconds: Double) async -> Int32 {
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .unspecified) ?? AVCaptureDevice.default(for: .video) else {
+        guard HeadCamera.device() != nil else {
             print("Nessuna fotocamera trovata.")
             return 1
         }
@@ -30,26 +30,20 @@ enum GestureSpike {
         }
 
         let recorder = GestureRecorder(fps: fps)
-        let session = AVCaptureSession()
-        session.beginConfiguration()
-        if session.canSetSessionPreset(.vga640x480) { session.sessionPreset = .vga640x480 } else if session.canSetSessionPreset(.medium) { session.sessionPreset = .medium }
-        guard let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else {
-            session.commitConfiguration()
-            print("La fotocamera «\(device.localizedName)» non si apre.")
-            return 1
-        }
-        session.addInput(input)
-        let output = AVCaptureVideoDataOutput()
-        output.alwaysDiscardsLateVideoFrames = true
         let queue = DispatchQueue(label: "mactalkact.gesture-spike")
-        output.setSampleBufferDelegate(recorder, queue: queue)
-        guard session.canAddOutput(output) else {
-            session.commitConfiguration()
-            print("La fotocamera «\(device.localizedName)» non dà fotogrammi.")
+        let session: AVCaptureSession, output: AVCaptureVideoDataOutput, device: AVCaptureDevice
+        do {
+            (session, output, device) = try HeadCamera.open(delegate: recorder, queue: queue)
+        } catch HeadCamera.OpenError.cannotOpen(let name) {
+            print("La fotocamera «\(name)» non si apre.")
+            return 1
+        } catch HeadCamera.OpenError.noOutput(let name) {
+            print("La fotocamera «\(name)» non dà fotogrammi.")
+            return 1
+        } catch {
+            print("Nessuna fotocamera trovata.")
             return 1
         }
-        session.addOutput(output)
-        session.commitConfiguration()
         recorder.clock = session.synchronizationClock
 
         // From here on the camera may be on: every way out turns it off.
@@ -58,7 +52,7 @@ enum GestureSpike {
             session.stopRunning()
             output.setSampleBufferDelegate(nil, queue: nil)
         }
-        setFrameRate(device, fps: fps)
+        HeadCamera.setFrameRate(device, fps: fps)
         let speaker = Speaker()
         func say(_ text: String) async {
             print("» \(text)")
@@ -154,17 +148,7 @@ enum GestureSpike {
         return 0
     }
 
-    /// Asks the camera itself for the frame rate when it supports it; the recorder also skips
-    /// frames that come too early.
-    private static func setFrameRate(_ device: AVCaptureDevice, fps: Int) {
-        guard device.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= Double(fps) && Double(fps) <= $0.maxFrameRate }),
-              (try? device.lockForConfiguration()) != nil else { return }
-        device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: CMTimeScale(fps))
-        device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: CMTimeScale(fps))
-        device.unlockForConfiguration()
-    }
-
-    nonisolated static func hostNow() -> Double { CMClockGetTime(CMClockGetHostTimeClock()).seconds }
+    nonisolated static func hostNow() -> Double { HeadCamera.hostNow() }
 
     /// CPU time of the whole process (user + system), in seconds.
     static func processCPUSeconds() -> Double {
@@ -189,11 +173,7 @@ final class GestureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var lastProcessed = -Double.infinity
     private var gate = AttentionGate()
     private var detector = HeadGestureDetector()
-    private let request: VNDetectFaceRectanglesRequest = {
-        let r = VNDetectFaceRectanglesRequest()
-        r.revision = VNDetectFaceRectanglesRequestRevision3
-        return r
-    }()
+    private let request = HeadCamera.faceRequest()
 
     init(fps: Int) { minInterval = 1 / Double(max(1, fps)) }
 
@@ -208,23 +188,14 @@ final class GestureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         let (phase, reference) = lock.withLock { (self.phase, self.reference) }
         guard phase >= 0 else { return }
-        var pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if let clock { pts = CMSyncConvertTime(pts, from: clock, to: CMClockGetHostTimeClock()) }
-        let t = pts.seconds
+        let t = HeadCamera.time(of: sampleBuffer, clock: clock)
         // Small tolerance: frames do not arrive exactly on time.
         guard t - lastProcessed >= minInterval * 0.8, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         lastProcessed = t
         let pixelSize = (width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels))
         let v0 = GestureSpike.hostNow()
-        try? VNImageRequestHandler(cvPixelBuffer: pixels, orientation: .up).perform([request])
+        let sample = HeadCamera.sample(pixels, t: t, request: request)
         let visionMs = (GestureSpike.hostNow() - v0) * 1000
-        // The biggest face is Nico's.
-        let face = (request.results ?? []).max { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height }
-        func degrees(_ n: NSNumber?) -> Double? { n.map { $0.doubleValue * 180 / .pi } }
-        var sample = HeadSample.absent(t)
-        if let face, let yaw = degrees(face.yaw), let pitch = degrees(face.pitch) {
-            sample = HeadSample(t: t, yaw: yaw, pitch: pitch, roll: degrees(face.roll), size: Double(face.boundingBox.width))
-        }
         let attention = reference.map { gate.feed(sample, reference: $0) }
         let gesture = detector.feed(sample)
         let latencyMs = (GestureSpike.hostNow() - t) * 1000

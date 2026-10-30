@@ -366,6 +366,9 @@ final class SpeechEngine {
     var onUtterance: ((String) -> Void)?
     /// The user started speaking (voice activity detected).
     var onSpeechStart: (() -> Void)?
+    /// Voice activity closed a sentence (end silence included), before its text is ready. One call
+    /// for every `onUtterance`, in the same order.
+    var onSpeechEnd: (() -> Void)?
 
     private(set) var isRunning = false
     /// Words to expect in the next sentences (`SpeechVocabulary`).
@@ -652,6 +655,7 @@ final class SpeechEngine {
         }
         session = nil
         let wasForced = forced || s.forced
+        if !wasForced { onSpeechEnd?() }
         Task { @MainActor in
             let text = await s.finish()
             // Only the length: the text of a sentence goes in the log once the router accepts it.

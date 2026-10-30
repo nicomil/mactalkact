@@ -1,8 +1,9 @@
 import Foundation
 
-// Pure logic of the head gesture spike (`--gesture-spike`): calibration, attention gate, yes/no
-// with the head, and the report. No camera here: everything works on angles and times, so
-// `--selftest` proves it with synthetic samples.
+// Pure logic of the head gestures: calibration, attention gate, judgment of a Frase, yes/no with
+// the head, and the report of the spike (`--gesture-spike`). The app uses the gate and the «no»
+// (`HeadWatcher`). No camera here: everything works on angles and times, so `--selftest` proves
+// it with synthetic samples.
 
 /// One camera frame reduced to the head angles (degrees) and the face size. Nothing else is kept:
 /// no image, no landmarks. `yaw`/`pitch` are nil when no face was found.
@@ -66,7 +67,12 @@ struct AttentionGate {
     private(set) var isOn = false
     private var pendingSince: Double?
 
-    init(config: Config = Config()) { self.config = config }
+    /// `startOn`: the state before the first sample. The app starts «looking at the screen», so the
+    /// first 300 ms of the camera never ignore a sentence.
+    init(config: Config = Config(), startOn: Bool = false) {
+        self.config = config
+        isOn = startOn
+    }
 
     static func inside(_ s: HeadSample, reference: HeadPose, config: Config) -> Bool {
         guard let yaw = s.yaw, let pitch = s.pitch else { return false }
@@ -86,6 +92,101 @@ struct AttentionGate {
             }
         }
         return isOn
+    }
+}
+
+extension AttentionGate.Config {
+    /// The limits chosen after the spike (research §40): ±25° on yaw and pitch never took reading
+    /// for looking away, and recognized the room in 75–100% of the frames.
+    static let app = AttentionGate.Config(yawLimit: 25, pitchLimit: 25, hold: 0.3)
+}
+
+/// Where Nico looked while saying a Frase, from the gate state of each frame in that time.
+enum PhraseAttention: Equatable {
+    case screen, away, unknown
+
+    /// One frame: whether a face was seen and the gate state after it.
+    struct Mark: Equatable {
+        var t: Double
+        var hasFace: Bool
+        var gateOn: Bool
+    }
+
+    /// «Away» only when more than half of the frames with a face have the gate off, and faces
+    /// cover at least half of the frames. A missing face is not «away»: bad light or Nico standing
+    /// must not make the app ignore commands. Fewer than 3 frames (camera stalled): unknown.
+    static func judge(_ marks: [Mark], from: Double, to: Double) -> PhraseAttention {
+        let inside = marks.filter { $0.t >= from && $0.t <= to }
+        guard inside.count >= 3 else { return .unknown }
+        let faces = inside.filter(\.hasFace)
+        guard !faces.isEmpty, faces.count * 2 >= inside.count else { return .unknown }
+        return faces.filter { !$0.gateOn }.count * 2 > faces.count ? .away : .screen
+    }
+}
+
+/// The «looking at the screen» pose: the calibrated one, then following slowly the samples that
+/// fall inside the limits (posture changes during the day). It never moves more than `maxDrift`
+/// degrees from the calibration, so a long talk with the room cannot turn the room into the screen.
+struct ReferenceTracker {
+    let calibrated: HeadPose
+    var limits = AttentionGate.Config.app
+    /// Seconds for the reference to cover about two thirds of a steady change.
+    var timeConstant = 120.0
+    var maxDrift = 10.0
+    private(set) var reference: HeadPose
+    private var lastT: Double?
+
+    init(calibrated: HeadPose) {
+        self.calibrated = calibrated
+        reference = calibrated
+    }
+
+    mutating func feed(_ s: HeadSample) {
+        guard let yaw = s.yaw, let pitch = s.pitch else { return }
+        defer { lastT = s.t }
+        guard let last = lastT, AttentionGate.inside(s, reference: reference, config: limits) else { return }
+        let k = min(max(s.t - last, 0), 1) / timeConstant
+        func step(_ ref: Double, _ v: Double, _ origin: Double) -> Double {
+            min(max(ref + (v - ref) * k, origin - maxDrift), origin + maxDrift)
+        }
+        reference = HeadPose(yaw: step(reference.yaw, yaw, calibrated.yaw), pitch: step(reference.pitch, pitch, calibrated.pitch))
+    }
+}
+
+/// What the app keeps while the camera runs (`HeadWatcher`): the moving reference, the gate, the
+/// last `keepSeconds` of gate marks and the «no» detector. A «no» is reported only while armed
+/// (a question is waiting), and once. Pure: `--selftest` feeds it synthetic samples.
+struct HeadLiveState {
+    var keepSeconds = 30.0
+    private(set) var tracker: ReferenceTracker?
+    private var gate = AttentionGate(config: .app, startOn: true)
+    private var detector = HeadGestureDetector()
+    private(set) var noArmed = false
+    private(set) var marks: [PhraseAttention.Mark] = []
+
+    mutating func setReference(_ r: HeadPose) {
+        if tracker?.calibrated != r { tracker = ReferenceTracker(calibrated: r) }
+    }
+
+    /// A question opens: the detector starts again, so movements before it do not count.
+    mutating func armNo() {
+        detector = HeadGestureDetector()
+        noArmed = true
+    }
+
+    /// True when this sample completes an awaited «no». Without a face the gate keeps its state:
+    /// a missing face is judged by `PhraseAttention`, not by the gate.
+    mutating func feed(_ s: HeadSample) -> Bool {
+        if s.hasFace, var tr = tracker {
+            tr.feed(s)
+            tracker = tr
+            _ = gate.feed(s, reference: tr.reference)
+        }
+        marks.append(PhraseAttention.Mark(t: s.t, hasFace: s.hasFace, gateOn: gate.isOn))
+        if let first = marks.first, s.t - first.t > keepSeconds + 5 { marks.removeAll { s.t - $0.t > keepSeconds } }
+        guard detector.feed(s) == .no, noArmed else { return false }
+        noArmed = false
+        return true
     }
 }
 

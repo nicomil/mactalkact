@@ -20,6 +20,11 @@ struct SettingsContext {
     var showHelp: () -> Void = {}
     /// Switches private mode on or off, with its message and its timer.
     var setPrivateMode: (Bool) -> Void = { AppSettings.shared.setPrivateMode($0) }
+    /// «Attenzione dalla fotocamera»: state of the camera, and the 5 s calibration.
+    var headStatus: () -> String = { "—" }
+    var calibrateHead: () async -> String = { "—" }
+    /// Turns the camera on or off again from the current settings (after the permission dialog).
+    var applyHead: () -> Void = {}
 }
 
 /// Builds the settings window. Shared by the app and by `--settings-shot`.
@@ -81,7 +86,7 @@ private struct SectionContent: View {
 
     var body: some View {
         switch section {
-        case .listening: ListeningSection(settings: settings)
+        case .listening: ListeningSection(settings: settings, context: context)
         case .conversation: ConversationSection(settings: settings, context: context)
         case .understanding: UnderstandingSection(settings: settings)
         case .agent: AgentSection(settings: settings, context: context)
@@ -222,6 +227,7 @@ private extension String {
 
 private struct ListeningSection: View {
     @ObservedObject var settings: AppSettings
+    let context: SettingsContext
 
     var body: some View {
         Card(title: "Attivazione",
@@ -248,6 +254,7 @@ private struct ListeningSection: View {
             NumberRow(title: "Si chiude dopo un silenzio di", value: $settings.sessionIdleSeconds, range: 15...300, step: 15,
                       decimals: 0, defaultValue: D.sessionIdleSeconds)
         }
+        HeadAttentionCard(settings: settings, context: context)
         Card(title: "Avanzate: rilevatore di voce",
              footer: "Valori sbagliati possono rendere l'ascolto sordo o troppo sensibile: in caso di dubbio usa «Ripristina predefiniti».") {
             NumberRow(title: "Soglia minima della voce", help: "Più bassa sente anche le voci deboli, ma anche più rumore.",
@@ -256,6 +263,62 @@ private struct ListeningSection: View {
                       value: $settings.vadNoiseFactor, range: 2...8, step: 0.5, unit: "×", defaultValue: D.vadNoiseFactor)
         }
         ResetButton(section: .listening, settings: settings)
+    }
+}
+
+/// «Attenzione dalla fotocamera» (research §40): the switch, the calibration and the camera state.
+private struct HeadAttentionCard: View {
+    @ObservedObject var settings: AppSettings
+    let context: SettingsContext
+    @State private var calibrating = false
+    @State private var message = ""
+    @State private var status = ""
+
+    var body: some View {
+        Card(title: "Attenzione dalla fotocamera",
+             footer: "La fotocamera resta accesa solo mentre l'app ascolta di continuo. Sul Mac si tengono solo gli angoli della testa degli ultimi 30 secondi: "
+                + "nessuna immagine viene salvata, inviata o mostrata. Se la fotocamera non vede il volto o non funziona, l'app decide come senza.") {
+            ToggleRow(title: "Ignora le frasi dette girato verso la stanza",
+                      help: "In mani libere e nella finestra di conversazione, una frase senza «\(settings.firstWakePhrase)» detta mentre guardi altrove è per chi è nella stanza. "
+                        + "Un «no» con la testa annulla la domanda in attesa («scrivilo», «Confermi?»).",
+                      isOn: $settings.headAttention)
+            HStack {
+                Button(calibrating ? "Guarda lo schermo…" : "Calibra") {
+                    calibrating = true
+                    message = ""
+                    Task {
+                        message = await context.calibrateHead()
+                        calibrating = false
+                        status = context.headStatus()
+                    }
+                }
+                .disabled(calibrating)
+                Text(message.isEmpty ? calibrationLine : message)
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if settings.headAttention {
+                Text("Stato: \(status)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { status = context.headStatus() }
+        // The camera state changes on its own (no frames after 3 s, listening on or off).
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in status = context.headStatus() }
+        .onChange(of: settings.headAttention) { _, on in
+            guard on else { return }
+            // The permission is asked here, with Nico at the Mac, and only once. While the dialog is
+            // open the camera cannot start: start it again once it is answered.
+            Task {
+                _ = await HeadWatcher.requestAccess()
+                context.applyHead()
+                status = context.headStatus()
+            }
+        }
+    }
+
+    private var calibrationLine: String {
+        guard settings.headReference != nil else { return "Mai calibrata: guarda lo schermo per 5 secondi." }
+        guard let at = settings.headCalibratedAt else { return "Calibrata." }
+        return "Calibrata il \(at.formatted(.dateTime.day().month(.wide).hour().minute()))."
     }
 }
 
